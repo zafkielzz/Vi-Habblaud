@@ -11,7 +11,7 @@
 # ---------------------------------------------------------------------------------------------
 # The base image is pinned by digest (same across both stages) for reproducible builds; Dependabot
 # (.github/dependabot.yml, docker ecosystem) updates tag and digest together when a new version is released.
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS builder
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS builder
 WORKDIR /app
 
 # Dependencies first: the layer stays cached as long as the lockfile does not change.
@@ -25,7 +25,7 @@ RUN npm run build
 # Stage 2: lean runtime. The server has no runtime dependencies (only node:* modules),
 # so dist/ and package.json (name, version, and "type": "module") are all that is needed.
 # ---------------------------------------------------------------------------------------------
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runtime
 
 # HABBLAUD_USAGE_DIR: where docker-up mounts (read-only) the usage captured by the statusline tap.
 ENV NODE_ENV=production \
