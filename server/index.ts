@@ -41,6 +41,7 @@ import { discoverCodexDirs } from './sources/codex/accounts';
 import { CodexHistory } from './sources/codex/history';
 import { AgySource, type AgySeat } from './sources/agy/source';
 import { CLAUDE_WORKER, seatSuffix, TeamService, workerAgentId } from './team';
+import { GhostWatch } from './workers/ghosts';
 import { WorkerService, type WorkerTarget } from './workers/service';
 import { BoardService } from './board';
 import { agyProfilesRoot } from './sources/agy/profiles';
@@ -497,6 +498,15 @@ messages?.start();
 stats.start();
 updates.start();
 worldUplink?.start();
+// Hung workers: a faint ghost on the seat and one line on the Board; nothing is stopped.
+const ghosts = new GhostWatch({
+  office,
+  candidates: () => [...(agy?.ghostCandidates() ?? []), ...(workers?.ghostCandidates() ?? [])],
+  news: (item) => {
+    if (board.feed.add(item)) board.publish();
+  },
+});
+ghosts.start();
 // New rule violations: one Board news item each, and the offices again (their logs, the rules boards flash).
 const rulesTimer = setInterval(() => {
   try {
@@ -775,6 +785,7 @@ function shutdown(signal: string): void {
   agents.stop();
   accounts.stop();
   board.stop();
+  ghosts.stop();
   hub.stop();
   terminals?.stop();
   timeline?.stop();

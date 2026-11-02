@@ -51,7 +51,7 @@ export function officeSummary(snap: SummarySnap | null | undefined, office: Offi
         ? { name: tr('New boss'), state: tr('opening…') }
         : undefined;
   const items = bossPlan(snap, office)?.plan?.items ?? [];
-  const running = officeItems((snap?.rooms ?? []).flatMap((r) => r.board?.items ?? []).filter((j) => j.status === 'working'), snap, office).length;
+  const running = officeItems((snap?.rooms ?? []).flatMap((r) => r.board?.items ?? []).filter((j) => j.status === 'working'), office).length;
   const next = items.find((t) => !t.done)?.text;
   const overlap = folderOverlap(teamOffices(snap?.team), office);
   return {

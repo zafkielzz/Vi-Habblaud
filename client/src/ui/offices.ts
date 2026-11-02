@@ -129,10 +129,9 @@ export function sameFocus(a: OfficeFocus | null, b: OfficeFocus | null): boolean
   return true;
 }
 
-/** A job given by this office. A job without one (before offices, or a script) counts for the first office. */
-export function jobInOffice(item: Pick<JobBoardItem, 'office'>, office: OfficeInfo | undefined, offices: readonly OfficeInfo[]): boolean {
-  if (!office) return true;
-  return item.office ? item.office === office.id : offices[0]?.id === office.id;
+/** A job given by this office. A job without one (a script, another session) belongs to no office. */
+export function jobInOffice(item: Pick<JobBoardItem, 'office'>, office: OfficeInfo | undefined): boolean {
+  return !office || item.office === office.id;
 }
 
 /** A to-do list: the HANDOFF file of a room, or of an office's folder while nobody works there (plan undefined = none yet). */

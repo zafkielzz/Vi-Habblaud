@@ -1,5 +1,5 @@
 // Antigravity source: temporary profiles on disk, a fake /proc, the AccountsService and the Office.
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -173,9 +173,24 @@ describe('scanAgyProcs', () => {
     ]);
     const found = scanAgyProcs(root, fakeProc(procs));
     expect(found).toEqual([
-      { pid: 40, acc: 'acc3', headless: false, startedAt: BOOT_MS + 2_000, ppid: 1 },
+      { pid: 40, acc: 'acc3', headless: false, startedAt: BOOT_MS + 2_000, ppid: 1, orphan: true },
       { pid: 30, acc: 'acc2', headless: true, prompt: 'Read x.py\nand y', cwd: '/w/proj', startedAt: BOOT_MS + 5_000, ppid: 20, claudePid: 10 },
     ]);
+  });
+});
+
+describe('scanAgyProcs: orphans', () => {
+  it('an agy whose parent died was reparented to init or systemd --user', () => {
+    const root = '/h/.agy_profiles';
+    const procs = new Map<number, FakeProc>([
+      [5, { comm: 'systemd', ppid: 1 }],
+      [6, { comm: 'herdr', ppid: 5 }],
+      [30, { comm: 'agy', ppid: 5, home: `${root}/acc2`, args: ['agy', '-p', 'hi'] }],
+      [31, { comm: 'agy', ppid: 6, home: `${root}/acc4`, args: ['agy'] }],
+    ]);
+    const found = scanAgyProcs(root, fakeProc(procs));
+    expect(found.find((p) => p.pid === 30)?.orphan).toBe(true);
+    expect(found.find((p) => p.pid === 31)?.orphan).toBeUndefined();
   });
 });
 
@@ -294,6 +309,54 @@ describe('AgySource', () => {
     t.source.poll();
     expect(t.agent('acc2')?.activity).toMatchObject({ kind: 'done', icon: '⚠️', error: true, text: 'Failed: TIMEOUT' });
     expect(t.agent('acc2')?.status).toBe('idle');
+  });
+
+  it('ghost check: a headless agy is watched, by its start until a write shows up in the account', () => {
+    const t = setup();
+    t.source.start();
+    t.job(31, 'acc2', 'long');
+    t.source.poll();
+    const started = BOOT_MS + 99_000;
+    expect(t.source.ghostCandidates()).toEqual([{ agentId: 'agy:acc2', name: 'acc2', pid: 31, lastSign: started }]);
+    const conv = join(t.root, 'acc2', '.gemini', 'antigravity-cli', 'conversations');
+    mkdirSync(conv);
+    writeFileSync(join(conv, 'a.db-wal'), 'x');
+    const later = started + 3_600_000;
+    utimesSync(join(conv, 'a.db-wal'), later / 1000, later / 1000);
+    expect(t.source.ghostCandidates()[0].lastSign).toBe(later);
+  });
+
+  it('ghost check: no job left when the agy-ask end line is written or the parent is gone', () => {
+    const t = setup();
+    t.source.start();
+    t.job(31, 'acc2', 'answered, then hung');
+    t.start(31, 'acc2', { role: 'qa' });
+    t.source.poll();
+    expect(t.source.ghostCandidates()[0].jobless).toBeUndefined();
+    appendFileSync(join(t.root, 'agy-ask.log.jsonl'), `${JSON.stringify({ event: 'end', acc: 'acc2', pid: 30, ts: 1, status: 'SUCCESS' })}\n`);
+    t.source.poll();
+    expect(t.source.ghostCandidates()[0].jobless).toBe(true);
+    t.procs.set(41, { comm: 'agy', ppid: 1, home: join(t.root, 'acc3'), args: ['agy', '-p', 'orphan'] });
+    t.source.poll();
+    expect(t.source.ghostCandidates().find((c) => c.pid === 41)?.jobless).toBe(true);
+  });
+
+  it('ghost check: an interactive agy under a live terminal is left alone, an orphan one is not', () => {
+    const t = setup();
+    t.source.start();
+    t.procs.set(20, { comm: 'herdr', ppid: 10 });
+    t.procs.set(21, { comm: 'agy', ppid: 20, home: join(t.root, 'acc2'), args: ['agy'] });
+    expect(t.source.ghostCandidates()).toEqual([]);
+    t.procs.set(21, { comm: 'agy', ppid: 1, home: join(t.root, 'acc2'), args: ['agy'] });
+    expect(t.source.ghostCandidates()).toMatchObject([{ pid: 21, jobless: true }]);
+  });
+
+  it('ghost check: a profile with no character is not watched', () => {
+    const t = setup();
+    t.source.setTeam(['acc2']);
+    t.source.start();
+    t.job(31, 'acc3', 'not a worker');
+    expect(t.source.ghostCandidates()).toEqual([]);
   });
 
   it('herdr pane blocked = needs you; working = working', async () => {
@@ -446,7 +509,7 @@ describe('AgySource', () => {
     const t = setup();
     const at = (BOOT_MS + 50_000) / 1000;
     const log = [
-      { event: 'start', acc: 'acc2', pid: 7, ts: at, role: 'review', claude_pid: 10, prompt: 'Review the diff' },
+      { event: 'start', acc: 'acc2', pid: 7, ts: at, role: 'review', claude_pid: 10, prompt: 'Review the diff', office: 'o1' },
       { event: 'end', acc: 'acc2', pid: 7, ts: at + 30, status: 'SUCCESS', sec: 30, usage: { total_tokens: 1_500 } },
       { event: 'start', acc: 'acc3', pid: 8, ts: at + 40, prompt: 'Killed hard' },
     ];
@@ -455,7 +518,7 @@ describe('AgySource', () => {
     const board = t.office.commit().snapshot.rooms.find((r) => r.id === '/w/agy-hub')?.board;
     expect(board?.items).toEqual([
       expect.objectContaining({ id: 'agy:acc3#8', text: 'Killed hard', status: 'failed', by: 'script' }),
-      expect.objectContaining({ id: 'agy:acc2#7', text: 'Review the diff', role: 'review', status: 'done', by: 'boss', tokens: 1_500 }),
+      expect.objectContaining({ id: 'agy:acc2#7', text: 'Review the diff', role: 'review', status: 'done', by: 'boss', tokens: 1_500, office: 'o1' }),
     ]);
   });
 

@@ -7,7 +7,7 @@
 //   content is the answer.
 // - Claude Code: <config>/projects/<cwd>/<session>.jsonl. The turn is over when the last assistant message stopped with
 //   `end_turn` and no tool is pending; the answer is the text of that message.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export interface TurnState {
@@ -29,6 +29,35 @@ export interface TurnState {
 /** Transcript of an Antigravity conversation. */
 export function agyTranscriptPath(stateDir: string, conversation: string): string {
   return join(stateDir, 'brain', conversation, '.system_generated', 'logs', 'transcript.jsonl');
+}
+
+/**
+ * The newest write of an account's agy (epoch ms; 0 = none found): its conversation databases, which agy-ask deletes
+ * after each call so only live ones and a few old ones are there, their transcripts and the run's log.
+ */
+export function lastWrite(stateDir: string, cliLog?: string): number {
+  let newest = 0;
+  const see = (path: string) => {
+    try {
+      newest = Math.max(newest, statSync(path).mtimeMs);
+    } catch {
+      // not written yet, or just deleted
+    }
+  };
+  if (cliLog) see(cliLog);
+  const dir = join(stateDir, 'conversations');
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return newest;
+  }
+  for (const name of names) {
+    see(join(dir, name));
+    const conv = /^(.+)\.db$/.exec(name)?.[1];
+    if (conv) see(agyTranscriptPath(stateDir, conv));
+  }
+  return newest;
 }
 
 /** Transcript of a Claude Code session (cwd encoded like Claude Code does). */

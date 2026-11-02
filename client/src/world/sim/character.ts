@@ -1,5 +1,6 @@
 // Character state: position, pose, animation, step queue, and visual markers.
 import type { AgentInfo } from '../../../../shared/types';
+import type { Energy } from '../../../../shared/energy';
 import type { Appearance, Dir, HeldItem, IconName, Pose } from '../../art/api';
 import { mulberry32 } from '../../../../shared/hash';
 import { FOOT_DX, FOOT_DY, TILE } from '../constants';
@@ -119,6 +120,8 @@ export class Character {
   grabbed = false;
   /** When the crown last landed on this character (boss appointed while the office watched): the crown drops in. */
   crownedAt = 0;
+  /** Boss or worker: its account's quota as energy (shared/energy.ts); null for anyone else or without a reading. */
+  energy: Energy | null = null;
   /** Where the pointer is (world px) while picked up. */
   grabX = 0;
   grabY = 0;

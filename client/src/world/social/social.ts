@@ -103,10 +103,11 @@ export class Social {
 
   /**
    * Can join a gathering now: idle (or waiting on a shell for SHELL_SOCIAL_MIN_MS), seated at
-   * own desk, with nothing planned. Those napping from prolonged idleness can be woken by an invite.
+   * own desk, with nothing planned. Those napping from prolonged idleness can be woken by an invite; those out of quota
+   * sleep on, and a ghost stays on its seat.
    */
   canJoin(c: Character, now: number): boolean {
-    if (c.gone || c.leaving || c.arriving || c.inside || c.gathering) return false;
+    if (c.gone || c.leaving || c.arriving || c.inside || c.gathering || c.energy?.asleep || c.info.ghost) return false;
     if (c.mode !== 'idle' && c.mode !== 'shell') return false;
     if (c.step || c.queue.length) return false;
     if (!c.homeSpot || c.atSpot !== c.homeSpot) return false;

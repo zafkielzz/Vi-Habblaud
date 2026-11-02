@@ -40,9 +40,9 @@ describe('board model', () => {
     expect(bossPlan(s, offices[2])).toEqual({ name: 'c', target: { office: 'oc' } });
     expect(bossPlan(s, offices[3])?.target).toEqual({ room: 'b' });
     const items = [{ id: 1, office: 'oa' }, { id: 2, office: 'ob' }, { id: 3 }];
-    expect(officeItems(items, s, offices[0]).map((i) => i.id)).toEqual([1, 3]);
-    expect(officeItems(items, s, offices[1]).map((i) => i.id)).toEqual([2]);
-    expect(officeItems(items, { team: { workers: [], agy: [], offices: [offices[0]] } }, offices[0]).map((i) => i.id)).toEqual([1, 2, 3]);
+    expect(officeItems(items, offices[0]).map((i) => i.id)).toEqual([1]);
+    expect(officeItems(items, offices[1]).map((i) => i.id)).toEqual([2]);
+    expect(officeItems(items, undefined).map((i) => i.id)).toEqual([1, 2, 3]);
   });
 
   it('important news: failures and quota hits, and who waits for you, newest first', () => {
@@ -61,6 +61,11 @@ describe('board model', () => {
     expect(hasBoard(snap([], [room('r', { board: { items: [] } })]))).toBe(true);
     expect(hasBoard(snap([], [], { news: [{ id: 'n', at: 0, kind: 'commit', icon: '📝', text: 'x' }] }))).toBe(true);
     expect(hasBoard(snap([agent('a', 'r', { boss: true })], [room('r')]))).toBe(true);
+  });
+
+  it('a ghost is news, with its PID', () => {
+    const news = [{ id: 'g', at: 1, kind: 'ghost' as const, icon: '👻', text: 'two looks hung', detail: 'silent for 10min · PID 42 · nothing was stopped' }];
+    expect(importantNews(snap([], [], { news }), 10).map((n) => n.text)).toEqual(['two looks hung · silent for 10min · PID 42 · nothing was stopped']);
   });
 
   it('a rules refusal says what was refused', () => {

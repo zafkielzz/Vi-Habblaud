@@ -10,6 +10,7 @@ import { SoundSettingsGroup } from './settings-sound';
 import type { SoundControl } from './sound';
 import { AboutGroup } from './version';
 import type { WorldThemeLink } from './world/world-dialog';
+import { COMPACTS_RANGE, sanitizeThresholds, SHARE_RANGE, type LoadThresholds } from '../../../shared/overload';
 import { LOCALE_STORAGE_KEY, LOCALES, normalizeLocale, tr, type Locale } from '../../../shared/i18n';
 
 type LanguageChoice = 'auto' | Locale;
@@ -82,6 +83,11 @@ export function segmented<T extends string>(label: string, options: readonly [T,
   };
 }
 
+/** A small number field; empty or invalid text falls back through sanitizeThresholds. */
+function numberField(label: string, min: number, max: number, onChange: () => void): HTMLInputElement {
+  return h('input', { class: 'ui-set__num', type: 'number', attrs: { min, max, step: 1, 'aria-label': label }, on: { change: onChange } }) as HTMLInputElement;
+}
+
 export class SettingsPopover implements UiComponent {
   readonly el: HTMLElement;
   private switches = new Map<BoolPref | 'demo', SwitchRefs>();
@@ -91,6 +97,8 @@ export class SettingsPopover implements UiComponent {
   private theme: ReturnType<typeof segmented<UiPrefs['theme']>>;
   private language: ReturnType<typeof segmented<LanguageChoice>>;
   private soundGroup: SoundSettingsGroup;
+  /** "Boss overloaded" thresholds; shares shown in %. */
+  private loadFields: Record<keyof LoadThresholds, HTMLInputElement>;
   private demoGroup: HTMLElement;
   /** Mobile page only (remote port with login): sign out of this device. */
   private remoteGroup: HTMLElement;
@@ -152,6 +160,16 @@ export class SettingsPopover implements UiComponent {
     );
     this.theme.row.append(h('span', { class: 'ui-set__hint', text: tr('Automatic: Halloween in October and Christmas from November 1 to December 26; the rest of the year, the original look. None: always the original.') }));
     this.soundGroup = new SoundSettingsGroup(ctx, sound);
+    const pct = (label: string) => numberField(label, SHARE_RANGE.min * 100, SHARE_RANGE.max * 100, () => this.saveLoad());
+    const count = (label: string) => numberField(label, COMPACTS_RANGE.min, COMPACTS_RANGE.max, () => this.saveLoad());
+    this.loadFields = {
+      tired: pct(tr('Tired from this % of the context')),
+      tiredCompacts: count(tr('Tired from this many compactions')),
+      overloaded: pct(tr('Overloaded from this % of the context')),
+      overloadedCompacts: count(tr('Overloaded from this many compactions')),
+    };
+    const loadRow = (label: string, share: HTMLInputElement, compacts: HTMLInputElement) =>
+      h('div', { class: 'ui-set ui-set--stack' }, h('span', { class: 'ui-set__label', text: label }), h('span', { class: 'ui-set__nums' }, share, h('span', { text: tr('% context, or') }), compacts, h('span', { text: tr('compactions') })));
 
     // Language names always in their own language, so whoever can't read the current one still finds theirs.
     this.language = segmented<LanguageChoice>(
@@ -205,6 +223,14 @@ export class SettingsPopover implements UiComponent {
         this.bubbles.row,
         this.liveliness.row,
         this.daylight.row,
+      ),
+      h(
+        'div',
+        { class: 'ui-set-group' },
+        h('h3', { text: tr('🥵 Boss overloaded') }),
+        loadRow(tr('💦 Tired from'), this.loadFields.tired, this.loadFields.tiredCompacts),
+        loadRow(tr('😵 Overloaded from'), this.loadFields.overloaded, this.loadFields.overloadedCompacts),
+        h('span', { class: 'ui-set__hint', text: tr('When a session shows as tired or overloaded. Defaults: 60% or 1 compaction, 80% or 2.') }),
       ),
       h(
         'div',
@@ -285,6 +311,7 @@ export class SettingsPopover implements UiComponent {
     this.liveliness.set(p.liveliness);
     this.daylight.set(p.daylight);
     this.theme.set(p.theme);
+    if (!Object.values(this.loadFields).includes(document.activeElement as HTMLInputElement)) this.showLoad(p.overload);
     this.language.set(savedLanguage());
     this.soundGroup.render();
     setHidden(this.demoGroup, this.ctx.store.mock || access().remote);
@@ -301,6 +328,23 @@ export class SettingsPopover implements UiComponent {
           : tr('Alerts you when someone needs you and the tab is in the background.');
     setText(notif.hint, hint);
     notif.btn.disabled = state === 'unsupported';
+  }
+
+  /** Saves the four fields, cleaned (tired never after overloaded), and shows what was kept. */
+  private saveLoad(): void {
+    const f = this.loadFields;
+    const num = (i: HTMLInputElement, k = 1) => (i.value.trim() ? Number(i.value) / k : undefined);
+    const overload = sanitizeThresholds({ tired: num(f.tired, 100), overloaded: num(f.overloaded, 100), tiredCompacts: num(f.tiredCompacts), overloadedCompacts: num(f.overloadedCompacts) });
+    this.ctx.updatePrefs({ overload });
+    this.showLoad(overload);
+  }
+
+  private showLoad(t: LoadThresholds): void {
+    const f = this.loadFields;
+    f.tired.value = String(Math.round(t.tired * 100));
+    f.overloaded.value = String(Math.round(t.overloaded * 100));
+    f.tiredCompacts.value = String(t.tiredCompacts);
+    f.overloadedCompacts.value = String(t.overloadedCompacts);
   }
 
   private async toggleNotifications(): Promise<void> {

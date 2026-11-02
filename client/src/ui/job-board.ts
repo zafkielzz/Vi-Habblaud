@@ -178,7 +178,7 @@ export class JobBoardDialog {
     const room = snap?.rooms.find((r) => r.id === this.roomId) ?? boardRoom(snap);
     const office = this.ctx.selectedOffice();
     const raw = room?.board ?? { items: [] };
-    const board: JobBoard = { ...raw, items: officeItems(raw.items, snap, office) };
+    const board: JobBoard = { ...raw, items: officeItems(raw.items, office) };
     const todo = bossPlan(snap, office);
     const now = this.ctx.now();
     const team = snap?.team;
@@ -243,7 +243,7 @@ export class JobBoardDialog {
     const local = !!this.ctx.store.snapshot?.meta.terminal && !this.ctx.store.mock;
     const office = this.ctx.selectedOffice();
     const many = teamOffices(team).length > 1;
-    const queued = officeItems(team?.jobs?.filter((j) => j.status === 'queued') ?? [], this.ctx.store.snapshot, office);
+    const queued = officeItems(team?.jobs?.filter((j) => j.status === 'queued') ?? [], office);
     const openJobs = [...new Set([...board.items.filter((it) => it.job && jobOpen(it.status)).map((it) => it.job!), ...queued.map((j) => j.id)])];
     const open = openJobs.length;
     const tools: HTMLElement[] = [];
@@ -370,7 +370,7 @@ export class JobBoardDialog {
     const snap = this.ctx.store.snapshot;
     const office = this.ctx.selectedOffice();
     setHidden(this.button, !hasBoard(snap, office));
-    const working = officeItems(boardRoom(snap)?.board?.items ?? [], snap, office).filter((it) => it.status === 'working').length;
+    const working = officeItems(boardRoom(snap)?.board?.items ?? [], office).filter((it) => it.status === 'working').length;
     setText(this.count, working ? String(working) : '');
     setHidden(this.count, !working);
     const label = working ? tr('Board (B): {0} jobs in progress', [working]) : tr('Board (B)');

@@ -1,7 +1,8 @@
 // Office simulation: reconciles server snapshots with world characters and rooms,
 // plans behaviors, and runs step queues on every frame.
 import { partsKey } from '../../../../shared/appearance';
-import type { AgentInfo, JobBoard, OfficeSnapshot, Provider, RoomInfo } from '../../../../shared/types';
+import { energyOf } from '../../../../shared/energy';
+import type { AccountUsage, AgentInfo, JobBoard, OfficeSnapshot, Provider, RoomInfo } from '../../../../shared/types';
 import type { ArtModule, Dir, RoomTheme } from '../../art/api';
 import type { WorldOptions } from '../api';
 import { COL_W, COMPACT_DELAY_MS, DISMANTLE_DELAY_MS, FOOT_DX, FOOT_DY, MISSING_DEBOUNCE_MS, RUN_SPEED, TILE, WALK_SPEED } from '../constants';
@@ -151,11 +152,15 @@ export class Sim {
   readonly forcedOffline = new Set<string>();
   readonly hiddenRooms = new Set<string>();
   /** Snapshot accounts (id -> color/letter/name) for badges: Codex gets hollow chip and badge. */
-  accounts = new Map<string, { short: string; color: string; name: string; provider?: Provider }>();
+  accounts = new Map<string, { short: string; color: string; name: string; provider?: Provider; usage?: AccountUsage }>();
+  /** Claude Code workers' characters (Antigravity ones are told by their provider): they get a mug like the boss. */
+  private workerAgents = new Set<string>();
   /** Debugging: extra rooms/agents merged on each snapshot (simulated sessions). */
   injected: { rooms: RoomInfo[]; agents: AgentInfo[] } = { rooms: [], agents: [] };
   /** Debugging: fields patched onto real snapshot agents (e.g. forced shells). */
   readonly agentPatches = new Map<string, Partial<AgentInfo>>();
+  /** Debug: usage readings overlaid on accounts (debug.setUsage). */
+  readonly usagePatches = new Map<string, AccountUsage>();
   /** One-off effects (confetti) for renderer to draw; renderer drains list. */
   readonly effects: WorldEffect[] = [];
   /** Room parties and alarms (GitHub events; sim/github.ts). */
@@ -202,7 +207,8 @@ export class Sim {
     this.now = now;
     const first = !this.initialized;
     this.initialized = true;
-    this.accounts = new Map(snap.accounts.map((a) => [a.id, { short: a.short, color: a.color, name: a.name, ...(a.provider === 'codex' ? { provider: a.provider } : {}) }]));
+    this.accounts = new Map(snap.accounts.map((a) => [a.id, { short: a.short, color: a.color, name: a.name, ...(a.provider === 'codex' ? { provider: a.provider } : {}), ...(this.usagePatches.has(a.id) || a.usage ? { usage: this.usagePatches.get(a.id) ?? a.usage } : {}) }]));
+    this.workerAgents = new Set((snap.team?.sessions ?? []).flatMap((s) => [s.agentId, ...Object.values(s.agentIds ?? {})]));
 
     // ---- buildings (one per office) and rooms
     let layoutDirty = this.syncOffices(snap);
@@ -850,13 +856,21 @@ export class Sim {
     }
   }
 
+  /** The boss's and the workers' quota as energy; once a second, so a window that renews wakes them on its own. */
+  private refreshEnergy(ch: Character, now: number): void {
+    const staff = ch.info.kind === 'main' && (!!ch.info.boss || ch.info.provider === 'agy' || this.workerAgents.has(ch.id));
+    ch.energy = staff ? energyOf(this.accounts.get(ch.info.account)?.usage, now) : null;
+  }
+
   /** Low-frequency housekeeping (leaving parent, unowned rooms, shrinking building). */
   private housekeeping(now: number): void {
     for (const ch of this.chars.values()) {
       if (ch.info.kind === 'sub' && !ch.leaving) this.refreshMode(ch);
       // foreground command exceeded 10 s (or waiting ended): changes mode without new snapshot
       else if (!ch.leaving && (ch.mode === 'shell' || (ch.info.status === 'working' && ch.info.shells?.length))) this.refreshMode(ch);
-      if (ch.mode === 'idle' && this.longIdle(ch, now) && ch.atSpot === ch.homeSpot && ch.pose === 'sleep' && ch.icon !== 'zzz') {
+      this.refreshEnergy(ch, now);
+      // (out of quota has its own 💤, render/overlay.ts; a ghost does not snore)
+      if (ch.mode === 'idle' && !ch.energy?.asleep && !ch.info.ghost && this.longIdle(ch, now) && ch.atSpot === ch.homeSpot && ch.pose === 'sleep' && ch.icon !== 'zzz') {
         ch.setIcon('zzz', 1e12, now);
       }
     }
@@ -2152,9 +2166,9 @@ export class Sim {
 
   // =================================================================== visita
 
-  /** Idle for a long time (naps at desk, may decline invites)? In visits, never: time is omitted. */
+  /** Idle for a long time, out of quota or a ghost (stays at its desk, no strolls)? In visits, never: time is omitted. */
   longIdle(ch: Character, now: number): boolean {
-    return !this.visit && isLongIdle(ch.info.status, ch.info.statusSince, now);
+    return !this.visit && (!!ch.energy?.asleep || !!ch.info.ghost || isLongIdle(ch.info.status, ch.info.statusSince, now));
   }
 
   /** Drawn characters: agents and, during visits, the visitor (last). */

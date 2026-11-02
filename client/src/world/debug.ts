@@ -1,7 +1,7 @@
 // World debug API (console: `habblaud.world.debug`), used in visual tests to
 // force scenarios: simulated sessions joining/leaving, closing rooms, time of day, camera, and
 // shell wait (running shells, aging wait time, finishing with success/failure).
-import type { Activity, AgentInfo, AgentStatus, RoomInfo, ShellJob } from '../../../shared/types';
+import type { AccountUsage, Activity, AgentGhost, AgentInfo, AgentStatus, RoomInfo, ShellJob } from '../../../shared/types';
 import { SPECIAL, type ShellOutcome } from '../../../shared/activity';
 import { hash32 } from '../../../shared/hash';
 import { TILE } from '../art/api';
@@ -76,6 +76,10 @@ export interface WorldDebug {
    * empty list -> 'idle' (if previously 'shell').
    */
   setShells(agentId: string, jobs: ShellJobInput[]): void;
+  /** Overrides an account's usage reading until reset() (the mug and the quota sleep); null drops the override. */
+  setUsage(account: string, usage: Partial<AccountUsage> | null): void;
+  /** Draws an agent as a ghost, or not (null), until reset(). */
+  setGhost(agentId: string, ghost: AgentGhost | null): void;
   /** Ages shells (all sessions with shells, or single agent) by `minutes` — to test stages. */
   ageShells(minutes: number, agentId?: string): void;
   /**
@@ -326,6 +330,7 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
 
     reset: () => {
       sim.agentPatches.clear();
+      sim.usagePatches.clear();
       sim.forcedOffline.clear();
       sim.hiddenRooms.clear();
       sim.injected.agents = [];
@@ -389,6 +394,17 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
       return w.coins;
     },
 
+    setUsage: (account, usage) => {
+      if (usage) sim.usagePatches.set(account, { source: 'statusline', fetchedAt: Date.now(), ...usage });
+      else sim.usagePatches.delete(account);
+      sim.reapply(Date.now());
+    },
+    setGhost: (id, ghost) => {
+      const injected = sim.injected.agents.find((a) => a.id === id);
+      if (injected) Object.assign(injected, { ghost: ghost ?? undefined });
+      else sim.agentPatches.set(id, { ...sim.agentPatches.get(id), ghost: ghost ?? undefined });
+      sim.reapply(Date.now());
+    },
     setShells: (id, jobs) => {
       if (editAgent(id, (a) => applyShells(a, makeJobs(jobs)))) reapply();
     },

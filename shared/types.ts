@@ -156,6 +156,14 @@ export interface WorkerProgress {
   badges: WorkerBadge[];
 }
 
+/** A hung worker: its job shows no progress ('stalled'), or its agy is alive with no job ('no-job'). */
+export interface AgentGhost {
+  reason: 'stalled' | 'no-job';
+  /** Last sign of life (epoch ms). */
+  since: number;
+  pid?: number;
+}
+
 export interface AgentInfo {
   /**
    * Stable while agent exists. Claude Code: main "<account>:<pid>", sub "<sessionId>:<agentId>".
@@ -228,6 +236,8 @@ export interface AgentInfo {
   progress?: WorkerProgress;
   /** Antigravity worker: mode and effort for jobs that do not say (~/.agy_profiles/defaults.json). */
   agyDefaults?: { mode?: string; effort?: string };
+  /** The worker looks hung: drawn as a faint ghost on its seat (server/workers/ghosts.ts). Nothing is stopped by it. */
+  ghost?: AgentGhost;
   /** The boss: Claude Code requesting work from Antigravity workers (crown, BOSS badge, and suit). */
   boss?: boolean;
 }
@@ -302,7 +312,7 @@ export interface HandoffPlan {
 export interface NewsItem {
   id: string;
   at: number;
-  kind: 'done' | 'failed' | 'quota' | 'level' | 'badge' | 'commit' | 'rule';
+  kind: 'done' | 'failed' | 'quota' | 'level' | 'badge' | 'commit' | 'rule' | 'ghost';
   icon: string;
   text: string;
   detail?: string;

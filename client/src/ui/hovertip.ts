@@ -15,7 +15,9 @@ import {
   updateShellActivityLine,
   updateStatusDot,
 } from './widgets';
+import { energyOf } from '../../../shared/energy';
 import { tr } from '../../../shared/i18n';
+import { ghostText, quotaSleepText } from '../world/render/overlay';
 
 export class HoverTip implements UiComponent {
   readonly el: HTMLElement;
@@ -107,10 +109,10 @@ export class HoverTip implements UiComponent {
     setText(this.since, a.statusSince && inStatus >= 60_000 ? tr('{0} ago', [formatDuration(inStatus)]) : '');
     if (wait) updateShellActivityLine(this.activity, wait, now);
     else updateActivityLine(this.activity, a.activity);
-    setHidden(this.mood, !wait);
-    if (wait) {
-      const stage = shellStage(now - wait.since);
-      setText(this.mood, `${stage.emoji} ${stage.text}`);
-    }
+    const energy = energyOf(this.ctx.account(a.account)?.usage, now);
+    const stage = wait ? shellStage(now - wait.since) : null;
+    const mood = a.ghost ? `👻 ${ghostText(a.ghost, now)}` : stage ? `${stage.emoji} ${stage.text}` : energy?.asleep && (a.status === 'idle' || a.status === 'done') ? `💤 ${quotaSleepText(energy.resetsAt, now)}` : '';
+    setHidden(this.mood, !mood);
+    setText(this.mood, mood);
   }
 }

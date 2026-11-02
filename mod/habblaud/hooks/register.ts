@@ -14,7 +14,7 @@
 //    line disappears and polling backs off to every 30 s until it returns. Only where the session renders
 //    (empty `$.session.surfaces()` = `claude -p`/SDK: nothing to show, nothing to ask).
 // 3. /habblaud: office summary, answered by the mod itself (does not call the model, does not consume usage).
-// 4. Office rules, only while this session is the boss of an office (agy-hub `rules-hook boss`, run at the session
+// 4. Office rules, only while this session is the boss of an office (tools/agy `rules-hook boss`, run at the session
 //    start and on each prompt): the rules for the boss go with the first prompt and again whenever the user changes
 //    them (rev), as context the model reads; each Edit/Write/MultiEdit/NotebookEdit/Read/Grep/Glob/Bash call is checked
 //    by `rules-hook` (the same script Claude workers run as a PreToolUse hook) and denied with its reason when it is
@@ -38,7 +38,7 @@ export const OFFLINE_POLL_MS = 30_000
 export const FETCH_TIMEOUT_MS = 2_000
 /** Identical values written less than this ago are not rewritten (same rule as the tap). */
 export const MIN_REWRITE_MS = 10_000
-/** Tools whose calls the office rules check (agy-hub bin/rules-hook). */
+/** Tools whose calls the office rules check (tools/agy/bin/rules-hook). */
 export const RULES_TOOLS: readonly string[] = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Read', 'Grep', 'Glob', 'Bash']
 /** How long rules-hook may take (it answers in ~20 ms); past that the call is allowed. */
 export const RULES_TIMEOUT_MS = 3_000
@@ -99,7 +99,7 @@ interface ModEnv {
   /** Usage directory; missing without HOME (or USERPROFILE) or HABBLAUD_USAGE_DIR. */
   usageDir?: string
   port: number
-  /** agy-hub bin/rules-hook: HABBLAUD_RULES_HOOK, else ~/.local/bin/rules-hook. */
+  /** tools/agy/bin/rules-hook: HABBLAUD_RULES_HOOK, else ~/.local/bin/rules-hook. */
   rulesHook?: string
 }
 

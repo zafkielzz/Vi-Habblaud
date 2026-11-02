@@ -4,6 +4,7 @@
 import { drawJobBoard } from './job-board';
 import { drawRulesBoard } from './rules-board';
 import { TILE, type ArtModule, type CharacterFrameRequest, type IconName, type ScreenMode, type Sprite } from '../../art/api';
+import type { Energy } from '../../../../shared/energy';
 import type { SeasonalTheme, WorldOptions } from '../api';
 import type { WorldAssets } from '../assets';
 import type { Camera } from '../camera';
@@ -75,6 +76,12 @@ const POPCORN_DX: Readonly<Record<string, number>> = { down: 0, up: -9, left: -5
 const POPCORN_DY: Readonly<Record<string, number>> = { down: 11, up: 8, left: 9, right: 9 };
 /** Cobweb next to a neighbor: at most this (px) extending out of body. */
 const WEB_MAX_OUT = 9;
+/** A hung worker (AgentInfo.ghost) on its seat: faint, the chair shows through. */
+const GHOST_ALPHA = 0.4;
+/** The desk mug by coffee level (shared/energy.ts). */
+const MUG_ICONS: Readonly<Record<Energy['level'], IconName>> = { 0: 'mug_0', 1: 'mug_1', 2: 'mug_2', 3: 'mug_3', 4: 'mug_4' };
+/** Where the mug stands from a desk seat's feet (icon anchor: bottom center), by the way the seat faces. */
+const MUG_AT = { up: { dx: 12, dy: -13 }, down: { dx: 12, dy: 6 } } as const;
 /** Edge tint of exterior area (vignette) and of grass beyond it. */
 const VIGNETTE_ALPHA = 0.2;
 const VIGNETTE_EDGE = `rgba(18,40,26,${VIGNETTE_ALPHA})`;
@@ -974,7 +981,8 @@ export class Renderer {
     // lateral lane offset when walking (two on same path do not become a two-headed sprite)
     const x = Math.round(ch.x + ch.offX);
     const y = Math.round(ch.y + ch.offY);
-    const alpha = ch === this.sim.visitor ? ch.alpha : ch.alpha * (1 - CHAR_FADE * this.dim.char(ch.id, ch.office));
+    const solid = ch === this.sim.visitor ? ch.alpha : ch.alpha * (1 - CHAR_FADE * this.dim.char(ch.id, ch.office));
+    const alpha = ch.info.ghost ? solid * GHOST_ALPHA : solid;
     ctx.globalAlpha = alpha;
     // floor rings (selection, hover, alert)
     if (ch.mode === 'wait') this.drawAlertRing(x, y, now);
@@ -1052,6 +1060,7 @@ export class Renderer {
       // rain: drops fall from cloud to head
       if (name === 'storm' && Math.random() < this.dt * 24) this.particles.rain(x - 3 + Math.floor(Math.random() * 7), head.y - 3 - lift, lift + 1);
     }
+    if (ch.energy) this.pushMug(ch, ch.energy.level, solid);
     if (shell && ch.shellStage === 'nap' && ch.pose === 'sleep') {
       // napping: "zzz" floating above and to the right of hourglass ("×N" badge stays below)
       this.pushIcon(x + 10, head.y - 13, 'zzz', Math.round(Math.sin(now / 500) * 1.5), alpha, 0);
@@ -1064,6 +1073,14 @@ export class Renderer {
       this.particles.popcorn(px, py);
       if (Math.random() < 0.3) this.particles.popcorn(px, py);
     }
+  }
+
+  /** The coffee mug on the character's own desk (stays there on a stroll): its quota as energy (shared/energy.ts). */
+  private pushMug(ch: Character, level: Energy['level'], alpha: number): void {
+    const spot = ch.homeSpot ? this.sim.spots.get(ch.homeSpot) : undefined;
+    if (spot?.kind !== 'desk') return;
+    const a = MUG_AT[spot.dir === 'up' ? 'up' : 'down'];
+    this.pushIcon(spot.x + a.dx, spot.y + a.dy, MUG_ICONS[level], 0, alpha, 0);
   }
 
   private pushIcon(x: number, y: number, name: IconName, bounce: number, alpha: number, badge: number): void {

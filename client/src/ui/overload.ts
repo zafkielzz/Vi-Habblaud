@@ -3,7 +3,7 @@
 // usual way out: ask the session to update the project's handoff file (through habblaud-mensagens, when the session
 // takes messages), then open a new session in the same folder, which reads the handoff and carries on.
 import type { AgentInfo } from '../../../shared/types';
-import { sessionLoad, type LoadLevel, type SessionLoad } from '../../../shared/overload';
+import { sessionLoad, type LoadLevel, type LoadThresholds, type SessionLoad } from '../../../shared/overload';
 import type { TerminalRouter, UiContext } from './context';
 import { h, iconButton, setHidden, setText, setVariant } from './dom';
 import { formatDuration } from './format';
@@ -18,10 +18,10 @@ export interface LoadedSession {
 const RANK: Record<LoadLevel, number> = { overloaded: 2, tired: 1, ok: 0 };
 
 /** Tired or overloaded Claude Code main sessions: the boss first, then the most loaded. */
-export function loadedSessions(agents: readonly AgentInfo[]): LoadedSession[] {
+export function loadedSessions(agents: readonly AgentInfo[], thresholds?: LoadThresholds): LoadedSession[] {
   return agents
     .filter((a) => a.kind === 'main' && (a.provider ?? 'claude') === 'claude')
-    .map((agent) => ({ agent, load: sessionLoad(agent) }))
+    .map((agent) => ({ agent, load: sessionLoad(agent, thresholds) }))
     .filter((s) => s.load.level !== 'ok')
     .sort((a, b) => Number(!!b.agent.boss) - Number(!!a.agent.boss) || RANK[b.load.level] - RANK[a.load.level] || (b.load.share ?? 0) - (a.load.share ?? 0));
 }
@@ -88,12 +88,16 @@ export class OverloadDialog {
 
   toggle(): void {
     if (this.el.open) this.close();
-    else if (loadedSessions(this.ctx.store.snapshot?.agents ?? []).length) this.open();
+    else if (this.sessions().length) this.open();
     else this.ctx.announce(tr('No session is overloaded right now.'));
   }
 
+  private sessions(): LoadedSession[] {
+    return loadedSessions(this.ctx.store.snapshot?.agents ?? [], this.ctx.prefs.overload);
+  }
+
   render(): void {
-    const sessions = loadedSessions(this.ctx.store.snapshot?.agents ?? []);
+    const sessions = this.sessions();
     this.renderButton(sessions);
     if (!this.el.open) return;
     const now = this.ctx.now();

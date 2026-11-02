@@ -1,14 +1,14 @@
 // Worker terminals: jobs restart the worker's terminal with the request, the answer comes from the conversation file.
 // Fake terminals; real temporary files.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { JobBoardItem, PtyInfo } from '../../shared/types';
 import { NameStore } from '../model/names';
 import { Office } from '../model/office';
 import { IDLE_CLOSE_MS, LEAN_TOOLS, leanClaudeArgs, rulesHookSettings, taskOf, TRUST_WAIT_MS, WorkerService, type WorkerPtys, type WorkerTarget } from './service';
-import { agyTurn, claudeTranscriptPath, claudeTurn } from './turns';
+import { agyTranscriptPath, agyTurn, claudeTranscriptPath, claudeTurn, lastWrite } from './turns';
 
 const T0 = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -18,6 +18,29 @@ afterEach(() => {
 
 const step = (o: Record<string, unknown>) => JSON.stringify(o);
 const CONV = '26a99462-96c2-4742-9f6d-a9a3620e7176';
+
+describe('lastWrite', () => {
+  it('the newest of the conversation databases, their transcripts and the log', () => {
+    const state = mkdtempSync(join(tmpdir(), 'habblaud-lastwrite-'));
+    dirs.push(state);
+    expect(lastWrite(state)).toBe(0);
+    mkdirSync(join(state, 'conversations'));
+    const at = (path: string, sec: number) => {
+      writeFileSync(path, 'x');
+      utimesSync(path, sec, sec);
+    };
+    at(join(state, 'conversations', `${CONV}.db`), 1_000);
+    at(join(state, 'conversations', `${CONV}.db-wal`), 2_000);
+    expect(lastWrite(state)).toBe(2_000_000);
+    const transcript = agyTranscriptPath(state, CONV);
+    mkdirSync(dirname(transcript), { recursive: true });
+    at(transcript, 3_000);
+    expect(lastWrite(state)).toBe(3_000_000);
+    at(join(state, 'cli.log'), 4_000);
+    expect(lastWrite(state, join(state, 'cli.log'))).toBe(4_000_000);
+    expect(lastWrite(state, join(state, 'gone.log'))).toBe(3_000_000);
+  });
+});
 
 describe('turns', () => {
   it('agy: over when the last step is a planner response without tool calls; its content is the answer', () => {
@@ -149,6 +172,25 @@ describe('WorkerService', () => {
     expect(t.board.at(-1)).toMatchObject({ status: 'done', job: job.id, workerId: 'acc2', by: 'boss', role: 'qa' });
     // the terminal stays open after the job
     expect(t.open.has('agy:acc2')).toBe(true);
+  });
+
+  it('ghost check: a running job reports when its conversation last grew; nothing once it is over', async () => {
+    const t = setup();
+    expect(t.svc.ghostCandidates()).toEqual([]);
+    await t.svc.ask({ worker: 'acc2', prompt: 'long one' });
+    expect(t.svc.ghostCandidates()).toEqual([{ agentId: 'agy:acc2', name: 'two (Agy)', pid: t.open.get('agy:acc2')!.pid, lastSign: T0 }]);
+    t.advance(5_000);
+    t.svc.tick();
+    expect(t.svc.ghostCandidates()[0].lastSign).toBe(T0);
+    t.agyWrites([{ type: 'USER_INPUT', status: 'DONE', content: 'q' }]);
+    t.svc.tick();
+    expect(t.svc.ghostCandidates()[0].lastSign).toBe(T0 + 5_000);
+    t.advance(5_000);
+    t.svc.tick();
+    expect(t.svc.ghostCandidates()[0].lastSign).toBe(T0 + 5_000);
+    t.agyWrites(answer('done'));
+    t.svc.tick();
+    expect(t.svc.ghostCandidates()).toEqual([]);
   });
 
   it('one job at a time; waitJob returns once it is over', async () => {

@@ -324,6 +324,7 @@ export interface RoomTheme {
 export type IconName = 'alert' | 'question' | 'zzz' | 'check' | 'heart' | 'coffee' | 'music' | 'idea' | 'sweat' | 'star' | 'lightning' | 'chat' | 'box' | 'wave'
   | 'hourglass' // hourglass (waiting for a shell)
   | 'hourglass_flip' // same hourglass flipping (alternate with 'hourglass' to animate)
+  | 'mug_0' | 'mug_1' | 'mug_2' | 'mug_3' | 'mug_4' // coffee mug on a desk, seen from the side: empty to full (quota as energy)
   | 'cobweb' // cobweb (~12px) for corner of chair/character when wait gets long
   | 'storm' // small rain cloud with lightning (something failed)
   // --- social life (additive)

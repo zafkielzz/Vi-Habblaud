@@ -22,6 +22,8 @@ export interface AgyProc {
   ppid?: number;
   /** PID of the Claude Code that opened the call (agy-ask run by it), if any. */
   claudePid?: number;
+  /** Its parent died: it was reparented to init or `systemd --user` (agy-ask killed, terminal gone). */
+  orphan?: boolean;
 }
 
 const PRINT_FLAGS = new Set(['-p', '--print', '--prompt']);
@@ -101,6 +103,7 @@ export function scanAgyProcs(profilesRoot: string, r: ProcReader = procReader())
     if (prompt?.trim().startsWith('/')) continue;
     const p: AgyProc = { pid, acc, headless: flag > 0, startedAt: r.bootMs() + (st.startTicks / CLK_TCK) * 1000, ppid: st.ppid };
     if (prompt) p.prompt = prompt;
+    if (st.ppid <= 1 || r.comm(st.ppid) === 'systemd') p.orphan = true;
     const cwd = r.cwd(pid);
     if (cwd) p.cwd = cwd;
     found.set(pid, p);

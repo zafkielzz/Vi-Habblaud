@@ -86,9 +86,71 @@ function run(sim: Sim, clock: { now: number }, seconds: number, until?: () => bo
   }
 }
 
+/** A snapshot whose account has this 5-hour usage. */
+function withUsage(s: OfficeSnapshot, utilization: number, resetsAt: number): OfficeSnapshot {
+  return { ...s, accounts: s.accounts.map((a) => ({ ...a, usage: { source: 'statusline', fetchedAt: T0, fiveHour: { utilization, resetsAt } } })) };
+}
+
 function newSim(): Sim {
   return new Sim(art, () => ({ ...DEFAULT_WORLD_OPTIONS, liveliness: 'calm' }));
 }
+
+describe('quota as energy', () => {
+  const idleBoss = () => agent('ana', '/a', 'idle', { boss: true });
+
+  it('only the boss and the workers have a mug', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const s = snap([room('/a', 0)], [idleBoss(), agent('bia', '/a', 'working', { provider: 'agy' }), agent('cau', '/a', 'working'), agent('dri', '/a', 'working')]);
+    const team = { workers: ['w'], sessions: [{ worker: 'w', kind: 'claude', agentId: 'cau', account: '.claude', driving: false, conversations: {} }] };
+    sim.applySnapshot(withUsage({ ...s, team } as unknown as OfficeSnapshot, 50, T0 + 3_600_000), clock.now);
+    run(sim, clock, 1.5);
+    expect(sim.chars.get('ana')!.energy?.level).toBe(2);
+    expect(sim.chars.get('bia')!.energy?.level).toBe(2);
+    expect(sim.chars.get('cau')!.energy?.level).toBe(2);
+    expect(sim.chars.get('dri')!.energy).toBeNull();
+  });
+
+  it('out of quota and idle: sleeps at its desk, no pixel zzz, and wakes when the window renews', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    sim.applySnapshot(withUsage(snap([room('/a', 0)], [idleBoss()]), 100, T0 + 10_000), clock.now);
+    run(sim, clock, 3);
+    const ana = sim.chars.get('ana')!;
+    expect(ana.energy?.asleep).toBe(true);
+    expect(ana.atSpot).toBe(ana.homeSpot);
+    expect(ana.pose).toBe('sleep');
+    expect(ana.icon).toBeNull();
+    expect(sim.social.canJoin(ana, clock.now)).toBe(false);
+    run(sim, clock, 9);
+    expect(ana.energy?.asleep).toBe(false);
+    expect(ana.pose).not.toBe('sleep');
+  });
+
+  it('a character still working stays up with an empty mug', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    sim.applySnapshot(withUsage(snap([room('/a', 0)], [agent('ana', '/a', 'working', { boss: true })]), 100, T0 + 3_600_000), clock.now);
+    run(sim, clock, 3);
+    const ana = sim.chars.get('ana')!;
+    expect(ana.energy?.level).toBe(0);
+    expect(ana.pose).toBe('type');
+  });
+});
+
+describe('ghost', () => {
+  it('an idle ghost stays on its seat, without the sleep icon or invitations', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    sim.applySnapshot(snap([room('/a', 0)], [agent('ana', '/a', 'idle', { ghost: { reason: 'no-job', since: T0 } })]), clock.now);
+    run(sim, clock, 3);
+    const ana = sim.chars.get('ana')!;
+    expect(ana.atSpot).toBe(ana.homeSpot);
+    expect(sim.longIdle(ana, clock.now)).toBe(true);
+    expect(ana.icon).toBeNull();
+    expect(sim.social.canJoin(ana, clock.now)).toBe(false);
+  });
+});
 
 describe('office simulation', () => {
   it('initial load: working agents are seated typing, room lights on', () => {

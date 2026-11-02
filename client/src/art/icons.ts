@@ -30,6 +30,15 @@ const HOURGLASS_PAL: Palette = {
   S: '#d6952a', // sand in shadow
 };
 
+// Small desk mug, cut away so the level shows: `coffee` rows from the bottom, of the 4 it holds.
+function mugIcon(coffee: number): IconDef {
+  const fill = (row: number) => (4 - row <= coffee ? 'c' : 'e');
+  return {
+    rows: [`w${fill(0).repeat(3)}w..`, `w${fill(1).repeat(3)}whh`, `w${fill(2).repeat(3)}w.h`, `w${fill(3).repeat(3)}whh`, 'wwwww..'],
+    pal: { w: '#f4f2ee', c: '#6b4226', e: '#c9c3b6', h: '#d6d2c8' },
+  };
+}
+
 const ICONS: Readonly<Record<IconName, IconDef>> = {
   alert: {
     rows: [
@@ -112,6 +121,11 @@ const ICONS: Readonly<Record<IconName, IconDef>> = {
     ],
     pal: { s: '#e6ecf5', w: '#f4f2ee', c: '#6b4226', r: '#e2604f', h: '#d6d2c8', d: '#b9b3a6' },
   },
+  mug_0: mugIcon(0),
+  mug_1: mugIcon(1),
+  mug_2: mugIcon(2),
+  mug_3: mugIcon(3),
+  mug_4: mugIcon(4),
   music: {
     rows: [
       '...nnnnnn',

@@ -38,6 +38,8 @@ import { parseAgyUsage, runAgyUsage } from './usage';
 import { findAgyCliLog, readAgyRun, settingsModel, type AgyRunInfo } from './clilog';
 import { AgyDefaultsFile, type AgyDefaults } from './defaults';
 import { tr } from '../../../shared/i18n';
+import type { GhostCandidate } from '../../workers/ghosts';
+import { lastWrite } from '../../workers/turns';
 
 /** How often the profiles folder is re-read (accounts logged in or removed while the server runs). */
 export const RESCAN_MS = 30_000;
@@ -76,6 +78,8 @@ export interface AgyAskLine {
   usage?: { input_tokens?: number; output_tokens?: number; thinking_tokens?: number; total_tokens?: number };
   /** "terminal": a job run in the worker's terminal by server/workers (it puts it on the board itself). */
   via?: string;
+  /** Start line: OfficeInfo.id of the office that gave the job. */
+  office?: string;
 }
 
 /** A character to show for a profile (server/team.ts seat, or an Antigravity boss). */
@@ -543,6 +547,7 @@ export class AgySource implements AgentSource {
     };
     const role = line.role || defaultRole(w);
     if (role) item.role = role;
+    if (line.office) item.office = line.office;
     this.upsertBoard(item);
   }
 
@@ -679,6 +684,8 @@ export class AgySource implements AgentSource {
       at: Math.min(job.startedAt, this.now()),
     };
     if (role) item.role = role;
+    const office = job.ppid !== undefined ? this.starts.get(job.ppid)?.office : undefined;
+    if (office) item.office = office;
     this.upsertBoard(item);
   }
 
@@ -792,6 +799,29 @@ export class AgySource implements AgentSource {
       r.info = readAgyRun(r.path);
     }
     return r.info;
+  }
+
+  /**
+   * What the ghost check watches (server/workers/ghosts.ts): headless agy (its `-p` run, however it was started) and any
+   * agy whose parent is gone. Interactive agy under a live terminal is left alone: waiting at its prompt is normal.
+   * Writes are per account, so a hung process beside a healthy one on the same account stays hidden until that one ends.
+   */
+  ghostCandidates(): GhostCandidate[] {
+    const running = scanAgyProcs(this.opts.root, this.procs);
+    const out: GhostCandidate[] = [];
+    for (const w of this.present) {
+      if (!this.shown.has(w.id)) continue;
+      const mine = running.filter((p) => p.acc === w.profile.acc && (p.headless || p.orphan));
+      if (!mine.length) continue;
+      const written = lastWrite(w.profile.stateDir, w.run?.path);
+      for (const p of mine) {
+        const ended = p.ppid !== undefined && this.ends.has(p.ppid);
+        const c: GhostCandidate = { agentId: w.id, name: workerName(w.profile), pid: p.pid, lastSign: Math.max(p.startedAt, written) };
+        if (ended || p.orphan) c.jobless = true;
+        out.push(c);
+      }
+    }
+    return out;
   }
 
   /** Sets a worker's defaults for jobs that do not say (POST /api/agy/defaults). */

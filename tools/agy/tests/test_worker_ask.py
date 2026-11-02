@@ -518,9 +518,11 @@ class RulesHook(unittest.TestCase):
             return json.loads(out)["text"]
 
         self.assertIn("no HANDOFF*.md yet", text())
+        self.assertIn("one item at a time", text())
         with open(os.path.join(folder, "handoff_v2.md"), "w") as f:
             f.write("# Next steps\n")
         self.assertNotIn("HANDOFF*.md", text())
+        self.assertIn("one item at a time", text())
 
 
 if __name__ == "__main__":

@@ -206,6 +206,15 @@ middle one (0.**3**.0).
   Habblaud mod does the same for a Claude Code boss and gives it its rules with the first prompt and again after you
   change them. Nobody's agent may edit `team.json` or the violation log: rules change from the page only. Jobs on the
   Board show the task without the rules. These are guardrails against mistakes, not a sandbox.
+- **Quota as energy:** the coffee mug on a boss's or worker's desk empties as its 5-hour quota is used (the weekly one
+  for plans without a 5-hour window). With the quota exhausted and nothing to do, the character sleeps at its desk
+  under a steady 💤, skips strolls and gatherings, and wakes by itself when the window renews; hover it for when.
+- **Hung workers as ghosts:** a worker whose job shows no progress for 10 minutes (no transcript or log writes), or an
+  agy process alive with no job (its parent gone or its job over), turns into a faint ghost on its seat, with one 👻
+  line on the Board giving its PID; hover it to see for how long. Nothing is stopped: the ghost clears by itself when
+  the job moves again or the process goes away.
+- **"Boss overloaded" thresholds in Settings:** when a session counts as tired or overloaded (share of the context and
+  compactions) can now be set under Settings › 🥵 Boss overloaded. The defaults stay 60% or 1 compaction and 80% or 2.
 
 ### Fixed
 
@@ -234,6 +243,9 @@ middle one (0.**3**.0).
 
 - **The worker scripts ship with Habblaud:** `agy-ask`, `claude-ask`, `agy-as`, the rules hook, the agy plugins and the
   skills are in `tools/agy`, and `tools/agy/install.sh` sets them up.
+
+- **The Board shows only the jobs of the office you are in.** A job from another session or folder, or with no office, no
+  longer appears under "The workers' jobs"; jobs keep their office after a server restart.
 
 ## [1.0.3] - 2026-10-16
 

@@ -1,4 +1,5 @@
 // Formatting in the active language (times, numbers, usage). Pure functions: no DOM, tested in ui/format.test.ts.
+import { FIVE_HOURS_MS, WEEK_MS, windowRenewed } from '../../../shared/energy';
 import { intlLocale, tr } from '../../../shared/i18n';
 
 const SECOND = 1_000;
@@ -103,8 +104,7 @@ export function compactDuration(ms: number): string {
   return h ? `${d}d${h}h` : `${d}d`;
 }
 
-export const FIVE_HOURS_MS = 5 * HOUR;
-export const WEEK_MS = 7 * DAY;
+export { FIVE_HOURS_MS, WEEK_MS };
 
 /** Display of a usage window (5 h or week), factoring in data age. */
 export interface UsageWindowView {
@@ -127,8 +127,7 @@ export interface UsageWindowView {
 export function usageWindowView(win: { utilization: number; resetsAt?: number } | undefined, fetchedAt: number, now: number, windowMs: number): UsageWindowView | null {
   if (!win) return null;
   const resetsAt = win.resetsAt !== undefined && Number.isFinite(win.resetsAt) ? win.resetsAt : undefined;
-  const renewed = resetsAt !== undefined ? resetsAt <= now : now - fetchedAt >= windowMs;
-  if (renewed) {
+  if (windowRenewed(win, fetchedAt, now, windowMs)) {
     return {
       pct: null,
       renewed: true,

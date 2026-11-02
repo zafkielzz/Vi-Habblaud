@@ -7,7 +7,8 @@ Habblaud mod.
                       "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}) and appends one
                       RuleViolation (by "hook") to rules-log.jsonl; otherwise prints nothing (the call goes on).
   rules-hook boss     {"office", "name", "rev", "text"} when the calling Claude Code session is the boss of an office
-                      (text = the rules for the boss, plus a note when the folder has no HANDOFF*.md yet), else {}.
+                      (text = the rules for the boss, how to follow the to-do list, and to ask for a handoff file
+                      when the folder has none), else {}.
                       Used by the Habblaud mod (mod/habblaud).
 
 Antigravity (agy) PreToolUse hooks use the same script (agy-plugin/office-rules): their event is {"toolCall": {"name",
@@ -151,14 +152,19 @@ AGY = [False]
 
 
 def note(folder):
-    """The note for a boss whose office folder exists and has no handoff file; '' otherwise."""
-    missing = folder and os.path.isdir(folder) and not glob.glob(os.path.join(glob.escape(folder), "[Hh][Aa][Nn][Dd][Oo][Ff][Ff]*.md"))
-    return NO_HANDOFF if missing else ""
+    """What a boss is told about the office's to-do list; a folder with no handoff file asks for one first."""
+    if not folder:
+        return ""
+    missing = os.path.isdir(folder) and not glob.glob(os.path.join(glob.escape(folder), "[Hh][Aa][Nn][Dd][Oo][Ff][Ff]*.md"))
+    return BOSS_TODO + (NO_HANDOFF if missing else "")
 
 
-NO_HANDOFF = ("\n\nThis office's folder has no HANDOFF*.md yet. If the work starts from an idea file or a new idea, ask "
-              "the user first whether to go ahead with it. If yes, write HANDOFF.md from it (keep the idea file as it "
-              "is) with a \"Next steps\" list: that list is the office's to-do on the Board.")
+BOSS_TODO = ("\n\nYour to-do list is the \"Next steps\" list in the HANDOFF file of this office's folder; the Board shows it. "
+             "Read it before you start and work through it one item at a time, in order. Mark an item `- [x]` as soon as "
+             "it is done, and re-read the list before the next one: the user adds to it on the Board.")
+NO_HANDOFF = ("\n\nThis office's folder has no HANDOFF*.md yet. Before any work, ask the user whether to create one to "
+              "follow. If yes, write HANDOFF.md with a \"Next steps\" list, from the idea file if there is one (leave that "
+              "file as it is).")
 
 
 def main():

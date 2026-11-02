@@ -1,7 +1,37 @@
 // Pure rules for world text overlay layer (bubbles and framing).
 import { describe, expect, it } from 'vitest';
 import { overviewFrame } from '../camera';
-import { rationBubbles, waitBubbleText } from './overlay';
+import { ghostText, headIconLift, outOfQuota, quotaSleepText, rationBubbles, waitBubbleText } from './overlay';
+
+describe('ghost', () => {
+  it('says what is wrong and for how long', () => {
+    expect(ghostText({ reason: 'stalled', since: 0 }, 12 * 60_000)).toBe('No progress for 12min');
+    expect(ghostText({ reason: 'no-job', since: 0 }, 12 * 60_000)).toBe('Alive with no job, silent for 12min');
+  });
+});
+
+describe('quota sleep', () => {
+  const empty = { left: 0, level: 0, asleep: true } as const;
+
+  it('only with nothing to do: a job or a question keeps the character up', () => {
+    expect(outOfQuota({ mode: 'idle', energy: empty })).toBe(true);
+    expect(outOfQuota({ mode: 'work', energy: empty })).toBe(false);
+    expect(outOfQuota({ mode: 'wait', energy: empty })).toBe(false);
+    expect(outOfQuota({ mode: 'idle', energy: null })).toBe(false);
+    expect(outOfQuota({ mode: 'idle', energy: { left: 5, level: 1, asleep: false } })).toBe(false);
+  });
+
+  it('its 💤 lifts the labels and bubbles above the head', () => {
+    expect(headIconLift({ mode: 'idle', icon: null, energy: empty })).toBe(13);
+    expect(headIconLift({ mode: 'idle', icon: null })).toBe(0);
+  });
+
+  it('says when it is back, if known', () => {
+    expect(quotaSleepText(2_000 + 90 * 60_000, 2_000)).toBe('Out of quota, back in 1h 30min');
+    expect(quotaSleepText(undefined, 2_000)).toBe('Out of quota');
+    expect(quotaSleepText(1_000, 2_000)).toBe('Out of quota');
+  });
+});
 
 describe('bubbles', () => {
   it('waiting: reason only, without redundant prefix', () => {

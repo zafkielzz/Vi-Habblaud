@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_THRESHOLDS } from '../../../shared/overload';
 import { DEFAULT_PREFS, loadPrefs, migrateLegacyKeys, PREFS_KEY, sanitizePrefs, savePrefs, worldOptionsFrom } from './prefs';
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -54,8 +55,18 @@ describe('preferences', () => {
     expect(loadPrefs(broken)).toEqual(DEFAULT_PREFS);
     expect(() => savePrefs(broken, DEFAULT_PREFS)).not.toThrow();
   });
+  it('overload thresholds: saved like the rest, older prefs get the defaults, bad values are cleaned', () => {
+    const st = memoryStorage({});
+    const overload = { tired: 0.5, overloaded: 0.9, tiredCompacts: 2, overloadedCompacts: 3 };
+    savePrefs(st, { ...DEFAULT_PREFS, overload });
+    expect(loadPrefs(st).overload).toEqual(overload);
+    expect(sanitizePrefs({ bubbles: 'none' }).overload).toEqual(DEFAULT_THRESHOLDS);
+    expect(sanitizePrefs({ overload: { tired: 'x', overloaded: 5 } }).overload).toEqual({ ...DEFAULT_THRESHOLDS, overloaded: 1 });
+    expect(worldOptionsFrom({ ...DEFAULT_PREFS, overload }).overload).toEqual(overload);
+  });
+
   it('extracts only world options', () => {
-    expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto' });
+    expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto', overload: DEFAULT_THRESHOLDS });
     expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'night' })).toMatchObject({ dayNight: true, daylight: 'night' });
   });
   it('day/night cycle: validates mode and migrates legacy switch', () => {

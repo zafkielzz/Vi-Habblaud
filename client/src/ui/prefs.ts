@@ -3,6 +3,7 @@
 import { DEFAULT_SOUND_SETTINGS, sanitizeSoundSettings, type SoundSettings } from '../audio/scheduler';
 import type { DaylightMode, WorldOptions } from '../world/api';
 import { DEFAULT_WORLD_OPTIONS } from '../world/api';
+import { DEFAULT_THRESHOLDS, sanitizeThresholds, type LoadThresholds } from '../../../shared/overload';
 
 export const PREFS_KEY = 'habblaud:prefs';
 
@@ -25,6 +26,8 @@ export interface UiPrefs {
   hiddenAccounts: string[];
   /** Habblaud World: notice when the first visitor enters your building (per connection). Enabled by default. */
   worldVisitNotify: boolean;
+  /** "Boss overloaded": when a session counts as tired or overloaded. */
+  overload: LoadThresholds;
 }
 
 export const DEFAULT_PREFS: UiPrefs = {
@@ -40,6 +43,7 @@ export const DEFAULT_PREFS: UiPrefs = {
   feedOpen: true,
   hiddenAccounts: [],
   worldVisitNotify: true,
+  overload: DEFAULT_THRESHOLDS,
 };
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
@@ -67,6 +71,7 @@ export function sanitizePrefs(raw: unknown): UiPrefs {
     // The account filter chips are gone: a list saved by them would hide accounts with no way back.
     hiddenAccounts: [],
     worldVisitNotify: bool(o.worldVisitNotify, d.worldVisitNotify),
+    overload: sanitizeThresholds(o.overload),
   };
 }
 
@@ -91,7 +96,7 @@ export function savePrefs(storage: StorageLike | null, prefs: UiPrefs): void {
 
 /** Preferences subset consumed by the world (canvas). */
 export function worldOptionsFrom(p: UiPrefs): Partial<WorldOptions> {
-  return { showNames: p.showNames, bubbles: p.bubbles, liveliness: p.liveliness, dayNight: p.daylight !== 'day', daylight: p.daylight, theme: p.theme };
+  return { showNames: p.showNames, bubbles: p.bubbles, liveliness: p.liveliness, dayNight: p.daylight !== 'day', daylight: p.daylight, theme: p.theme, overload: p.overload };
 }
 
 /** localStorage with protection against browsers that throw an exception when accessing it. */

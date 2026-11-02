@@ -608,9 +608,9 @@ describe('floors and walls', () => {
 });
 
 describe('icons and themes', () => {
-  it('all 24 icons exist with outline', () => {
-    expect(ICON_NAMES.length).toBe(24);
-    for (const n of ['hourglass', 'hourglass_flip', 'cobweb', 'storm', 'coin', 'sparkle', 'trophy', 'hand_rock', 'hand_paper', 'hand_scissors'] as const) {
+  it('all 29 icons exist with outline', () => {
+    expect(ICON_NAMES.length).toBe(29);
+    for (const n of ['mug_0', 'mug_4', 'hourglass', 'hourglass_flip', 'cobweb', 'storm', 'coin', 'sparkle', 'trophy', 'hand_rock', 'hand_paper', 'hand_scissors'] as const) {
       expect(ICON_NAMES).toContain(n);
     }
     for (const n of ICON_NAMES) {

@@ -2,6 +2,8 @@
 // Implementation: client/src/world/index.ts -> createWorld().
 // Rule: changes here must be ADDITIVE.
 
+import type { LoadThresholds } from '../../../shared/overload';
+
 export type Selection = { type: 'agent'; id: string } | { type: 'room'; id: string } | null;
 
 export interface WorldOptions {
@@ -19,6 +21,8 @@ export interface WorldOptions {
   daylight?: DaylightMode;
   /** Visual theme: auto (follows calendar; see seasonalThemeFor), none, Christmas, or Halloween. */
   theme?: OfficeTheme;
+  /** (Optional, additive) When a session shows as tired or overloaded; absent = the defaults. */
+  overload?: LoadThresholds;
 }
 
 /** Theme rendered by renderer: original office ('none') or a seasonal one. */

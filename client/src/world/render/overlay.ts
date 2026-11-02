@@ -14,7 +14,7 @@ import type { Sim } from '../sim/sim';
 import { buildAnim } from './anim';
 import { drawFxBanner } from './github-fx';
 import type { HeadInfo, Renderer } from './renderer';
-import type { JobBoard, Provider } from '../../../../shared/types';
+import type { AgentGhost, JobBoard, Provider } from '../../../../shared/types';
 import { jobBoardParts } from './job-board';
 import { rulesBoardHead } from './rules-board';
 
@@ -25,8 +25,9 @@ const RULES_BOARD_MIN_PX = 44;
 import { tr } from '../../../../shared/i18n';
 import { CHAR_FADE } from './office-dim';
 import { coreBase, isArea, RECEPTION_ID } from '../layout/core';
-import { sessionLoad } from '../../../../shared/overload';
+import { sessionLoad, type LoadThresholds } from '../../../../shared/overload';
 import { modelSpec } from '../../../../shared/model-spec';
+import { formatDuration } from '../../../../shared/activity';
 
 // Pixelify Sans has an almost closed capital "C" (reads "Oopa" instead of "Copa") in any
 // canvas weight/size; world text uses the system font, always readable.
@@ -188,9 +189,25 @@ function luminance(hex: string): number {
 }
 
 /** Height (world px) occupied by overhead icons: bubbles and labels rise to avoid covering them. */
-export function headIconLift(ch: Pick<Character, 'mode' | 'icon'>): number {
+export function headIconLift(ch: Pick<Character, 'mode' | 'icon'> & Partial<Pick<Character, 'energy'>>): number {
   if (ch.icon === 'storm') return 13 + STORM_LIFT;
-  return ch.mode === 'wait' || ch.mode === 'shell' || ch.icon ? 13 : 0;
+  return ch.mode === 'wait' || ch.mode === 'shell' || ch.icon || outOfQuota(ch) ? 13 : 0;
+}
+
+/** Fast asleep because its quota ran out (shared/energy.ts): only with nothing to do, a job or a question keeps it up. */
+export function outOfQuota(ch: Pick<Character, 'mode'> & Partial<Pick<Character, 'energy'>>): boolean {
+  return ch.mode === 'idle' && !!ch.energy?.asleep;
+}
+
+/** Hover text of a hung worker (AgentInfo.ghost). */
+export function ghostText(g: AgentGhost, now: number): string {
+  const silence = formatDuration(Math.max(60_000, Math.floor((now - g.since) / 60_000) * 60_000));
+  return g.reason === 'no-job' ? tr('Alive with no job, silent for {0}', [silence]) : tr('No progress for {0}', [silence]);
+}
+
+/** Hover text of a character out of quota. */
+export function quotaSleepText(resetsAt: number | undefined, now: number): string {
+  return resetsAt && resetsAt > now ? tr('Out of quota, back in {0}', [formatDuration(resetsAt - now)]) : tr('Out of quota');
 }
 
 /** Waiting bubble text: reason only (yellow and ✋ already convey "needs you"). */
@@ -235,6 +252,8 @@ export class Overlay {
   private ox = 0;
   private oy = 0;
   private zoom = 1;
+  /** "Boss overloaded" thresholds (Settings). */
+  private thresholds: LoadThresholds | undefined;
 
   constructor(
     private readonly ctx: CanvasRenderingContext2D,
@@ -308,6 +327,7 @@ export class Overlay {
     const dpr = camera.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.textBaseline = 'middle';
+    this.thresholds = opts.overload;
     this.placed.length = 0;
     const t = camera.transform();
     this.k = t.scale / dpr;
@@ -409,6 +429,7 @@ export class Overlay {
     }
     this.drawChats(now);
     this.drawFloaters(now);
+    this.drawQuotaSleep();
     ctx.textBaseline = 'alphabetic';
   }
 
@@ -791,6 +812,8 @@ export class Overlay {
       const a = Math.min(1, (now - ch.sayAt) / 120, (ch.sayUntil - now) / 300);
       return this.takeBubble(ch, head, sayIcon(ch.sayText), ch.sayText, 'say', 55, a, ch.sayAt);
     }
+    if (ch.info.ghost && selected) return this.takeBubble(ch, head, '👻', ghostText(ch.info.ghost, now), 'info', 80, 1, ch.activityChangedAt);
+    if (outOfQuota(ch) && selected) return this.takeBubble(ch, head, '💤', quotaSleepText(ch.energy?.resetsAt, now), 'info', 80, 1, ch.activityChangedAt);
     const act = ch.info.activity;
     if (ch.mode === 'shell' && ch.shellSince > 0 && !ch.leaving) {
       const sb = this.shellBubble(ch, head, now, opts, selected, hovered);
@@ -965,6 +988,28 @@ export class Overlay {
       ctx.fillText(b.fitted, tx, y + h / 2 + 1);
     }
     ctx.restore();
+  }
+
+  /**
+   * 💤 over whoever ran out of quota: steady, centered on the head, drifting slowly. The session-overload one sits beside
+   * the head and takes turns with 😵 (drawLabel), and the long-idle nap has the pixel "zzz" icon.
+   */
+  private drawQuotaSleep(): void {
+    if (this.zoom < TINY_ZOOM) return;
+    const { ctx } = this;
+    const scale = Math.max(1, this.zoom / 2);
+    for (const ch of this.sim.chars.values()) {
+      if (!outOfQuota(ch) || ch.pose !== 'sleep' || ch.leaving) continue;
+      const head = this.renderer.heads.get(ch.id);
+      if (!head || !head.visible) continue;
+      ctx.globalAlpha = 1 - CHAR_FADE * this.renderer.dim.charLevel(ch.id);
+      ctx.font = `${Math.round(10 * scale)}px sans-serif`;
+      ctx.textAlign = 'center';
+      // (above the crown)
+      ctx.fillText('💤', this.sx(head.x), this.sy(head.y) - ((ch.info.boss ? 15 : 7) + Math.sin(this.sim.now / 900)) * scale);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
   }
 
   /** Mini-bubbles for conversations (emoji only). */
@@ -1157,9 +1202,10 @@ export class Overlay {
       ctx.textAlign = 'left';
     }
     // A Claude Code session with a long context or compacted (shared/overload.ts): a drop of sweat when tired,
-    // 😵 and 💤 taking turns when overloaded. Only on main sessions, nothing in the compact label.
-    if (ch.info.kind === 'main' && (ch.info.provider ?? 'claude') === 'claude' && !l.compact) {
-      const level = sessionLoad(ch.info).level;
+    // 😵 and 💤 taking turns when overloaded. Only on main sessions, nothing in the compact label, and nothing beside the
+    // other sleep (out of quota, drawQuotaSleep).
+    if (ch.info.kind === 'main' && (ch.info.provider ?? 'claude') === 'claude' && !l.compact && !outOfQuota(ch)) {
+      const level = sessionLoad(ch.info, this.thresholds).level;
       if (level !== 'ok') {
         const icon = level === 'tired' ? '💦' : Math.floor(this.sim.now / 1_500) % 2 ? '💤' : '😵';
         ctx.font = `${Math.round(10 * Math.max(1, this.zoom / 2))}px sans-serif`;

@@ -2,6 +2,7 @@
 // Source watchers (sources/watcher.ts) call mutation methods; the SSE hub
 // calls commit() (throttled) to obtain the new snapshot, feed, and pending notices.
 import type {
+  AgentGhost,
   AccountInfo,
   Activity,
   AgentDetail,
@@ -685,6 +686,15 @@ export class Office {
     const rec = this.agents.get(id);
     if (!rec || JSON.stringify(rec.info.agyDefaults ?? {}) === JSON.stringify(d)) return;
     rec.info.agyDefaults = d;
+    this.markDirty();
+  }
+
+  /** A worker that looks hung, or not any more (AgentInfo.ghost). */
+  setGhost(id: string, ghost: AgentGhost | undefined): void {
+    const rec = this.agents.get(id);
+    if (!rec || JSON.stringify(rec.info.ghost) === JSON.stringify(ghost)) return;
+    if (ghost) rec.info.ghost = ghost;
+    else delete rec.info.ghost;
     this.markDirty();
   }
 

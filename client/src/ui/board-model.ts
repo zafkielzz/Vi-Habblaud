@@ -1,7 +1,7 @@
 // What the Board shows, from the snapshot (pure: tested in board-model.test.ts).
 // - The boss's to-do list: the "next steps" of the HANDOFF file in the office's folder (RoomInfo.plan), else in the
 //   boss's folder; without a boss (and a single office), the newest list of any room.
-// - The workers' jobs of the office shown (several offices: each job carries the office that gave it).
+// - The workers' jobs of the office shown (each job carries the office that gave it).
 // - Important news: failed jobs and quota hits today, and who needs you now (fixed rules, no tokens).
 import type { JobBoardItem, NewsItem, OfficeInfo, OfficeSnapshot, RoomInfo } from '../../../shared/types';
 import { jobInOffice, officeBoss, officePlan, roomTodo, teamOffices, type TodoList } from './offices';
@@ -29,10 +29,9 @@ export function bossPlan(snap: PlanSnap | null | undefined, office?: OfficeInfo)
   return any && roomTodo(any);
 }
 
-/** The jobs of the office shown (all of them with a single office). */
-export function officeItems<T extends Pick<JobBoardItem, 'office'>>(items: readonly T[], snap: Pick<OfficeSnapshot, 'team'> | null | undefined, office: OfficeInfo | undefined): T[] {
-  const offices = teamOffices(snap?.team);
-  return office && offices.length > 1 ? items.filter((it) => jobInOffice(it, office, offices)) : [...items];
+/** The jobs of the office shown: a job from anywhere else (another session or folder, no office) is not its business. */
+export function officeItems<T extends Pick<JobBoardItem, 'office'>>(items: readonly T[], office: OfficeInfo | undefined): T[] {
+  return items.filter((it) => jobInOffice(it, office));
 }
 
 /** The first room with a job board (the Antigravity workers room). */
@@ -44,9 +43,9 @@ export function boardRoom(snap: Pick<OfficeSnapshot, 'rooms'> | null | undefined
 export function importantNews(snap: Pick<OfficeSnapshot, 'agents' | 'news'> | null | undefined, now: number): Array<Pick<NewsItem, 'id' | 'at' | 'icon' | 'text'> & { detail?: string }> {
   const out: Array<Pick<NewsItem, 'id' | 'at' | 'icon' | 'text'> & { detail?: string }> = [];
   for (const n of snap?.news ?? []) {
-    if (n.kind !== 'failed' && n.kind !== 'quota' && n.kind !== 'rule') continue;
-    // a refusal says what was refused (otherwise several read the same: "acc2 stopped by the rules of X")
-    const text = n.kind === 'rule' && n.detail ? `${n.text} · ${n.detail}` : n.text;
+    if (n.kind !== 'failed' && n.kind !== 'quota' && n.kind !== 'rule' && n.kind !== 'ghost') continue;
+    // a refusal says what was refused (otherwise several read the same: "acc2 stopped by the rules of X"), a ghost its PID
+    const text = (n.kind === 'rule' || n.kind === 'ghost') && n.detail ? `${n.text} · ${n.detail}` : n.text;
     out.push({ id: n.id, at: n.at, icon: n.icon, text, ...(n.detail ? { detail: n.detail } : {}) });
   }
   for (const a of snap?.agents ?? []) {

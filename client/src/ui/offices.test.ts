@@ -88,12 +88,12 @@ describe('offices', () => {
     expect([...workerAgentIds({ sessions }, ['claude:.claude-w'])]).toEqual(['claude:w']);
   });
 
-  it('jobs: by office; a job without one counts for the first office', () => {
+  it('jobs: by office; a job without one belongs to no office', () => {
     const list = [office('a'), office('b')];
-    expect(jobInOffice({ office: 'b' }, list[1], list)).toBe(true);
-    expect(jobInOffice({ office: 'b' }, list[0], list)).toBe(false);
-    expect(jobInOffice({}, list[0], list)).toBe(true);
-    expect(jobInOffice({}, list[1], list)).toBe(false);
+    expect(jobInOffice({ office: 'b' }, list[1])).toBe(true);
+    expect(jobInOffice({ office: 'b' }, list[0])).toBe(false);
+    expect(jobInOffice({}, list[0])).toBe(false);
+    expect(jobInOffice({}, undefined)).toBe(true);
   });
 
   it("to-do list: the plan of the office's folder room, else of its folder (read by the server)", () => {

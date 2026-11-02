@@ -17,6 +17,26 @@ export interface LoadThresholds {
 
 export const DEFAULT_THRESHOLDS: LoadThresholds = { tired: 0.6, overloaded: 0.8, tiredCompacts: 1, overloadedCompacts: 2 };
 
+/** Limits of the two kinds of threshold (Settings). */
+export const SHARE_RANGE = { min: 0.1, max: 1 } as const;
+export const COMPACTS_RANGE = { min: 1, max: 99 } as const;
+
+/**
+ * Thresholds from Settings, field by field: what is missing or not a number falls back to its default, the rest is
+ * brought into range, and tired never starts after overloaded (it would never show).
+ */
+export function sanitizeThresholds(raw: unknown): LoadThresholds {
+  const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const d = DEFAULT_THRESHOLDS;
+  const share = (v: unknown, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(SHARE_RANGE.max, Math.max(SHARE_RANGE.min, v)) * 100) / 100 : fallback;
+  const compacts = (v: unknown, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(COMPACTS_RANGE.max, Math.max(COMPACTS_RANGE.min, v))) : fallback;
+  const overloaded = share(o.overloaded, d.overloaded);
+  const overloadedCompacts = compacts(o.overloadedCompacts, d.overloadedCompacts);
+  return { tired: Math.min(share(o.tired, d.tired), overloaded), overloaded, tiredCompacts: Math.min(compacts(o.tiredCompacts, d.tiredCompacts), overloadedCompacts), overloadedCompacts };
+}
+
 /**
  * Context window guessed from the model id, used only when the session did not report its own (AgentInfo.contextWindow):
  * 1M for the "[1m]" variants and the Claude 5 generation (Opus/Sonnet/Haiku 5.x, Fable, Mythos), otherwise 200k.

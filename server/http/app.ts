@@ -119,7 +119,7 @@ export interface ApiDeps {
     setRules?: (office: string | undefined, rules: unknown, rev: number) => TeamResult;
     proposeRule?: (office: string | undefined, p: { text: string; for?: RuleFor; why?: string; by?: string }) => TeamResult;
     decideRule?: (office: string | undefined, id: string, accept: boolean) => TeamResult;
-    /** GET /api/team/rules?office=&who=: what a script needs (agy-hub). */
+    /** GET /api/team/rules?office=&who=: what a script needs (tools/agy). */
     rulesView?: (office: string | undefined, who: 'boss' | 'workers') => { office: string; name: string; folder: string; rules: OfficeRules; text: string } | undefined;
   };
   /** Worker terminals (/api/workers/*, server/workers): jobs, cancel; this computer only. */

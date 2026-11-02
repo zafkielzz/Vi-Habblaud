@@ -20,6 +20,7 @@ import { maskSecrets, truncate } from '../../shared/activity';
 import { tr } from '../../shared/i18n';
 import { errMsg, log } from '../log';
 import type { Office } from '../model/office';
+import type { GhostCandidate } from './ghosts';
 import { agyTranscriptPath, agyTurn, claudeTranscriptPath, claudeTrusts, claudeTurn, type TurnState } from './turns';
 
 /** Characters of the answer sent back by default. */
@@ -45,7 +46,7 @@ export const TRUST_WAIT_MS = 15_000;
  */
 export const LEAN_TOOLS = 'Bash,Read,Edit,Write,WebFetch,WebSearch';
 
-/** --settings that make a Claude Code worker run agy-hub's rules-hook before the tools the office rules check. */
+/** --settings that make a Claude Code worker run tools/agy's rules-hook before the tools the office rules check. */
 export function rulesHookSettings(hook: string): string {
   const command = /^[\w./~-]+$/.test(hook) ? hook : `'${hook.replace(/'/g, "'\\''")}'`;
   return JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|Bash', hooks: [{ type: 'command', command, timeout: 10 }] }] } });
@@ -122,7 +123,7 @@ export interface WorkerServiceOptions {
   targets: () => WorkerTarget[];
   agyBin: string;
   claudeBin: string;
-  /** agy-hub bin/rules-hook: a Claude worker's job for an office runs it as its PreToolUse hook (office rules). */
+  /** tools/agy/bin/rules-hook: a Claude worker's job for an office runs it as its PreToolUse hook (office rules). */
   rulesHook?: string;
   /** Folder of a job without `cwd` (the workers room). */
   room: string;
@@ -157,6 +158,8 @@ interface Job extends WorkerJob {
   known?: Set<string>;
   deadline: number;
   size: number;
+  /** Last time its conversation grew (its start until then): the ghost check. */
+  progressAt: number;
   turn?: TurnState;
 }
 
@@ -239,6 +242,14 @@ export class WorkerService {
     return false;
   }
 
+  /** Running jobs and their last sign of life, for the ghost check (server/workers/ghosts.ts). */
+  ghostCandidates(): GhostCandidate[] {
+    return [...this.sessions.values()].flatMap((s) => {
+      const j = s.job;
+      return j && live(j) && j.ptyPid !== undefined ? [{ agentId: j.agentId, name: s.t.name, pid: j.ptyPid, lastSign: j.progressAt }] : [];
+    });
+  }
+
   // ------------------------------------------------------------------ jobs
 
   async ask(input: AskInput): Promise<AskResult> {
@@ -264,6 +275,7 @@ export class WorkerService {
       cwd: input.cwd ?? this.opts.room,
       deadline: now + JOB_TIMEOUT_MS,
       size: -1,
+      progressAt: now,
     };
     if (input.role) job.role = input.role;
     if (input.mode && input.mode !== 'default') job.mode = input.mode;
@@ -421,6 +433,7 @@ export class WorkerService {
     }
     if (size === j.size) return;
     j.size = size;
+    j.progressAt = this.now();
     const turn = s.t.kind === 'agy' ? agyTurn(readFileSync(path, 'utf8')) : claudeTurn(readFileSync(path, 'utf8'));
     j.turn = turn;
     if (turn.ended) {

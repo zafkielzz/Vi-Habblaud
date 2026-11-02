@@ -56,7 +56,7 @@ loading the module; nothing outside this list is called):
 
 In plain words: writes a single file (usage), communicates only with `127.0.0.1`, reads six environment variables and
 does not read messages. It makes decisions only for **office rules**, and only while the session is the boss of an
-office: it runs agy-hub's `rules-hook` (`HABBLAUD_RULES_HOOK`, else `~/.local/bin/rules-hook`; ~20 ms) at the session
+office: it runs `tools/agy/bin/rules-hook` (`HABBLAUD_RULES_HOOK`, else `~/.local/bin/rules-hook`; ~20 ms) at the session
 start and on each prompt (`rules-hook boss`); the rules for the boss go with the first prompt, and again when the user
 changes them, as context for the model; each Edit/Write/MultiEdit/NotebookEdit/Read/Grep/Glob/Bash call is checked by
 the same script and denied with its reason when it breaks the rules. Without `rules-hook`, on an error or after 3 s,
