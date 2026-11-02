@@ -5,7 +5,7 @@ import { resolveWorldTheme } from './theme';
 const d = (m: number, day: number, h = 12) => new Date(2026, m - 1, day, h);
 
 describe('resolveWorldTheme', () => {
-  it('escolha fixa vai como está', () => {
+  it('a fixed choice goes as is', () => {
     for (const t of ['none', 'halloween', 'christmas'] as const) expect(resolveWorldTheme(t, d(7, 1))).toBe(t);
   });
 

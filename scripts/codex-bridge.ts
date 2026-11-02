@@ -1,21 +1,21 @@
-// Auxiliar do Habblaud para as mensagens ao Codex quando o Habblaud roda no Docker. Roda no HOST (Mac), com tsx:
+// Habblaud helper for messages to Codex when Habblaud runs in Docker. Runs on the HOST (Mac), with tsx:
 //
-//   npm run codex:bridge     (opções: --port <n>, --once)
+//   npm run codex:bridge     (options: --port <n>, --once)
 //
-// As mensagens ao Codex entram na sessão por `codex queue --thread <threadId> --message <texto>`, que precisa rodar no
-// Mac (é aqui que estão o Codex e as pastas das contas); no Docker o servidor não alcança o binário. Este processo, a
-// cada 2 s, pergunta ao Habblaud se há mensagens para as sessões do Codex (POST /api/codex/bridge/poll), roda o
-// comando para cada uma, na ordem, com o CODEX_HOME da conta, e confirma o resultado (POST /api/codex/bridge/ack).
-// Enquanto ele roda, o escritório deixa mandar mensagens aos agentes do Codex (o Habblaud o considera presente por até
-// 10 s depois da última rodada). Fora do Docker não precisa dele: o próprio servidor roda o comando.
+// Messages to Codex enter the session via `codex queue --thread <threadId> --message <text>`, which must run on the
+// host (where Codex and account folders reside); inside Docker the server cannot reach the binary. Every 2 s, this
+// process polls Habblaud for messages destined for Codex sessions (POST /api/codex/bridge/poll), runs the command
+// for each in order with the account's CODEX_HOME, and acknowledges the result (POST /api/codex/bridge/ack). While
+// running, the office allows sending messages to Codex agents (Habblaud considers it present up to 10 s after the
+// last round). Outside Docker it is not needed: the server itself runs the command.
 //
-// Binário: HABBLAUD_CODEX_BIN ou `codex` do PATH. Nunca roda o Codex com -c, --enable, --disable nem --no-daemon, e
-// confere cada mensagem antes (id de thread, pasta do Codex que existe). O texto das mensagens nunca vai para a tela.
-// Também começa os agentes novos pedidos no escritório (com HABBLAUD_PTY=1 no Habblaud; anexos gravados em
-// ~/.habblaud/attachments/), lê os arquivos das entregas (só de pastas de projeto conhecidas, da pasta temporária e dos
-// anexos) e transcreve o ditado com o Whisper local (whisper-cli + ffmpeg + modelo; ver server/dictation/whisper.ts).
-// Arquivos e ditado usam rodadas com espera: o Habblaud só responde quando chega trabalho (ou a cada 20 s).
-// Ctrl+C para parar.
+// Binary: HABBLAUD_CODEX_BIN or `codex` in PATH. Never runs Codex with -c, --enable, --disable or --no-daemon, and
+// verifies each message first (thread id, existing Codex folder). Message text is never printed to the screen.
+// Also starts new agents requested in the office (with HABBLAUD_PTY=1 in Habblaud; attachments saved to
+// ~/.habblaud/attachments/), reads delivery files (only from known project folders, temp folder, and attachments),
+// and transcribes dictation with local Whisper (whisper-cli + ffmpeg + model; see server/dictation/whisper.ts).
+// Files and dictation use long-polling rounds: Habblaud only responds when work arrives (or every 20 s).
+// Ctrl+C to stop.
 import { statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,14 +32,14 @@ import { HOST_WAIT_MS } from '../server/host-wait';
 import { readFileSync } from 'node:fs';
 
 export const DEFAULT_PORT = 4747;
-/** Intervalo entre as rodadas. */
+/** Interval between polling rounds. */
 export const POLL_MS = 2_000;
-/** Pausa mínima entre rodadas com espera (Habblaud antigo, que responde na hora) e depois de uma recusa. */
+/** Minimum pause between long-poll rounds (older Habblaud, which responds immediately) and after a refusal. */
 export const WAIT_ROUND_MIN_MS = 500;
 export const REFUSED_RETRY_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 5_000;
 
-const USAGE = tr('Uso: npm run codex:bridge [-- opções]\n\nEntrega as mensagens do escritório às sessões do Codex quando o Habblaud roda no Docker (deixe rodando no computador).\n\nOpções:\n  --port <n>   porta do Habblaud (padrão: HABBLAUD_PORT ou {0})\n  --once       faz uma rodada só e sai\n  -h, --help   mostra esta ajuda\n\nBinário do Codex: HABBLAUD_CODEX_BIN ou `codex` do PATH.', [DEFAULT_PORT]);
+const USAGE = tr('Usage: npm run codex:bridge [-- options]\n\nDelivers office messages to Codex sessions when Habblaud runs in Docker (keep it running on the computer).\n\nOptions:\n  --port <n>   Habblaud port (default: HABBLAUD_PORT or {0})\n  --once       runs a single pass and exits\n  -h, --help   shows this help\n\nCodex binary: HABBLAUD_CODEX_BIN or `codex` from PATH.', [DEFAULT_PORT]);
 
 export interface BridgeMessage {
   id: string;
@@ -53,7 +53,7 @@ export interface BridgeResult {
   id: string;
   ok: boolean;
   error?: string;
-  /** Agentes novos: rodando em segundo plano (`cli`) ou na tela do app esperando o Enter (`app`). */
+  /** New agents: running in background (`cli`) or on app screen waiting for Enter (`app`). */
   how?: SpawnHow;
   note?: string;
 }
@@ -76,8 +76,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     if (a === '--once') once = true;
     else if (a === '--port') {
       port = Number(argv[++i]);
-      if (!Number.isInteger(port) || port <= 0 || port >= 65_536) throw new FatalError(tr('--port precisa de um número entre 1 e 65535.'));
-    } else throw new FatalError(tr('opção desconhecida: {0}\n\n{1}', [a, USAGE]));
+      if (!Number.isInteger(port) || port <= 0 || port >= 65_536) throw new FatalError(tr('--port needs a number between 1 and 65535.'));
+    } else throw new FatalError(tr('unknown option: {0}\n\n{1}', [a, USAGE]));
   }
   return { port, once };
 }
@@ -91,21 +91,21 @@ function isDir(p: string): boolean {
 }
 
 /**
- * Confere uma mensagem vinda do Habblaud antes de rodar o comando: id, texto, id de thread (UUID) e uma pasta do
- * Codex que existe neste computador (nunca uma do Claude Code). Devolve a mensagem ou o motivo da recusa.
+ * Validates a message from Habblaud before running the command: id, text, thread id (UUID) and an existing
+ * Codex folder on this computer (never a Claude Code one). Returns the message or refusal reason.
  */
 export function checkMessage(raw: unknown): BridgeMessage | { id?: string; error: string } {
   const r = rec(raw);
   const id = typeof r?.id === 'string' && r.id.trim() ? r.id : undefined;
-  if (!r || !id) return { error: tr('mensagem sem id') };
-  if (typeof r.text !== 'string' || !r.text.trim()) return { id, error: tr('mensagem vazia') };
-  if (typeof r.thread !== 'string' || !THREAD_ID.test(r.thread)) return { id, error: tr('id de thread do Codex inválido') };
+  if (!r || !id) return { error: tr('message without id') };
+  if (typeof r.text !== 'string' || !r.text.trim()) return { id, error: tr('empty message') };
+  if (typeof r.thread !== 'string' || !THREAD_ID.test(r.thread)) return { id, error: tr('invalid Codex thread id') };
   const home = typeof r.codexHome === 'string' ? r.codexHome : '';
-  if (!home || !isAbsolute(home) || !isDir(home) || isClaudeDir(home)) return { id, error: tr('a pasta do Codex {0} não existe neste computador', [home || tr('(vazia)')]) };
+  if (!home || !isAbsolute(home) || !isDir(home) || isClaudeDir(home)) return { id, error: tr("the Codex folder {0} doesn't exist on this computer", [home || tr('(empty)')]) };
   return { id, account: typeof r.account === 'string' ? r.account : '', codexHome: resolve(home), thread: r.thread, text: r.text };
 }
 
-/** POST JSON ao Habblaud local; null = fora do ar, tempo esgotado ou resposta ilegível. */
+/** POST JSON to local Habblaud; null = unreachable, timed out, or unreadable response. */
 export type Post = (path: string, body: unknown) => Promise<{ status: number; json: unknown } | null>;
 
 export function httpPost(port: number, timeoutMs = REQUEST_TIMEOUT_MS): Post {
@@ -113,7 +113,7 @@ export function httpPost(port: number, timeoutMs = REQUEST_TIMEOUT_MS): Post {
     try {
       const res = await fetch(`http://127.0.0.1:${port}${path}`, {
         method: 'POST',
-        // O guard do Habblaud exige JSON em todo POST da API (mesmo o corpo vazio da rodada).
+        // Habblaud's guard requires JSON on every API POST (even the empty round body).
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
@@ -137,7 +137,7 @@ export type RoundResult =
   | { state: 'refused'; status: number; error?: string }
   | { state: 'ok'; results: BridgeResult[] };
 
-/** Uma rodada: busca as mensagens, roda `codex queue` para cada uma (na ordem) e confirma cada resultado. Nunca lança. */
+/** One round: polls messages, runs `codex queue` for each (in order), and confirms results. Never throws. */
 export async function round(post: Post, run: CodexQueueRunner, log: (line: string) => void = () => {}): Promise<RoundResult> {
   const polled = await post('/api/codex/bridge/poll', {});
   if (!polled) return { state: 'down' };
@@ -155,7 +155,7 @@ export async function round(post: Post, run: CodexQueueRunner, log: (line: strin
         results.push(result);
         await post('/api/codex/bridge/ack', { results: [result] });
       }
-      log(tr('✗ mensagem recusada: {0}', [m.error]));
+      log(tr('✗ message rejected: {0}', [m.error]));
       continue;
     }
     let r: CodexQueueResult;
@@ -167,50 +167,50 @@ export async function round(post: Post, run: CodexQueueRunner, log: (line: strin
     const result = r.ok ? { id: m.id, ok: true } : { id: m.id, ok: false, error: r.error };
     results.push(result);
     await post('/api/codex/bridge/ack', { results: [result] });
-    log(r.ok ? tr('✓ mensagem na fila do thread {0}… ({1})', [m.thread.slice(0, 8), m.account || 'Codex']) : `✗ thread ${m.thread.slice(0, 8)}…: ${r.error}`);
+    log(r.ok ? tr('✓ message queued for thread {0}… ({1})', [m.thread.slice(0, 8), m.account || 'Codex']) : `✗ thread ${m.thread.slice(0, 8)}…: ${r.error}`);
   }
   return { state: 'ok', results };
 }
 
-/** Anexos de um pedido vindo do Habblaud: nomes seguros, base64 válido, tamanho e quantidade no limite. */
+/** Attachments of request from Habblaud: safe names, valid base64, size and count within limits. */
 export function checkFiles(raw: unknown): Attachment[] | { error: string } {
   if (raw === undefined) return [];
-  if (!Array.isArray(raw) || raw.length > ATTACHMENTS_PER_SPAWN) return { error: tr('anexos inválidos') };
+  if (!Array.isArray(raw) || raw.length > ATTACHMENTS_PER_SPAWN) return { error: tr('invalid attachments') };
   const out: Attachment[] = [];
   for (const f of raw) {
     const r = rec(f);
-    if (!r || typeof r.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) return { error: tr('anexo ilegível') };
+    if (!r || typeof r.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) return { error: tr('unreadable attachment') };
     const data = Buffer.from(r.data, 'base64');
-    if (!data.length || data.length > ATTACHMENT_MAX_BYTES) return { error: tr('anexo vazio ou grande demais') };
+    if (!data.length || data.length > ATTACHMENT_MAX_BYTES) return { error: tr('attachment empty or too large') };
     out.push({ name: safeFileName(typeof r.name === 'string' ? r.name : 'arquivo'), type: typeof r.type === 'string' ? r.type : '', data });
   }
   return out;
 }
 
-/** Linha do log de um agente novo que abriu: uma frase inteira por caso (anexos e nota), para traduzir. */
+/** Log line for a newly opened agent: a full sentence per case (attachments and note), for translation. */
 function spawnedLine(folder: string, how: SpawnHow, files: number, note?: string): string {
   if (how === 'cli') {
-    if (!files) return tr('✓ agente novo rodando em segundo plano em {0}', [folder]);
+    if (!files) return tr('✓ new agent in {0} running in the background', [folder]);
     return files > 1
-      ? tr('✓ agente novo rodando em segundo plano em {0} com {1} anexos', [folder, files])
-      : tr('✓ agente novo rodando em segundo plano em {0} com 1 anexo', [folder]);
+      ? tr('✓ new agent in {0} running in the background with {1} attachments', [folder, files])
+      : tr('✓ new agent in {0} running in the background with 1 attachment', [folder]);
   }
   if (note) {
-    if (!files) return tr('✓ agente novo aberto no app do Claude em {0} (não rodou sozinho: {1})', [folder, note]);
+    if (!files) return tr("✓ new agent in {0} opened in the Claude app (didn't run on its own: {1})", [folder, note]);
     return files > 1
-      ? tr('✓ agente novo aberto no app do Claude em {0} com {1} anexos (não rodou sozinho: {2})', [folder, files, note])
-      : tr('✓ agente novo aberto no app do Claude em {0} com 1 anexo (não rodou sozinho: {1})', [folder, note]);
+      ? tr("✓ new agent in {0} opened in the Claude app with {1} attachments (didn't run on its own: {2})", [folder, files, note])
+      : tr("✓ new agent in {0} opened in the Claude app with 1 attachment (didn't run on its own: {1})", [folder, note]);
   }
-  if (!files) return tr('✓ agente novo aberto no app do Claude em {0}', [folder]);
+  if (!files) return tr('✓ new agent in {0} opened in the Claude app', [folder]);
   return files > 1
-    ? tr('✓ agente novo aberto no app do Claude em {0} com {1} anexos', [folder, files])
-    : tr('✓ agente novo aberto no app do Claude em {0} com 1 anexo', [folder]);
+    ? tr('✓ new agent in {0} opened in the Claude app with {1} attachments', [folder, files])
+    : tr('✓ new agent in {0} opened in the Claude app with 1 attachment', [folder]);
 }
 
 /**
- * Agentes novos pelo escritório: busca os pedidos (POST /api/host/spawn/poll), confere cada um (pasta que existe
- * aqui), roda em segundo plano com o `claude --bg` (com `cli`) ou, se não der, monta o link claude://code/new ele
- * mesmo e abre o app do Claude; confirma em /api/host/spawn/ack. Nunca lança.
+ * New agents via the office: polls requests (POST /api/host/spawn/poll), validates each (folder exists locally),
+ * runs in background with `claude --bg` (with `cli`) or falls back to building claude://code/new link and opening
+ * the Claude app; confirms at /api/host/spawn/ack. Never throws.
  */
 export async function spawnRound(
   post: Post,
@@ -232,8 +232,8 @@ export async function spawnRound(
     const files = checkFiles(rec(raw)?.files);
     const bad = 'error' in req ? req.error : 'error' in files ? files.error : problem(req.folder);
     if (bad || 'error' in req || 'error' in files) {
-      results.push({ id, ok: false, error: bad ?? tr('pedido inválido') });
-      log(tr('✗ agente novo recusado: {0}', [bad]));
+      results.push({ id, ok: false, error: bad ?? tr('invalid request') });
+      log(tr('✗ new agent rejected: {0}', [bad]));
       continue;
     }
     let r: { ok: true; how: SpawnHow; note?: string } | { ok: false; error: string };
@@ -244,15 +244,15 @@ export async function spawnRound(
       r = { ok: false, error: String((err as Error)?.message ?? err) };
     }
     results.push(r.ok ? { id, ok: true, how: r.how, ...(r.note ? { note: r.note } : {}) } : { id, ok: false, error: r.error });
-    log(!r.ok ? tr('✗ agente novo em {0}: {1}', [req.folder, r.error]) : spawnedLine(req.folder, r.how, files.length, r.note));
+    log(!r.ok ? tr('✗ new agent in {0}: {1}', [req.folder, r.error]) : spawnedLine(req.folder, r.how, files.length, r.note));
   }
   if (results.length) await post('/api/host/spawn/ack', { results });
   return { state: 'ok', results };
 }
 
 /**
- * Ditado: busca os áudios (POST /api/host/dictation/poll), transcreve cada um com o Whisper local e devolve o texto e
- * o idioma em /api/host/dictation/ack. O texto nunca vai para a tela. Nunca lança.
+ * Dictation: polls audio clips (POST /api/host/dictation/poll), transcribes each with local Whisper, and returns
+ * text and language to /api/host/dictation/ack. Text is never logged to screen. Never throws.
  */
 export async function dictationRound(post: Post, transcribe: Transcriber, log: (line: string) => void = () => {}, opts: { wait?: boolean } = {}): Promise<RoundResult> {
   const polled = await post(`/api/host/dictation/poll${opts.wait ? '?wait=1' : ''}`, {});
@@ -265,18 +265,18 @@ export async function dictationRound(post: Post, transcribe: Transcriber, log: (
     const id = typeof r?.id === 'string' ? r.id : '';
     if (!id) continue;
     if (typeof r?.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) {
-      results.push({ id, ok: false, error: tr('áudio ilegível') });
+      results.push({ id, ok: false, error: tr('unreadable audio') });
       continue;
     }
     const started = Date.now();
     try {
       const t = await transcribe(Buffer.from(r.data, 'base64'), typeof r.type === 'string' ? r.type : '');
       results.push({ id, ok: true, text: t.text, lang: t.lang });
-      log(tr('✓ ditado transcrito ({0}, {1} s)', [t.lang || '?', ((Date.now() - started) / 1000).toFixed(1)]));
+      log(tr('✓ dictation transcribed ({0}, {1} s)', [t.lang || '?', ((Date.now() - started) / 1000).toFixed(1)]));
     } catch (err) {
-      const error = (err as Error)?.message || tr('o Whisper falhou');
+      const error = (err as Error)?.message || tr('Whisper failed');
       results.push({ id, ok: false, error });
-      log(tr('✗ ditado: {0}', [error]));
+      log(tr('✗ dictation: {0}', [error]));
     }
   }
   if (results.length) await post('/api/host/dictation/ack', { results });
@@ -284,9 +284,9 @@ export async function dictationRound(post: Post, transcribe: Transcriber, log: (
 }
 
 /**
- * Arquivos das entregas: busca os caminhos pedidos (POST /api/host/files/poll), confere cada um com checkFile (tipo de
- * ver, nada com cara de segredo, até 25 MB, links resolvidos) e com `inside` (pastas que pode ler) e devolve o conteúdo
- * em /api/host/files/ack. Nunca lança.
+ * Delivery files: polls requested paths (POST /api/host/files/poll), validates each with checkFile (safe type,
+ * no secrets, up to 25 MB, resolved symlinks) and `inside` (allowed folders), and returns content to
+ * /api/host/files/ack. Never throws.
  */
 export async function filesRound(
   post: Post,
@@ -305,23 +305,23 @@ export async function filesRound(
     const id = typeof r?.id === 'string' ? r.id : '';
     if (!id) continue;
     const checked = check(typeof r?.path === 'string' ? r.path : '');
-    const c = 'error' in checked || !opts.inside || opts.inside(checked.path) ? checked : { error: tr('fora das pastas de projeto conhecidas') };
+    const c = 'error' in checked || !opts.inside || opts.inside(checked.path) ? checked : { error: tr('outside the known project folders') };
     if ('error' in c) {
       results.push({ id, ok: false, error: c.error });
-      log(tr('✗ arquivo de entrega recusado: {0}', [c.error]));
+      log(tr('✗ delivery file rejected: {0}', [c.error]));
       continue;
     }
     try {
       results.push({ id, ok: true, data: read(c.path).toString('base64') });
     } catch {
-      results.push({ id, ok: false, error: tr('arquivo ilegível') });
+      results.push({ id, ok: false, error: tr('unreadable file') });
     }
   }
   if (results.length) await post('/api/host/files/ack', { results });
   return { state: 'ok', results: results.map(({ id, ok, error }) => ({ id, ok, ...(error ? { error } : {}) })) };
 }
 
-/** Repete uma rodada com espera: fora do ar, de 2 em 2 s; recusada (recurso desligado), a cada minuto. */
+/** Repeats a long-poll round: down, every 2 s; refused (feature disabled), every minute. */
 async function waitLoop(roundFn: () => Promise<RoundResult>): Promise<never> {
   for (;;) {
     const started = Date.now();
@@ -346,18 +346,18 @@ async function main(): Promise<void> {
   const log = (line: string) => console.log(`[codex-bridge] ${line}`);
   log(
     bin
-      ? tr('Entregando as mensagens do Habblaud (http://127.0.0.1:{0}) às sessões do Codex com {1}, e começando os agentes novos pedidos no escritório. Ctrl+C para parar.', [parsed.port, bin])
-      : tr('Sem o Codex (codex no PATH ou HABBLAUD_CODEX_BIN): só começo os agentes novos pedidos no Habblaud (http://127.0.0.1:{0}). Ctrl+C para parar.', [parsed.port]),
+      ? tr('Delivering Habblaud messages (http://127.0.0.1:{0}) to Codex sessions with {1}, and starting the new agents requested in the office. Ctrl+C to stop.', [parsed.port, bin])
+      : tr('No Codex (codex in PATH or HABBLAUD_CODEX_BIN): only starting the new agents requested in Habblaud (http://127.0.0.1:{0}). Ctrl+C to stop.', [parsed.port]),
   );
-  log(cli ? tr('Agentes novos rodam em segundo plano com {0} --bg (pasta confiável; senão, no app do Claude).', [claudeBin]) : tr('Sem o claude no PATH (ou HABBLAUD_CLAUDE_BIN): agentes novos abrem no app do Claude e esperam o Enter.'));
+  log(cli ? tr('New agents run in the background with {0} --bg (trusted folder; otherwise, in the Claude app).', [claudeBin]) : tr('No claude in PATH (or HABBLAUD_CLAUDE_BIN): new agents open in the Claude app and wait for Enter.'));
   const whisper = findWhisper(process.env);
   let transcribe: Transcriber | undefined;
-  if ('missing' in whisper) log(tr('Ditado desligado: falta {0}.', [whisper.missing]));
+  if ('missing' in whisper) log(tr('Dictation off: {0} is missing.', [whisper.missing]));
   else {
-    log(tr('Ditado: Whisper local ({0}), idiomas {1} detectados sozinhos.', [whisper.model.split('/').pop(), whisper.langs.join('/')]));
+    log(tr('Dictation: local Whisper ({0}), languages {1} auto-detected.', [whisper.model.split('/').pop(), whisper.langs.join('/')]));
     transcribe = createWhisperTranscriber(whisper);
   }
-  // Arquivos das entregas e ditado (a pessoa está esperando): rodadas com espera, cada uma no seu laço.
+  // Delivery files and dictation (user is waiting): long-poll rounds, each in its own loop.
   if (!parsed.once) {
     const waitPost = httpPost(parsed.port, HOST_WAIT_MS + 10_000);
     const accountDirs = discoverClaudeDirs(process.env);
@@ -370,7 +370,7 @@ async function main(): Promise<void> {
     }
   }
   let last = '';
-  // Agentes novos desligados no Habblaud (sem HABBLAUD_PTY=1): pergunta de novo só a cada minuto.
+  // New agents disabled in Habblaud (without HABBLAUD_PTY=1): poll again only once per minute.
   let spawnRetryAt = 0;
   let spawned: RoundResult = { state: 'ok', results: [] };
   for (;;) {
@@ -381,12 +381,12 @@ async function main(): Promise<void> {
     const r = run ? await round(post, run, log) : spawned;
     const state =
       r.state === 'down'
-        ? tr('Habblaud fora do ar em http://127.0.0.1:{0}; tentando de novo a cada {1} s.', [parsed.port, POLL_MS / 1_000])
+        ? tr('Habblaud is down at http://127.0.0.1:{0}; retrying every {1} s.', [parsed.port, POLL_MS / 1_000])
         : r.state === 'refused'
-          ? tr('o Habblaud recusou ({0}{1}).', [r.status, r.error ? `: ${r.error}` : ''])
+          ? tr('Habblaud refused ({0}{1}).', [r.status, r.error ? `: ${r.error}` : ''])
           : run
-            ? tr('conectado: os agentes do Codex já recebem mensagens pelo escritório.')
-            : tr('conectado ao Habblaud.');
+            ? tr('connected: Codex agents now receive messages from the office.')
+            : tr('connected to Habblaud.');
     if (state !== last) log(state);
     last = state;
     if (parsed.once) {
@@ -399,7 +399,7 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((err: unknown) => {
-    console.error(err instanceof FatalError ? tr('[codex-bridge] Erro: {0}', [err.message]) : tr('[codex-bridge] Erro inesperado: {0}', [String(err)]));
+    console.error(err instanceof FatalError ? tr('[codex-bridge] Error: {0}', [err.message]) : tr('[codex-bridge] Unexpected error: {0}', [String(err)]));
     process.exitCode = 1;
   });
 }

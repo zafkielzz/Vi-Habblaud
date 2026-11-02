@@ -1,7 +1,8 @@
-/* Interface do Habblaud: painéis escuros translúcidos sobre o escritório em pixel art.
-   Tipografia: logotipo em pixels (SVG); Pixelify Sans só em rótulos fixos de painel sem "C" maiúsculo nem
-   dígitos (na Pixelify o "C" parece "O" e o "5" parece "S"); system-ui para o corpo, nomes, letras de conta e números.
-   Identidade: detalhes "em pixel" (pontos de status quadrados, barras segmentadas de uso, ícones em pixels). */
+/* Habblaud interface: translucent dark panels over the pixel art office.
+   Typography: pixel logo (SVG); Pixelify Sans only on fixed panel labels without capital "C" or
+   digits (in Pixelify "C" looks like "O" and "5" looks like "S"); system-ui for body, names,
+   account letters and numbers.
+   Identity: "pixel" details (square status dots, segmented usage bars, pixel icons). */
 
 .ui-root {
   --ui-bg: rgba(18, 21, 29, 0.85);
@@ -12,14 +13,14 @@
   --ui-line-strong: rgba(160, 176, 210, 0.24);
   --ui-text: #e8ecf5;
   --ui-muted: #9aa4b8;
-  /* 5,4:1 sobre o painel (#161a23) e 4,8:1 sobre linhas em destaque: AA para texto pequeno. */
+  /* 5.4:1 over the panel (#161a23) and 4.8:1 over highlighted lines: AA for small text. */
   --ui-faint: #8790a6;
   --ui-accent: #7cc8ff;
   --ui-accent-soft: rgba(124, 200, 255, 0.13);
 
   --st-working: #4fd18b;
   --st-waiting: #ffb547;
-  /* Esperando o shell: turquesa (distinto do verde de "trabalhando" e do azul de "concluído"). */
+  /* Waiting for shell: turquoise (distinct from the green of "working" and the blue of "done"). */
   --st-shell: #3cd8d2;
   --st-idle: #8b98b3;
   --st-done: #6aa8ff;
@@ -35,7 +36,10 @@
 
   --radius: 10px;
   --radius-sm: 7px;
-  --top-h: 64px;
+  /* Office tabs (ui/office-tabs.ts), then the top bar under them; --top-h is where the panels start. */
+  --bar-h: 64px;
+  --status-h: 32px;
+  --top-h: calc(var(--bar-h) + var(--status-h));
   --gap: 10px;
   --side-w: 304px;
   --drawer-w: 380px;
@@ -43,7 +47,7 @@
   --feed-head: 38px;
   --feed-max: 700px;
   --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
-  /* Área livre do escritório (fora dos painéis), mantida pelo JS (ui/viewport.ts). */
+  /* Free area of the office (outside panels), maintained by JS (ui/viewport.ts). */
   --free-top: calc(var(--top-h) + var(--gap));
   --free-right: var(--gap);
   --free-bottom: calc(var(--feed-head) + var(--gap) * 2);
@@ -61,8 +65,8 @@
   box-sizing: border-box;
 }
 
-/* A Pixelify Sans junta "fi" numa ligadura que parece um "A" ("ConAgurações").
-   O atalho `font` zera as ligaduras a cada regra, por isso a desativação precisa vencer a cascata. */
+/* Pixelify Sans combines "fi" into a ligature that looks like an "A" ("ConAgurações").
+   The `font` shorthand resets ligatures on each rule, so disabling them must override the cascade. */
 .ui-root,
 .ui-root * {
   font-variant-ligatures: no-common-ligatures !important;
@@ -102,7 +106,7 @@
   border-radius: 6px;
 }
 
-/* Elementos que não devem capturar o mouse (o #ui libera ponteiro só para filhos diretos). */
+/* Elements that should not capture mouse events (#ui only enables pointer for direct children). */
 #ui > .ui-toasts,
 #ui > .ui-tip,
 #ui > .ui-sr,
@@ -110,12 +114,12 @@
   pointer-events: none;
 }
 
-/* Gaveta recém-aberta por um clique no canvas: deixa o 2º clique do duplo clique chegar ao escritório. */
+/* Drawer newly opened by a canvas click: lets the 2nd click of a double-click reach the office. */
 #ui > .ui-drawer.is-opening {
   pointer-events: none;
 }
 
-/* Sonda invisível que resolve as variáveis de tamanho dos painéis em px (ui/viewport.ts). */
+/* Invisible probe that resolves panel size variables in px (ui/viewport.ts). */
 .ui-probe {
   position: fixed;
   left: 0;
@@ -175,7 +179,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-/* ------------------------------------------------------------------ ícones e botões */
+/* ------------------------------------------------------------------ icons and buttons */
 
 .ui-px-icon {
   display: block;
@@ -302,7 +306,7 @@
   color: var(--ui-muted);
 }
 
-/* ------------------------------------------------------------------ peças: chip de conta, status, papel, progresso */
+/* ------------------------------------------------------------------ parts: account chip, status, role, progress */
 
 .ui-acc-chip {
   --acc: #8b98b3;
@@ -314,7 +318,7 @@
   border-radius: 4px;
   background: var(--acc);
   color: #12151d;
-  /* Fonte do sistema: a letra da conta precisa ser lida sem ambiguidade ("C" vs "O"). */
+  /* System font: the account letter must be read unambiguously ("C" vs "O"). */
   font: 800 10.5px/1 var(--font-ui);
   letter-spacing: 0;
   box-shadow:
@@ -339,8 +343,8 @@
     inset 0 2px 0 rgba(255, 255, 255, 0.35);
 }
 
-/* Conta do Codex: chip "vazado" (fundo escuro, borda e letra na cor da conta) com cantos em degrau, como um pixel
-   arredondado. Lê-se de longe como "outra ferramenta" sem precisar de logotipo. */
+/* Codex account: "hollow" chip (dark background, border and letter in account color) with stepped
+   corners, like a rounded pixel. Reads from afar as "another tool" without needing a logo. */
 .ui-acc-chip[data-provider='codex'] {
   --step: 2px;
   border-radius: 0;
@@ -365,7 +369,7 @@
   --step: 3px;
 }
 
-/* Selo de texto "Codex" ao lado do nome da conta (fonte do sistema: na Pixelify o "C" parece "O"). */
+/* "Codex" text badge next to the account name (system font: in Pixelify "C" looks like "O"). */
 .ui-prov {
   display: inline-flex;
   align-items: center;
@@ -590,17 +594,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ------------------------------------------------------------------ barra superior */
+/* ------------------------------------------------------------------ top bar */
 
 .ui-topbar {
   position: fixed;
-  inset: 0 0 auto 0;
-  /* Acima dos avisos: a dica de uso por conta abre sobre eles. */
+  inset: var(--status-h) 0 auto 0;
+  /* Above toasts: the per-account usage tip opens over them. */
   z-index: 55;
   display: flex;
   align-items: center;
   gap: 12px;
-  height: var(--top-h);
+  height: var(--bar-h);
   padding: 0 10px 0 8px;
   background: var(--ui-bg);
   -webkit-backdrop-filter: blur(14px) saturate(1.25);
@@ -648,7 +652,7 @@
   gap: 4px;
 }
 
-/* Logotipo em pixels: 47×8 px da placa da marca, em escala inteira (3×) para ficar nítido. */
+/* Pixel logo: 47×8 px brand badge, at integer scale (3×) to stay sharp. */
 .ui-brand__name {
   display: block;
   line-height: 0;
@@ -724,7 +728,7 @@
   padding-left: 2px;
 }
 
-/* Versão na barra superior: o número ou, com release mais nova no GitHub, o selo "Nova versão". */
+/* Version in the top bar: the number or, with a newer GitHub release, the "New version" badge. */
 .ui-version {
   display: inline-flex;
   align-items: center;
@@ -779,13 +783,13 @@
   }
 }
 
-/* Com o selo "Demonstração" não sobra espaço para o número (ele continua em Configurações › Sobre). */
+/* With the "Demo" badge there is no room left for the number (it remains in Settings › About). */
 .ui-topbar__status:has(.ui-demo-badge:not([hidden])) .ui-version:not(.is-new) {
   display: none;
 }
 
-/* Barra apertada (ou com o selo "Demonstração"): o selo fica só com a seta; a dica, o aviso e o ponto nas
-   configurações explicam. */
+/* Tight bar (or with "Demo" badge): badge keeps only the arrow; tooltip, toast, and settings
+   dot explain it. */
 .ui-topbar__status:has(.ui-demo-badge:not([hidden])) .ui-version.is-new {
   padding: 0 6px;
 }
@@ -804,7 +808,7 @@
   }
 }
 
-/* Ponto no botão de configurações enquanto há versão nova (vale também em telas estreitas). */
+/* Dot on settings button while there is a new version (also applies on narrow screens). */
 .ui-icon-btn.has-update {
   position: relative;
 }
@@ -823,7 +827,7 @@
     0 0 6px var(--st-working);
 }
 
-/* Contadores */
+/* Counters */
 .ui-counters {
   display: flex;
   align-items: stretch;
@@ -912,7 +916,7 @@
   }
 }
 
-/* Uso por conta */
+/* Usage by account */
 .ui-usage {
   display: flex;
   align-items: center;
@@ -921,405 +925,7 @@
   min-width: 0;
 }
 
-.ui-usage-card {
-  --acc: #8b98b3;
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 9px;
-  width: 310px;
-  flex: 0 1 auto;
-  /* Abaixo disso o cartão perderia o reinício; o e-mail some antes (consulta de contêiner abaixo). */
-  min-width: 188px;
-  padding: 5px 10px 5px 6px;
-  border-radius: 9px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--acc) 14%, transparent), transparent 46%),
-    var(--ui-bg-soft);
-  border: 1px solid var(--ui-line);
-  outline-offset: 2px;
-  cursor: default;
-}
-
-.ui-usage-card:hover,
-.ui-usage-card:focus-visible,
-.ui-usage-card:focus-within {
-  border-color: var(--ui-line-strong);
-}
-
-.ui-usage-card > .ui-acc-chip {
-  align-self: stretch;
-  width: 30px;
-  height: auto;
-  min-height: 30px;
-}
-
-/* Selo de "números antigos" sobre o chip: só no celular, onde o cabeçalho do cartão some. */
-.ui-usage-card__flag {
-  position: absolute;
-  left: 1px;
-  top: 1px;
-  display: none;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: #1a1f2b;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  color: #ffcf8a;
-}
-
-.ui-usage-card__flag .ui-px-icon {
-  width: 10px;
-  height: 10px;
-  border: 0;
-  background: none;
-}
-
-.ui-usage-card__body {
-  /* Contêiner: o conteúdo se adapta à largura do cartão (3 contas, telas médias). */
-  container: usage-card / inline-size;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.ui-usage-card__head {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  font-size: 11.5px;
-  line-height: 14px;
-}
-
-.ui-usage-card__name {
-  flex: none;
-  font-weight: 650;
-}
-
-.ui-usage-card__email {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ui-faint);
-  font-size: 11px;
-}
-
-.ui-usage-card__state {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: auto;
-  flex: none;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: rgba(255, 181, 71, 0.12);
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #ffcf8a;
-}
-
-/* Codex com números recentes: a idade fica à mostra, discreta (os números só se renovam com sessão rodando). */
-.ui-usage-card__state.is-fresh {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ui-muted);
-}
-
-.ui-usage-card__state-icon {
-  display: inline-grid;
-  align-self: center;
-}
-
-.ui-usage-card__state .ui-px-icon {
-  width: 10px;
-  height: 10px;
-  border: 0;
-  background: none;
-  color: inherit;
-}
-
-/* As duas linhas (5h e Semana) dividem as mesmas colunas (subgrid): barras alinhadas e a coluna do
-   reinício do tamanho do texto mais longo; quem cede espaço é a barra. */
-.ui-usage-card__meters {
-  display: grid;
-  grid-template-columns: 38px minmax(16px, 1fr) 32px auto;
-  column-gap: 6px;
-  row-gap: 1px;
-}
-
-/* Números antigos: barras e percentuais em cinza (legíveis), sem apagar o bloco inteiro. */
-.ui-usage-card__meters.is-dim .ui-meter {
-  --lv: #a3abbd;
-}
-
-.ui-usage-card__meters.is-dim .ui-meter__fill {
-  filter: none;
-  background: repeating-linear-gradient(90deg, rgba(163, 171, 189, 0.55) 0 4px, transparent 4px 5px);
-}
-
-.ui-meter {
-  --lv: var(--ui-faint);
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: subgrid;
-  align-items: center;
-  height: 15px;
-  font-size: 10.5px;
-}
-
-.ui-meter.is-ok {
-  --lv: var(--lv-ok);
-}
-
-.ui-meter.is-warn {
-  --lv: var(--lv-warn);
-}
-
-.ui-meter.is-crit {
-  --lv: var(--lv-crit);
-}
-
-.ui-meter__label {
-  color: var(--ui-muted);
-  white-space: nowrap;
-}
-
-.ui-meter__label-short,
-.ui-meter__reset-short {
-  display: none;
-}
-
-/* Barra segmentada (segmentos de 4 px + 1 px de vão). O preenchimento é arredondado para segmentos inteiros. */
-.ui-meter__bar {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 8px;
-  overflow: hidden;
-  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0 4px, transparent 4px 5px);
-}
-
-.ui-meter__fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: calc(var(--pct, 0) * 1%);
-  width: max(5px, round(down, calc(var(--pct, 0) * 1%), 5px));
-  background: repeating-linear-gradient(90deg, var(--lv) 0 4px, transparent 4px 5px);
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--lv) 70%, transparent));
-  transition: width 0.6s steps(6, end);
-}
-
-.ui-meter.is-zero .ui-meter__fill,
-.ui-meter.is-none .ui-meter__fill {
-  display: none;
-}
-
-.ui-meter__pct {
-  font: 650 11.5px/1 var(--font-ui);
-  color: var(--lv);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.ui-meter.is-none .ui-meter__pct {
-  color: var(--ui-muted);
-}
-
-.ui-meter__reset {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #b3bbcc;
-  font-variant-numeric: tabular-nums;
-}
-
-.ui-meter.is-renewed .ui-meter__reset {
-  color: var(--ui-muted);
-  font-style: italic;
-}
-
-/* Cartão estreito (3 contas, telas médias): some o e-mail (fica na dica), depois rótulos e reinício encurtam. */
-@container usage-card (max-width: 236px) {
-  .ui-usage-card__email {
-    display: none;
-  }
-}
-
-@container usage-card (max-width: 206px) {
-  .ui-usage-card__meters {
-    grid-template-columns: 30px minmax(14px, 1fr) 30px auto;
-    column-gap: 5px;
-  }
-
-  .ui-meter__label-long,
-  .ui-meter__reset-long {
-    display: none;
-  }
-
-  .ui-meter__label-short,
-  .ui-meter__reset-short {
-    display: inline;
-  }
-}
-
-/* Cartão minúsculo (4 ou mais contas em telas médias): sem a coluna do reinício (fica na dica). */
-@container usage-card (max-width: 123px) {
-  .ui-usage-card__meters {
-    grid-template-columns: 24px minmax(8px, 1fr) 30px;
-    column-gap: 4px;
-  }
-
-  .ui-meter__reset {
-    display: none;
-  }
-
-  /* A idade vira só o relógio (o texto continua na dica). */
-  .ui-usage-card__state > span:last-child {
-    display: none;
-  }
-}
-
-.ui-usage-card__msg {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 30px;
-  font-size: 11.5px;
-  color: var(--ui-muted);
-}
-
-.ui-usage-card__msg-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ui-usage-card__msg-short {
-  display: none;
-}
-
-/* Codex sem cota nem créditos: aviso (nunca uma barra em 0%). */
-.ui-usage-card__msg.is-noquota {
-  color: #ffb0a0;
-  font-weight: 650;
-}
-
-.ui-usage-card__how {
-  flex: none;
-  margin-left: auto;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: var(--ui-accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(124, 200, 255, 0.3);
-  color: var(--ui-accent);
-  font-size: 11px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.ui-usage-card__how:hover {
-  background: rgba(124, 200, 255, 0.2);
-}
-
-.ui-usage-card__how-short {
-  display: none;
-}
-
-@container usage-card (max-width: 206px) {
-  .ui-usage-card__msg-long,
-  .ui-usage-card__how-long {
-    display: none;
-  }
-
-  .ui-usage-card__msg-short,
-  .ui-usage-card__how-short {
-    display: inline;
-  }
-
-  .ui-usage-card__how {
-    padding: 0 7px;
-  }
-}
-
-/* Cartão minúsculo (3 contas no celular): fica só o botão, que já diz que falta ativar. */
-@container usage-card (max-width: 112px) {
-  .ui-usage-card__msg-text {
-    display: none;
-  }
-
-  .ui-usage-card__how {
-    margin-left: 0;
-  }
-}
-
-.ui-usage-tip {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 60;
-  width: 380px;
-  max-width: calc(100vw - 24px);
-  padding: 12px 14px;
-  border-radius: var(--radius);
-  background: var(--ui-bg-solid);
-  border: 1px solid var(--ui-line-strong);
-  box-shadow: 0 16px 40px rgba(5, 7, 12, 0.5);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-4px);
-  transition:
-    opacity 0.15s,
-    transform 0.15s,
-    visibility 0s linear 0.15s;
-  pointer-events: none;
-}
-
-.ui-usage-card:hover .ui-usage-tip,
-.ui-usage-card:focus-visible .ui-usage-tip {
-  opacity: 1;
-  visibility: visible;
-  transform: none;
-  transition-delay: 0.12s, 0.12s, 0s;
-}
-
-.ui-usage-tip__title {
-  margin-bottom: 8px;
-  font: 700 13.5px/1.25 var(--font-ui);
-}
-
-.ui-usage-tip .ui-kv dd {
-  text-align: left;
-}
-
-.ui-usage-tip__note {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--ui-line);
-  font-size: 11.5px;
-  color: #c9d1e2;
-}
-
-.ui-usage-tip__setup {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--ui-line);
-}
-
-.ui-usage-tip__setup-title {
-  margin-bottom: 6px;
-  font-size: 11.5px;
-  font-weight: 650;
-}
-
-/* Passo a passo para ligar o uso (dica do cartão e ajuda). */
+/* Step-by-step to enable usage (card tooltip and help). */
 .ui-usage-setup {
   display: flex;
   flex-direction: column;
@@ -1381,6 +987,266 @@
   align-items: center;
   gap: 8px;
   flex: none;
+  /* Tool buttons on the right edge (the counters stay with the brand). */
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------------ office tabs (ui/office-tabs.ts) */
+
+/* Above the top bar like a browser's tabs: the office shown is the tab that joins the bar below it. */
+.ui-offices {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 56;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: var(--status-h);
+  padding: 0 8px;
+  background: rgba(9, 11, 16, 0.92);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  font-size: 12px;
+  color: var(--ui-text);
+}
+
+.ui-offices[hidden] {
+  display: none;
+}
+
+/* No offices (demo, older server): the strip takes no room. */
+.ui-root:has(> .ui-offices[hidden]) {
+  --status-h: 0px;
+}
+
+.ui-offices__tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ui-offices__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  width: 180px;
+  min-width: 64px;
+  height: calc(var(--status-h) - 5px);
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: none;
+  color: var(--ui-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A thin divider between two tabs that are not the one shown (as in a browser). */
+.ui-offices__tab + .ui-offices__tab::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 25%;
+  height: 50%;
+  border-left: 1px solid var(--ui-line);
+}
+
+.ui-offices__tab:hover::before,
+.ui-offices__tab:hover + .ui-offices__tab::before,
+.ui-offices__tab.is-on::before,
+.ui-offices__tab.is-on + .ui-offices__tab::before {
+  border-left-color: transparent;
+}
+
+.ui-offices__tab:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+
+.ui-offices__tab.is-on {
+  color: var(--ui-text);
+  font-weight: 600;
+  background: var(--ui-bg);
+  box-shadow: inset 0 2px 0 var(--ui-accent);
+}
+
+.ui-offices__tab.is-nofolder .ui-offices__name {
+  font-style: italic;
+}
+
+.ui-offices__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-offices__add,
+.ui-offices__edit,
+.ui-offices__nofolder {
+  flex: none;
+  align-self: center;
+}
+
+.ui-offices__add,
+.ui-offices__edit {
+  color: var(--ui-muted);
+}
+
+.ui-offices__spacer {
+  flex: 1 1 0;
+}
+
+.ui-offices__nofolder {
+  padding: 2px 8px;
+  border: 1px dashed var(--ui-line-strong);
+  border-radius: 6px;
+  background: none;
+  color: var(--ui-muted);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ui-offices__nofolder:hover {
+  color: var(--ui-text);
+}
+
+/* The menu of an office tab (right click; ui/office-menu.ts): what the office is, then what to do with it. */
+.ui-officemenu {
+  position: fixed;
+  z-index: 70;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 4px 0;
+  border-radius: 10px;
+  background: var(--ui-bg-solid);
+  border: 1px solid var(--ui-line-strong);
+  box-shadow: 0 14px 40px rgba(5, 7, 12, 0.5);
+  color: var(--ui-text);
+  font: 13px/1.4 var(--font-ui);
+}
+
+.ui-officemenu[hidden] {
+  display: none;
+}
+
+.ui-officemenu__head {
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.ui-officemenu__name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-officemenu__folder {
+  margin: 1px 0 6px;
+  font: 11px/1.35 var(--font-mono);
+  word-break: break-all;
+}
+
+.ui-officemenu__row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ui-officemenu__label {
+  flex: none;
+  width: 64px;
+  color: var(--ui-muted);
+}
+
+.ui-officemenu__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-officemenu__items {
+  padding-top: 4px;
+}
+
+.ui-officemenu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-officemenu__item:hover,
+.ui-officemenu__item:focus-visible {
+  background: var(--ui-bg-hover);
+  outline: none;
+}
+
+.ui-officemenu__item[aria-disabled='true'] {
+  color: var(--ui-muted);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ui-officemenu__item.is-danger {
+  color: var(--ui-danger, #ff8a8a);
+}
+
+.ui-officemenu__sep {
+  margin: 4px 0;
+  border-top: 1px solid var(--ui-line);
+}
+
+.ui-offices__tab {
+  -webkit-touch-callout: none;
+}
+
+.ui-teamdlg__actions.ui-officedlg__actions {
+  justify-content: space-between;
+}
+
+.ui-officedlg__actions .ui-officedlg__delete {
+  color: var(--ui-danger, #ff8a8a);
+}
+
+.ui-teamdlg__actions.ui-officedlg__actions:has(> .ui-officedlg__delete[hidden]) {
+  justify-content: flex-end;
+}
+
+.ui-teamdlg__fixed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: var(--ui-bg-soft);
+  font-weight: 600;
+}
+
+.ui-teamdlg__fixed .ui-muted {
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.ui-spawn__folder:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ui-btn-group {
@@ -1393,7 +1259,7 @@
   border: 1px solid var(--ui-line);
 }
 
-/* ------------------------------------------------------------------ barra lateral */
+/* ------------------------------------------------------------------ sidebar */
 
 .ui-sidebar {
   position: fixed;
@@ -1493,43 +1359,6 @@
   outline: none;
 }
 
-.ui-acc-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ui-acc-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 9px 0 5px;
-  border-radius: 7px;
-  border: 1px solid var(--ui-line);
-  background: var(--ui-bg-soft);
-  font-size: 12px;
-  transition:
-    opacity 0.15s,
-    background-color 0.15s;
-}
-
-.ui-acc-filter:hover {
-  background: var(--ui-bg-hover);
-}
-
-.ui-acc-filter.is-off {
-  opacity: 0.45;
-}
-
-.ui-acc-filter.is-off .ui-acc-chip {
-  filter: grayscale(1);
-}
-
-.ui-acc-filter.is-off .ui-acc-filter__name {
-  text-decoration: line-through;
-}
-
 .ui-side__scroll {
   flex: 1;
   min-height: 0;
@@ -1615,33 +1444,219 @@
   text-align: center;
 }
 
-.ui-room__accs {
-  display: inline-flex;
-  gap: 3px;
-  margin-left: auto;
-  flex: none;
+/* Sidebar by role (ui/sidebar.ts): a plain heading (not a button), the boss in gold. */
+.ui-rolegroup__head {
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
-.ui-room__path {
+.ui-rolegroup__head:hover {
+  background: none;
+}
+
+.ui-rolegroup.is-boss {
+  border-color: rgba(242, 179, 61, 0.45);
+  background: rgba(242, 179, 61, 0.06);
+}
+
+.ui-rolegroup.is-boss .ui-room__head {
+  --room: #f2b33d;
+}
+
+.ui-rolegroup.is-workers .ui-room__head {
+  --room: #4fd18b;
+}
+
+.ui-rolegroup__note {
+  margin: 0;
+  padding: 0 10px 9px 14px;
+  font-size: 11.5px;
+  color: var(--ui-faint);
+}
+.ui-rolegroup__stepdown {
+  display: block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+/* ＋ of the Boss and Workers groups (ui/team-dialogs.ts), at the right end of the heading. */
+.ui-rolegroup__add {
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Others: a folding heading (a button). */
+.ui-rolegroup__toggle {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-rolegroup__toggle:hover {
+  background: var(--ui-bg-hover);
+}
+
+.ui-rolegroup.is-others .ui-room__head {
+  --room: #8b98b3;
+}
+
+.ui-rolegroup__chevron {
+  flex: none;
+  color: var(--ui-muted);
+  font-size: 11px;
+  transition: transform 0.15s;
+}
+
+.ui-rolegroup__toggle[aria-expanded='true'] .ui-rolegroup__chevron {
+  transform: rotate(90deg);
+}
+
+/* ＋ Boss / ＋ Workers dialog. */
+.ui-dialog.ui-teamdlg {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.ui-teamdlg__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px 18px;
+  overflow-y: auto;
+}
+
+.ui-teamdlg__intro,
+.ui-teamdlg__status {
+  margin: 0;
+}
+
+.ui-teamdlg__status:empty {
+  display: none;
+}
+
+.ui-teamdlg__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-teamdlg__label {
+  margin: 6px 0 0;
+  font-weight: 650;
+}
+
+.ui-teamdlg__accounts,
+.ui-teamdlg__free {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-teamdlg__account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-bg-soft);
+  color: var(--ui-text);
+  font: inherit;
+  text-align: left;
+}
+
+button.ui-teamdlg__account {
+  cursor: pointer;
+}
+
+button.ui-teamdlg__account:hover {
+  border-color: var(--ui-line-strong);
+}
+
+.ui-teamdlg__account.is-on {
+  border-color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 14%, transparent);
+}
+
+.ui-teamdlg__account-name {
+  font-weight: 600;
+}
+
+.ui-teamdlg__account-email {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Worker kind tag in ＋ Worker (Antigravity / Claude Code). */
+.ui-teamdlg__kind {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: rgba(79, 209, 139, 0.15);
+  color: #4fd18b;
+}
+
+.ui-teamdlg__kind.is-claude {
+  background: rgba(242, 140, 61, 0.15);
+  color: #f2a05d;
+}
+
+.ui-teamdlg__note {
+  margin: 0;
+  font-size: 12px;
+  color: #f2b33d;
+}
+
+/* "🖥 Terminal" in a worker's drawer (ui/agy-panel.ts). */
+.ui-workerterm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ui-workerterm__state {
+  margin: 0;
+}
+
+.ui-workerterm__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ui-teamdlg__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ui-teamdlg__actions .ui-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-teamdlg__actions:has(> [hidden]:only-child) {
+  display: none;
+}
+
+.ui-agent__place {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
   color: var(--ui-faint);
-}
-
-.ui-room__tasks {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.ui-room__tasks-text {
-  font-size: 10.5px;
-  color: var(--ui-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .ui-nodes {
@@ -1713,7 +1728,7 @@
   font-weight: 650;
 }
 
-/* O nome tem prioridade: o selo de papel encolhe com reticências. */
+/* Name has priority: role badge shrinks with ellipsis. */
 .ui-agent .ui-role {
   display: block;
   flex: 0 1 auto;
@@ -1732,7 +1747,7 @@
   color: #ffd08f;
 }
 
-/* Subagentes aninhados com linha conectora */
+/* Nested subagents with connecting line */
 .ui-subs {
   position: relative;
   margin: 0 0 4px 24px;
@@ -1802,7 +1817,7 @@
   font-size: 12.5px;
 }
 
-/* Entradas e saídas de itens */
+/* Item arrivals and departures */
 .is-entering {
   animation: ui-enter 0.32s var(--ease) both;
 }
@@ -1984,7 +1999,7 @@
   color: #ff9b8f;
 }
 
-/* ------------------------------------------------------------------ gaveta de detalhes */
+/* ------------------------------------------------------------------ details drawer */
 
 .ui-drawer {
   position: fixed;
@@ -2187,7 +2202,7 @@
   font-size: 12.5px;
 }
 
-/* Perguntas do AskUserQuestion dentro do alerta: só leitura, a resposta é dada no Claude Code. */
+/* AskUserQuestion questions inside alert: read-only, answer is provided in Claude Code. */
 .ui-ask {
   display: grid;
   gap: 10px;
@@ -2456,7 +2471,7 @@
   white-space: nowrap;
 }
 
-/* Visão da sala */
+/* Room view */
 .ui-room-hero {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -2477,7 +2492,7 @@
     0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
-/* Nome da sala com o lápis de renomear ao lado. */
+/* Room name with rename pencil next to it. */
 .ui-room-hero__title {
   display: flex;
   align-items: center;
@@ -2516,11 +2531,11 @@
   color: #c9d1e2;
 }
 
-/* ------------------------------------------------------------------ avisos (toasts) */
+/* ------------------------------------------------------------------ toasts */
 
-/* Canto inferior direito, à esquerda da gaveta: ao lado do feed quando sobra espaço (fora do prédio
-   enquadrado), senão logo acima dele. Não cobre a placa da sala em foco nem o popover de configurações.
-   Posição e largura calculadas em ui/viewport.ts. O mais novo fica embaixo, perto da borda. */
+/* Bottom right corner, left of drawer: next to feed when space allows (outside framed building),
+   otherwise right above it. Does not cover focused room sign or settings popover.
+   Position and width computed in ui/viewport.ts. Newest stays at bottom, near edge. */
 .ui-toasts {
   position: fixed;
   z-index: 50;
@@ -2543,8 +2558,8 @@
     visibility 0s linear 0.15s;
 }
 
-/* Durante o replay os avisos ficam acima da barra de reprodução (a altura dela vem de ui/timelapse.ts), em vez de
-   cobrir a linha do tempo e os botões. */
+/* During replay, toasts stay above playback bar (its height comes from ui/timelapse.ts), instead of
+   covering timeline and buttons. */
 .ui-root.is-replay .ui-toasts {
   bottom: calc(var(--free-bottom) + var(--lapse-h, 0px) + 10px);
 }
@@ -2637,7 +2652,7 @@
   }
 }
 
-/* ------------------------------------------------------------------ popover de configurações */
+/* ------------------------------------------------------------------ settings popover */
 
 .ui-popover {
   position: fixed;
@@ -2716,7 +2731,7 @@
   color: var(--ui-muted);
 }
 
-/* Sobre: versão em uso, estado da verificação no GitHub e a versão nova (com o jeito de atualizar). */
+/* About: version in use, GitHub check status, and new version (with how to update). */
 .ui-about {
   scroll-margin: 8px;
 }
@@ -2884,14 +2899,15 @@
   color: var(--ui-text);
 }
 
-.ui-seg__opt[aria-checked='true'] {
+.ui-seg__opt[aria-checked='true'],
+.ui-seg__opt[aria-selected='true'] {
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
   font-weight: 600;
   box-shadow: inset 0 0 0 1px rgba(124, 200, 255, 0.35);
 }
 
-/* ------------------------------------------------------------------ ajuda */
+/* ------------------------------------------------------------------ help */
 
 .ui-dialog {
   width: min(760px, calc(100vw - 32px));
@@ -3022,7 +3038,7 @@
   background: var(--ui-accent);
 }
 
-/* Contas e uso: ocupa a largura toda (passo a passo) e pisca ao ser aberta por "Como ativar". */
+/* Accounts and usage: spans full width (step-by-step) and flashes when opened via "How to enable". */
 .ui-help__usage {
   grid-column: 1 / -1;
   scroll-margin-top: 12px;
@@ -3077,9 +3093,9 @@
   gap: 3px;
 }
 
-/* ------------------------------------------------------------------ estados: vazio, splash, conexão */
+/* ------------------------------------------------------------------ states: empty, splash, connection */
 
-/* Centralizado na área livre (fora da barra lateral, da gaveta e do feed). */
+/* Centered in free area (outside sidebar, drawer, and feed). */
 .ui-empty {
   position: fixed;
   z-index: 10;
@@ -3112,7 +3128,7 @@
   }
 }
 
-/* Ilustração do escritório vazio (960×540, exibida em escala exata de 1/2 quando cabe). */
+/* Empty office illustration (960×540, displayed at exact 1/2 scale when it fits). */
 .ui-empty__art {
   position: relative;
   flex: none;
@@ -3135,7 +3151,7 @@
   object-fit: cover;
 }
 
-/* Ilustração em CSS (pixels grandes): mesa, monitor apagado, cadeira, planta e luminária. */
+/* CSS illustration (large pixels): desk, dark monitor, chair, plant, and lamp. */
 .ui-empty__art.is-css {
   width: 200px;
   aspect-ratio: auto;
@@ -3383,7 +3399,7 @@
   animation: ui-blink 1s steps(2, jump-none) infinite;
 }
 
-/* Aviso de versão nova (página aberta antes de uma atualização do Habblaud). */
+/* New version alert (page opened before Habblaud update). */
 .ui-banner--update {
   z-index: 46;
   border-color: rgba(74, 168, 232, 0.55);
@@ -3393,7 +3409,7 @@
   background: #4aa8e8;
 }
 
-/* ------------------------------------------------------------------ dica do personagem */
+/* ------------------------------------------------------------------ character tooltip */
 
 .ui-tip {
   position: fixed;
@@ -3465,7 +3481,7 @@
   height: 7px;
 }
 
-/* ------------------------------------------------------------------ fundo das gavetas (telas estreitas) */
+/* ------------------------------------------------------------------ drawer backdrop (narrow screens) */
 
 .ui-scrim {
   position: fixed;
@@ -3479,10 +3495,10 @@
     visibility 0s linear 0.25s;
 }
 
-/* ------------------------------------------------------------------ esperando o shell */
+/* ------------------------------------------------------------------ waiting for shell */
 
-/* Ponto de status em ampulheta: a areia (::before em cima, ::after embaixo) escorre em 4 passos de pixel
-   e o ponto vira; o fim de um ciclo é idêntico ao começo do próximo (sem salto). */
+/* Hourglass status dot: sand (::before on top, ::after on bottom) drains in 4 pixel steps
+   and dot flips; end of a cycle is identical to start of next (no jump). */
 .ui-status-dot.is-shell {
   --st: var(--st-shell);
   position: relative;
@@ -3490,7 +3506,7 @@
   height: 10px;
   border-radius: 0;
   background: color-mix(in srgb, var(--st) 40%, #223038);
-  /* Silhueta de ampulheta (o recorte some com o brilho; a forma já distingue o estado). */
+  /* Hourglass silhouette (cutout disappears with glow; shape already distinguishes state). */
   clip-path: polygon(0 0, 100% 0, 100% 16%, 62% 50%, 100% 84%, 100% 100%, 0 100%, 0 84%, 38% 50%, 0 16%);
   animation: ui-dot-flip 2.4s cubic-bezier(0.6, 0, 0.3, 1) infinite;
 }
@@ -3546,7 +3562,7 @@
   }
 }
 
-/* Ampulheta (ícone em pixels ou ⏳) virando a cada 1,2 s, como a do escritório. */
+/* Hourglass (pixel icon or ⏳) flipping every 1.2 s, like the one in the office. */
 .ui-hourglass .ui-px-icon,
 .ui-activity.is-shell .ui-activity__icon {
   animation: ui-hourglass-turn 2.4s cubic-bezier(0.5, 0, 0.3, 1.3) infinite;
@@ -3566,7 +3582,7 @@
   }
 }
 
-/* Linha de atividade "⏳ <label> · 12:31 ×2": o cronômetro e o contador nunca entram nas reticências. */
+/* Activity line "⏳ <label> · 12:31 ×2": stopwatch and counter never enter ellipsis. */
 .ui-activity__time {
   flex: none;
   font-variant-numeric: tabular-nums;
@@ -3594,7 +3610,7 @@
   color: #bdeeea;
 }
 
-/* Fim de um shell (atividade ShellDone do servidor). */
+/* End of a shell (ShellDone activity from server). */
 .ui-activity.is-shell-ok .ui-activity__text {
   color: #9fe8c0;
 }
@@ -3612,7 +3628,7 @@
   box-shadow: inset 2px 0 0 var(--st-shell);
 }
 
-/* Contador "⏳ N shells" na barra superior (só aparece com shells rodando). */
+/* "⏳ N shells" counter in top bar (only appears with running shells). */
 .ui-counter.ui-counter--shells {
   flex-direction: row;
   align-items: center;
@@ -3655,7 +3671,7 @@
   }
 }
 
-/* Caixa de status da gaveta. */
+/* Drawer status box. */
 .ui-alert--shell {
   background: color-mix(in srgb, var(--st-shell) 10%, transparent);
   border-color: color-mix(in srgb, var(--st-shell) 42%, transparent);
@@ -3690,7 +3706,7 @@
   color: color-mix(in srgb, var(--st-shell) 45%, var(--ui-muted));
 }
 
-/* Seção "Shells rodando". */
+/* "Running shells" section. */
 .ui-shells {
   display: flex;
   flex-direction: column;
@@ -3799,7 +3815,7 @@
   word-break: break-word;
 }
 
-/* Linha do tempo e feed: fim de um shell. */
+/* Timeline and feed: end of a shell. */
 .ui-tl.is-shell-ok .ui-tl__text,
 .ui-feed__item.is-shell-ok .ui-feed__text {
   color: #9fe8c0;
@@ -3824,7 +3840,7 @@
   background-color: var(--ui-bg-hover);
 }
 
-/* Dica do personagem. */
+/* Character tooltip. */
 .ui-tip.is-shell {
   border-color: color-mix(in srgb, var(--st-shell) 55%, transparent);
 }
@@ -3835,7 +3851,7 @@
   color: color-mix(in srgb, var(--st-shell) 55%, #fff);
 }
 
-/* Ajuda: legenda da espera. */
+/* Help: waiting legend. */
 .ui-help__shell {
   grid-column: 1 / -1;
 }
@@ -3875,87 +3891,12 @@
   }
 }
 
-/* ------------------------------------------------------------------ responsivo */
+/* ------------------------------------------------------------------ responsive */
 
 @media (max-width: 1380px) {
   .ui-counter--rooms,
   .ui-counter--subagents {
     display: none;
-  }
-
-  /* 3 ou mais contas: os cartões de uso precisam do espaço dos contadores (o escritório mostra os números). */
-  .ui-topbar:has(.ui-usage-card:nth-child(3)) :is(.ui-counter--agents, .ui-counter--working) {
-    display: none;
-  }
-}
-
-@media (max-width: 1700px) {
-  .ui-topbar:has(.ui-usage-card:nth-child(4)) :is(.ui-counter--rooms, .ui-counter--agents, .ui-counter--working, .ui-counter--subagents) {
-    display: none;
-  }
-
-  .ui-topbar:has(.ui-usage-card:nth-child(3)) :is(.ui-counter--rooms, .ui-counter--subagents) {
-    display: none;
-  }
-}
-
-@media (max-width: 1500px) {
-  .ui-topbar:has(.ui-usage-card:nth-child(4)) .ui-brand__name {
-    display: none;
-  }
-}
-
-/* 4 ou mais contas (ex.: as do Claude Code, a do Codex e as do demo): os cartões podem estreitar até perder a coluna
-   do reinício (ela continua na dica de cada cartão) e o zoom fica na rolagem do mouse e nos atalhos + / −. */
-@media (max-width: 1700px) {
-  .ui-topbar:has(.ui-usage-card:nth-child(4)) .ui-usage-card {
-    min-width: 128px;
-  }
-
-  .ui-topbar:has(.ui-usage-card:nth-child(4)) .ui-topbar__right .ui-btn-group:first-child .ui-icon-btn:not(:first-child) {
-    display: none;
-  }
-}
-
-@media (max-width: 1140px) {
-  .ui-topbar:has(.ui-usage-card:nth-child(3)) .ui-brand__name {
-    display: none;
-  }
-}
-
-/* Os cartões de uso não cabem na linha da barra (muitas contas ou janela estreita; ui/usage.ts decide): vão para uma
-   segunda linha, como já acontece no celular, e rolam na horizontal se ainda assim não couberem. */
-@media (min-width: 601px) {
-  .ui-root.has-usage-row {
-    --top-h: 124px;
-  }
-
-  .ui-root.has-usage-row .ui-topbar {
-    flex-wrap: wrap;
-    align-content: center;
-    row-gap: 6px;
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
-
-  .ui-root.has-usage-row .ui-topbar__right {
-    margin-left: auto;
-  }
-
-  .ui-root.has-usage-row .ui-usage {
-    order: 10;
-    flex: 1 0 100%;
-    margin-left: 0;
-    padding: 3px 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  /* Sem ficar presa à rolagem da fila: a dica se ancora na barra (o backdrop-filter dela é o bloco de contenção). */
-  .ui-root.has-usage-row .ui-usage-tip {
-    position: fixed;
-    top: calc(var(--top-h) + 6px);
-    right: var(--gap);
   }
 }
 
@@ -3971,11 +3912,7 @@
     border: 0;
   }
 
-  .ui-usage-card__email {
-    display: none;
-  }
-
-  /* Zoom continua na rolagem do mouse e nos atalhos + / −. */
+  /* Zoom remains on mouse scroll and + / − shortcuts. */
   .ui-topbar__right .ui-btn-group:first-child .ui-icon-btn:not(:first-child) {
     display: none;
   }
@@ -3989,7 +3926,7 @@
     display: none;
   }
 
-  /* A pílula de conexão vira um selo no canto do logo. */
+  /* Connection pill becomes a badge on logo corner. */
   .ui-brand {
     position: relative;
   }
@@ -4081,7 +4018,7 @@
 
 @media (max-width: 600px) {
   .ui-root {
-    --top-h: 108px;
+    --bar-h: 108px;
     --gap: 8px;
     --feed-h: 44vh;
   }
@@ -4094,7 +4031,7 @@
     padding: 6px 8px;
   }
 
-  /* O feed tem a barra "Atividade" embaixo: o botão dele sai e deixa lugar para os do celular (Entregas, Novo agente). */
+  /* Feed has "Activity" bar at bottom: its button is removed to make room for mobile ones (Deliveries). */
   .ui-btn-feed {
     display: none;
   }
@@ -4143,46 +4080,12 @@
     order: 10;
     flex: 1 0 100%;
     margin-left: 0;
-    /* Com 4 ou mais contas os cartões mantêm o mínimo de 128 px e não cabem: a fila rola (a dica já é fixa aqui). */
+    /* With 4 or more accounts cards keep 128 px minimum and don't fit: row scrolls (tooltip is already fixed here). */
     overflow-x: auto;
     scrollbar-width: none;
   }
 
-  .ui-usage-card {
-    flex: 1 1 0;
-    width: auto;
-    min-width: 0;
-    gap: 6px;
-    padding: 4px 6px 4px 4px;
-  }
-
-  .ui-usage-card > .ui-acc-chip {
-    width: 22px;
-    font-size: 14px;
-  }
-
-  /* Sem cabeçalho: a idade dos números vira um selo no chip; o reinício fica na forma curta (↻1h29). */
-  .ui-usage-card__head {
-    display: none;
-  }
-
-  .ui-usage-card__flag {
-    display: grid;
-  }
-
-  .ui-meter__label {
-    font-size: 10px;
-  }
-
-  .ui-usage-tip {
-    position: fixed;
-    top: calc(var(--top-h) + 6px);
-    left: var(--gap);
-    right: var(--gap);
-    width: auto;
-  }
-
-  /* Folha inferior: deixa uma faixa do escritório visível acima dela para o agente/sala em foco. */
+  /* Bottom sheet: leaves a strip of office visible above it for focused agent/room. */
   .ui-drawer {
     top: auto;
     left: var(--gap);
@@ -4198,7 +4101,7 @@
     width: auto;
   }
 
-  /* Com a folha de detalhes aberta sobra uma faixa curta do escritório: só o aviso mais novo aparece. */
+  /* With details sheet open a short strip of office remains: only newest toast appears. */
   .has-drawer .ui-toast:not(:first-child) {
     display: none;
   }
@@ -4218,23 +4121,15 @@
   }
 
   .ui-popover {
-    /* Sobrepõe a posição calculada pelo JS (estilo inline). */
+    /* Overrides JS-computed position (inline style). */
     left: var(--gap) !important;
     right: var(--gap) !important;
     width: auto;
   }
 }
 
-/* Celular com Entregas e Novo agente: um ícone a mais que no computador não cabe numa linha; o timelapse sai (tecla L). */
-@media (max-width: 480px) {
-  .ui-topbar:has(.ui-btn-deliv:not([hidden])):has(.ui-btn-spawn:not([hidden])) .ui-btn-timelapse {
-    display: none;
-  }
-}
-
-/* Celulares (até 480 px): marca + 7 botões ocupam a primeira linha inteira, então os contadores descem para a linha dos
-   cartões. Sem isso, com dois contadores acesos, os botões da direita pulam para uma linha própria e a barra passa da
-   altura fixa. */
+/* Mobile (up to 480 px): brand + 7 buttons take whole first row, so counters drop to cards row.
+   Without this, with two active counters, right buttons jump to their own row and bar exceeds fixed height. */
 @media (max-width: 480px) {
   .ui-counters {
     order: 9;
@@ -4251,7 +4146,7 @@
   }
 }
 
-/* Celulares de 320 px: com os botões de 32 px a primeira linha (marca + 7 botões) não cabe. */
+/* 320 px phones: with 32 px buttons the first row (brand + 7 buttons) does not fit. */
 @media (max-width: 340px) {
   .ui-topbar__right .ui-icon-btn {
     width: 28px;
@@ -4259,7 +4154,7 @@
   }
 }
 
-/* ------------------------------------------------------------------ movimento reduzido */
+/* ------------------------------------------------------------------ reduced motion */
 
 @media (prefers-reduced-motion: reduce) {
   .ui-root *,
@@ -4276,7 +4171,7 @@
   outline: none;
 }
 
-/* ---------------------------------------------------------------- vida social (gaveta do agente) */
+/* ---------------------------------------------------------------- social life (agent drawer) */
 
 .ui-social__balance {
   color: #ffd34d;
@@ -4453,14 +4348,14 @@
   white-space: nowrap;
 }
 
-/* Partidas e apostas no feed: tom dourado discreto. */
+/* Matches and bets in feed: subtle gold tone. */
 .ui-feed__item.is-social .ui-feed__text {
   color: #ffe6a3;
 }
 
 /* ---------------------------------------------------------------- terminal */
 
-/* Botão na gaveta do agente: uma "linha de terminal" com o prompt em pixels. */
+/* Button in agent drawer: a "terminal line" with prompt in pixels. */
 .ui-term-cta {
   width: 100%;
   height: 34px;
@@ -4509,8 +4404,8 @@
   border-color: var(--ui-line-strong);
 }
 
-/* Janela flutuante: centralizada na área livre (entre a barra lateral e a gaveta) quando cabe; o escritório
-   continua visível e animando em volta. Largura ≈ min(920px, 72vw), sem ficar estreita demais. */
+/* Floating window: centered in free area (between sidebar and drawer) when it fits; office
+   remains visible and animated around it. Width ≈ min(920px, 72vw), without becoming too narrow. */
 .ui-term {
   --term-w: min(920px, 72vw, max(560px, calc(100vw - var(--free-left) - var(--free-right) - 16px)));
   --term-h: min(72vh, calc(100vh - var(--top-h) - var(--gap) * 2));
@@ -4552,7 +4447,7 @@
   }
 }
 
-/* Cromo da janela: Pixelify nos rótulos fixos; nome, papel e sala na fonte do sistema (legíveis). */
+/* Window chrome: Pixelify on fixed labels; name, role, and room in system font (readable). */
 .ui-term__bar {
   position: relative;
   display: flex;
@@ -4564,7 +4459,7 @@
   background: rgba(255, 255, 255, 0.035);
 }
 
-/* Fio segmentado em pixels sob a barra, como as barras de uso. */
+/* Segmented pixel wire below bar, like usage bars. */
 .ui-term__bar::after {
   content: '';
   position: absolute;
@@ -4652,7 +4547,7 @@
   flex: none;
 }
 
-/* Conversa */
+/* Conversation */
 .ui-term__body {
   position: relative;
   display: flex;
@@ -4668,7 +4563,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  /* A compensação ao descartar linhas antigas é feita no JS: sem a ancoragem automática do navegador. */
+  /* Compensation when discarding old lines is done in JS: without browser auto-anchoring. */
   overflow-anchor: none;
   padding: 14px 16px 18px;
   font: 12.5px/1.55 var(--font-mono);
@@ -4699,7 +4594,7 @@
   user-select: none;
 }
 
-/* "⏺" sempre como texto (nunca emoji colorido): a cor indica o estado da ferramenta. */
+/* "⏺" always as text (never colored emoji): color indicates tool state. */
 .ui-term__dot {
   font-family: var(--font-mono), 'Apple Symbols', 'Segoe UI Symbol', 'Noto Sans Symbols 2', sans-serif;
   font-variant-emoji: text;
@@ -4728,7 +4623,7 @@
   color: var(--ui-accent);
 }
 
-/* Prompt do usuário: "> texto" sobre fundo levemente destacado (alinhado às colunas das outras linhas). */
+/* User prompt: "> text" on slightly highlighted background (aligned with columns of other lines). */
 .ui-term__row--user {
   margin-inline: -8px;
   padding: 4px 8px;
@@ -4744,7 +4639,7 @@
   color: #f0f3fa;
 }
 
-/* Ferramenta: ⏺ verde (ok), vermelho (erro) ou apagado (ainda sem resultado). */
+/* Tool: ⏺ green (ok), red (error), or dimmed (no result yet). */
 .ui-term__row--tool .ui-term__dot {
   color: var(--st-working);
 }
@@ -4823,7 +4718,7 @@
   color: #8fb8ff;
 }
 
-/* "  ⎿  resultado" */
+/* "  ⎿  result" */
 .ui-term__result {
   display: grid;
   grid-template-columns: 3ch minmax(0, 1fr);
@@ -4859,7 +4754,7 @@
   margin-top: 0;
 }
 
-/* Raciocínio e eventos da sessão: apagados. */
+/* Reasoning and session events: dimmed. */
 .ui-term__think {
   font-style: italic;
   color: var(--term-dim);
@@ -4917,7 +4812,7 @@ button.ui-term__think:hover,
   opacity: 0.85;
 }
 
-/* Estados: conversa anterior cortada, carregando/vazio, erro, reconexão. */
+/* States: previous conversation trimmed, loading/empty, error, reconnecting. */
 .ui-term__note {
   display: flex;
   align-items: center;
@@ -4998,7 +4893,7 @@ button.ui-term__think:hover,
   }
 }
 
-/* Rodapé: linha de estado do Claude Code e a caixa de mensagem (ui/composer.ts; desabilitada quando não dá). */
+/* Footer: Claude Code status line and message box (ui/composer.ts; disabled when unavailable). */
 .ui-term__foot {
   flex: none;
   padding: 8px 12px 12px;
@@ -5095,7 +4990,7 @@ button.ui-term__think:hover,
   display: block;
   width: 100%;
   min-width: 0;
-  /* ~6 linhas; depois rola (a altura acompanha o texto: ui/composer.ts). */
+  /* ~6 lines; then scrolls (height tracks text: ui/composer.ts). */
   max-height: calc(1.5em * 6);
   margin: 0;
   padding: 0;
@@ -5121,7 +5016,85 @@ button.ui-term__think:hover,
   opacity: 1;
 }
 
-/* Caixa de mensagem (ui/composer.ts): na gaveta do agente e no rodapé do terminal (lá, a linha é o prompt acima). */
+/* Quick orders to boss (ui/drawer.ts, bossOrders): buttons putting ready prompt into message box. */
+.ui-boss-orders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.ui-boss-orders__btn {
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+/* Antigravity worker level (ui/agy-progress.ts): title, XP bar, and achievements. */
+.ui-agyp {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ui-agyp__head {
+  font-weight: 600;
+}
+
+.ui-agyp__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ui-agyp__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f2b33d, #ffd86b);
+}
+
+.ui-agyp__xp {
+  font-size: 11.5px;
+}
+
+.ui-agyp__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ui-agyp__badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line-strong);
+  font-size: 11.5px;
+  cursor: help;
+}
+
+/* "Send work" to an Antigravity worker (ui/agy-panel.ts): prompt, mode, role, and buttons. */
+.ui-agy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-agy > .ui-msg__input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: calc(12.5px * 1.4 * 10 + 16px);
+}
+
+.ui-agy .ui-agy__role {
+  flex: 0 1 120px;
+}
+
+.ui-agy .ui-agy__select {
+  flex: 1 1 0;
+  height: 32px;
+  padding: 0 6px;
+}
+
+/* Message box (ui/composer.ts): in agent drawer and terminal footer (there, line is prompt above). */
 .ui-msg--drawer .ui-msg__row {
   display: flex;
   align-items: flex-end;
@@ -5169,7 +5142,7 @@ button.ui-term__think:hover,
   opacity: 0.45;
 }
 
-/* Microfone da caixa de mensagem: só o ícone; gravando, mostra o tempo. */
+/* Message box microphone: icon only; when recording, shows elapsed time. */
 .ui-dictate--compact {
   flex: none;
   gap: 4px;
@@ -5205,7 +5178,7 @@ button.ui-term__think:hover,
   color: var(--ui-danger, #ff8a8a);
 }
 
-/* No terminal: o botão fica na ponta da linha do prompt, discreto como o resto. */
+/* In terminal: button sits at end of prompt line, subtle like the rest. */
 .ui-msg--terminal .ui-msg__send {
   align-self: end;
   min-width: 26px;
@@ -5255,7 +5228,7 @@ button.ui-term__think:hover,
   color: #ffb3aa;
 }
 
-/* Markdown das respostas (ui/markdown.ts). */
+/* Response markdown (ui/markdown.ts). */
 .ui-md > * + * {
   margin-top: 8px;
 }
@@ -5318,7 +5291,7 @@ button.ui-term__think:hover,
   pointer-events: none;
 }
 
-/* Blocos de código e tabelas rolam por dentro (a página nunca ganha rolagem horizontal). */
+/* Code blocks and tables scroll internally (page never gets horizontal scroll). */
 .ui-md__pre,
 .ui-md__table {
   margin: 0;
@@ -5381,7 +5354,7 @@ button.ui-term__think:hover,
   background: repeating-linear-gradient(90deg, var(--ui-line-strong) 0 4px, transparent 4px 6px);
 }
 
-/* Telas estreitas: ocupa a área abaixo da barra superior, sobre a gaveta. Celular: tela cheia. */
+/* Narrow screens: occupies area below top bar, over drawer. Mobile: full screen. */
 @media (max-width: 900px) {
   .ui-term {
     z-index: 42;
@@ -5417,9 +5390,9 @@ button.ui-term__think:hover,
   }
 }
 
-/* ---------------------------------------------------------------- terminal v2: busca, filtro, copiar e histórico */
+/* ---------------------------------------------------------------- terminal v2: search, filter, copy, and history */
 
-/* Barra de ferramentas sob o cabeçalho: filtro à esquerda, busca (quando aberta) à direita. */
+/* Toolbar below header: filter on left, search (when open) on right. */
 .ui-term__tools {
   display: flex;
   align-items: center;
@@ -5542,7 +5515,7 @@ button.ui-term__think:hover,
   height: 11px;
 }
 
-/* Resultados da busca: âmbar; o atual, laranja com contorno (o mesmo par do "precisa de você"). */
+/* Search results: amber; current, orange with outline (same pair as "needs you"). */
 .ui-term__hit {
   border-radius: 2px;
   background: rgba(255, 181, 71, 0.3);
@@ -5556,17 +5529,17 @@ button.ui-term__think:hover,
   color: #12151d;
 }
 
-/* Filtro: as linhas que não entram somem (a busca também não as conta). */
+/* Filter: non-matching lines disappear (search also does not count them). */
 .ui-term__row.is-filtered {
   display: none;
 }
 
-/* Corte no meio de uma linha comprida (o resto fica no DOM, escondido, para a busca). */
+/* Truncation in middle of long line (remainder stays in DOM, hidden, for search). */
 .ui-term__dots {
   color: var(--term-dim);
 }
 
-/* Copiar: botão discreto no canto da entrada, que aparece no hover ou no foco e confirma com "Copiado". */
+/* Copy: subtle button in corner of entry, appearing on hover or focus and confirming with "Copied". */
 .ui-term__row,
 .ui-term__call,
 .ui-term__result {
@@ -5646,7 +5619,7 @@ button.ui-term__think:hover,
   display: inline;
 }
 
-/* Telas de toque (sem hover): o botão fica sempre à vista, mais apagado. */
+/* Touch screens (no hover): button is always visible, more dimmed. */
 @media (hover: none) {
   .ui-term__copy {
     opacity: 0.7;
@@ -5654,7 +5627,7 @@ button.ui-term__think:hover,
   }
 }
 
-/* Sessão do histórico: chip da conta antes do título e o rótulo "histórico" em âmbar. */
+/* History session: account chip before title and "history" label in amber. */
 .ui-term__who .ui-acc-chip {
   margin-right: -1px;
 }
@@ -5667,7 +5640,7 @@ button.ui-term__think:hover,
   font-weight: 600;
 }
 
-/* Botão "Histórico" da barra superior (desligado sem acesso local, com a dica do porquê). */
+/* Top bar "History" button (disabled without local access, with tooltip explaining why). */
 .ui-hist-btn.is-disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -5678,7 +5651,7 @@ button.ui-term__think:hover,
   color: var(--ui-muted);
 }
 
-/* Popover do histórico: cabeçalho e busca fixos, a lista rola por dentro. */
+/* History popover: header and search fixed, list scrolls internally. */
 .ui-hist {
   display: flex;
   flex-direction: column;
@@ -5726,7 +5699,7 @@ button.ui-term__think:hover,
   top: 0;
   padding: 8px 10px 4px;
   background: var(--ui-bg-solid);
-  /* Fonte do sistema: a data tem dígitos (na Pixelify o "5" parece "S"). */
+  /* System font: date has digits (in Pixelify "5" looks like "S"). */
   font: 600 11.5px/1.2 var(--font-ui);
   letter-spacing: 0.02em;
   color: var(--ui-muted);
@@ -5838,7 +5811,7 @@ button.ui-term__think:hover,
 
 /* ------------------------------------------------------------------ timelapse (ui/timelapse.ts) */
 
-/* Escritório reproduzido: leve tom sépia e vinheta, para não confundir com o ao vivo (o selo diz a hora). */
+/* Replayed office: slight sepia tone and vignette, to avoid confusion with live (badge shows time). */
 html.is-replay #world {
   filter: sepia(0.3) saturate(0.9) contrast(1.03);
 }
@@ -5855,7 +5828,7 @@ html.is-replay #world {
   pointer-events: none;
 }
 
-/* Selo "REPLAY 14:32": no alto da área livre, sempre visível. */
+/* "REPLAY 14:32" badge: at top of free area, always visible. */
 .ui-lapse-badge {
   position: fixed;
   z-index: 14;
@@ -5910,7 +5883,7 @@ html.is-replay #world {
   display: none;
 }
 
-/* Barra de reprodução: embaixo, centralizada na área livre, logo acima do feed. */
+/* Playback bar: at bottom, centered in free area, right above feed. */
 .ui-lapse {
   position: fixed;
   z-index: 16;
@@ -6040,7 +6013,7 @@ html.is-replay #world {
   border-radius: 6px;
 }
 
-/* Trecho já reproduzido e a agulha (com o "botão" quadrado em cima). */
+/* Already played section and needle (with square "button" on top). */
 .ui-lapse__track::before {
   content: '';
   position: absolute;
@@ -6117,7 +6090,7 @@ html.is-replay #world {
   pointer-events: none;
 }
 
-/* Marca de pico: bandeirinha âmbar acima do gráfico (clique pula para lá). */
+/* Peak marker: amber flag above chart (click jumps there). */
 .ui-lapse__peak {
   position: absolute;
   top: -11px;
@@ -6151,9 +6124,9 @@ html.is-replay #world {
   font-variant-numeric: tabular-nums;
 }
 
-/* O feed segue ao vivo durante o replay: deixa isso claro no título. */
+/* The feed remains live during replay: make this clear in the title. */
 .ui-root.is-replay .ui-feed__title h2::after {
-  content: ' · ao vivo';
+  content: ' · live';
   font: 600 11px var(--font-ui);
   color: var(--st-working);
 }
@@ -6173,7 +6146,7 @@ html.is-replay #world {
     display: none;
   }
 
-  /* Segunda linha: "Voltar ao vivo" e o dia, com a largura que sobrar. */
+  /* Second line: "Back to live" and the day, using remaining width. */
   .ui-lapse__demo,
   .ui-lapse__live {
     order: 1;
@@ -6198,9 +6171,9 @@ html.is-replay #world {
   }
 }
 /* ------------------------------------------------------------------------------------------------
-   Responder pelo escritório: cartão "Pede permissão" na gaveta do agente (ui/permission.ts), o atalho
-   "Responder" nos avisos e o destaque do contador "precisam de você". A prévia (comando/diff) reaproveita
-   as classes do terminal (ui-term__in, ui-term__dl...).
+   Respond from office: "Requests permission" card in agent drawer (ui/permission.ts), "Respond" shortcut
+   in toasts, and "needs you" counter highlight. Preview (command/diff) reuses terminal classes
+   (ui-term__in, ui-term__dl...).
    ------------------------------------------------------------------------------------------------ */
 
 .ui-perm {
@@ -6399,9 +6372,9 @@ html.is-replay #world {
   color: #ffb3aa;
 }
 
-/* Perguntas do AskUserQuestion no cartão: rádios (escolha única) ou caixas (várias), com a descrição, e o
-   "Outro" com o campo de texto. Cabeçalho, pergunta, dica e descrição reaproveitam as classes ui-ask__* do
-   alerta "Precisa de você". */
+/* AskUserQuestion questions in card: radios (single choice) or checkboxes (multiple), with description,
+   and "Other" with text field. Header, question, tip, and description reuse ui-ask__* classes from
+   "Needs you" alert. */
 .ui-perm-ask {
   display: grid;
   gap: 12px;
@@ -6420,7 +6393,7 @@ html.is-replay #world {
   box-shadow: inset 0 1px 0 rgba(255, 181, 71, 0.25);
 }
 
-/* Legenda flutuando: fica no fluxo normal (sem o recorte que o fieldset faz na borda). */
+/* Floating legend: stays in normal flow (without border cutout from fieldset). */
 .ui-perm-ask__legend {
   float: left;
   width: 100%;
@@ -6517,14 +6490,14 @@ html.is-replay #world {
   opacity: 0.5;
 }
 
-/* Sem pedido no escritório, a lista do alerta é só leitura: a dica de como responder por aqui. */
+/* Without office request, alert list is read-only: tip on how to respond here. */
 .ui-ask__answer-hint {
   margin-top: 8px;
   font-size: 11px;
   opacity: 0.75;
 }
 
-/* Dica dos hooks do Codex no fim da gaveta de um agente do Codex. */
+/* Codex hooks tip at end of Codex agent drawer. */
 .ui-codex-hint {
   margin: 4px 0 2px;
   padding: 8px 10px;
@@ -6544,7 +6517,7 @@ html.is-replay #world {
   white-space: normal;
 }
 
-/* "Responder" no aviso de quem tem pedido para responder pelo escritório. */
+/* "Respond" in toast for agents with requests to answer from office. */
 .ui-toast__answer {
   flex: none;
   margin: 0 2px;
@@ -6561,11 +6534,11 @@ html.is-replay #world {
   background: rgba(255, 181, 71, 0.28);
 }
 
-/* Contador "precisam de você" com pedido para responder por aqui: um cadeado discreto. */
+/* "Needs you" counter with request to respond here: subtle lock icon. */
 .ui-counter--waiting.has-answer .ui-counter__label::after {
   content: ' · 🔐';
 }
-/* ------------------------------------------------------------------ ambiente: sons nas configurações */
+/* ------------------------------------------------------------------ ambient: sounds in settings */
 
 .ui-snd__details {
   transition: opacity 0.2s;
@@ -6681,12 +6654,263 @@ html.is-replay #world {
   }
 }
 
+/* ---------------------------------------------------------------- my day (metrics dashboard) */
 
-/* ---------------------------------------------------------------- meu dia (painel de métricas) */
+/* Status colors in charts: same tones as office, darkened for large bar areas (OKLCH L between
+   0.48 and 0.67 over #141821 panel, 3:1 contrast or higher). Stacking order validated for color blindness
+   (distinguishable neighbors): waiting for you | working | idle (context gray) | waiting for shell. */
+/* Expanded job board (ui/job-board.ts). */
+.ui-dialog.ui-board {
+  width: min(1180px, calc(100vw - 32px));
+  max-height: min(90vh, 900px);
+}
 
-/* Cores dos status nos gráficos: os mesmos tons do escritório, escurecidos para áreas grandes de barra (OKLCH L entre
-   0,48 e 0,67 sobre o painel #141821, contraste de 3:1 ou mais). A ordem de empilhamento foi validada para daltonismo
-   (vizinhos distinguíveis): esperando você | trabalhando | ocioso (cinza de contexto) | esperando o shell. */
+.ui-board__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 18px 18px;
+  overflow-y: auto;
+}
+
+.ui-board__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ui-faint);
+}
+
+.ui-board__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ui-board__item {
+  display: flex;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ui-line-strong);
+  border-left-width: 4px;
+}
+
+.ui-board__item.is-working {
+  border-left-color: #f2b33d;
+}
+
+.ui-board__item.is-done {
+  border-left-color: #5cc97b;
+}
+
+.ui-board__item.is-failed {
+  border-left-color: #e05555;
+}
+
+.ui-board__item.is-cancelled {
+  border-left-color: var(--ui-line-strong);
+  opacity: 0.7;
+}
+
+/* A terminal job's final answer (ui/job-board.ts): a few lines, the rest in the tooltip. */
+.ui-board__answer {
+  margin: 4px 0 2px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(92, 201, 123, 0.08);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ui-board__answer.is-error {
+  background: rgba(224, 85, 85, 0.1);
+}
+
+/* Terminal jobs: take the worker's wheel / cancel (ui/job-board.ts). */
+.ui-board__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.ui-board__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ui-board__item.is-done .ui-board__status {
+  color: var(--lv-ok);
+  font-weight: 700;
+}
+
+.ui-board__status {
+  font-size: 16px;
+}
+
+.ui-board__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.ui-board__who {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ui-board__role {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ui-board__text {
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+
+/* Two columns: the boss's to-do list and the workers' jobs; one under the other on narrow screens. */
+.ui-board__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .ui-board__cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ui-board__col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-board__col-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ui-board__checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ui-board__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.ui-board__check:hover {
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+}
+
+.ui-board__check label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.ui-board__check input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--lv-ok);
+}
+
+.ui-board__check.is-done label span {
+  color: var(--ui-muted);
+  text-decoration: line-through;
+}
+
+.ui-board__del {
+  opacity: 0;
+}
+
+.ui-board__check:hover .ui-board__del,
+.ui-board__del:focus-visible {
+  opacity: 1;
+}
+
+.ui-board__add {
+  display: flex;
+  gap: 6px;
+}
+
+.ui-board__add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.ui-board__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ui-board__empty p {
+  margin: 0;
+}
+
+.ui-board__more {
+  align-self: center;
+}
+
+/* Important news: one wrapped line under the columns. */
+.ui-board__news {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ui-line);
+  font-size: 12.5px;
+}
+
+.ui-board__news-title {
+  font-weight: 600;
+}
+
+.ui-board__news-item time {
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-board__meta {
+  margin: 0;
+  font-size: 11.5px;
+}
+
 .ui-dialog.ui-day {
   --day-waiting: #c98300;
   --day-working: #1bad69;
@@ -6799,7 +7023,7 @@ html.is-replay #world {
   transition: opacity 0.2s;
 }
 
-/* Recarregando: o gráfico anterior fica, mais apagado (sem esqueleto nem salto de layout). */
+/* Reloading: previous chart remains, dimmed (no skeleton or layout jump). */
 .ui-day.is-loading .ui-day__content {
   opacity: 0.6;
 }
@@ -6817,7 +7041,7 @@ html.is-replay #world {
   background: var(--sw);
 }
 
-/* Destaques */
+/* Highlights */
 .ui-day__kpis {
   grid-column: 1 / -1;
   display: grid;
@@ -6874,7 +7098,7 @@ html.is-replay #world {
   font-weight: 600;
 }
 
-/* Legenda (liga e desliga cada status nos gráficos) */
+/* Legend (toggles each status in charts) */
 .ui-day__legend {
   grid-column: 1 / -1;
   display: flex;
@@ -6910,7 +7134,7 @@ html.is-replay #world {
   box-shadow: inset 0 0 0 1.5px var(--sw);
 }
 
-/* Cartões */
+/* Cards */
 .ui-day__card {
   grid-column: 1 / -1;
   min-width: 0;
@@ -6959,7 +7183,7 @@ html.is-replay #world {
   background: var(--sw);
 }
 
-/* Por projeto: barras horizontais finas, empilhadas a partir de uma base comum (2 px de folga entre pedaços). */
+/* By project: thin horizontal bars, stacked from common baseline (2 px gap between segments). */
 .ui-day__bars {
   display: flex;
   flex-direction: column;
@@ -7017,7 +7241,7 @@ html.is-replay #world {
   border-radius: 0 4px 4px 0;
 }
 
-/* Por hora: colunas empilhadas (base embaixo), eixo com marcas redondas e linhas de grade discretas. */
+/* By hour: stacked columns (baseline at bottom), axis with round marks and subtle grid lines. */
 .ui-day__plot {
   position: relative;
   height: 170px;
@@ -7117,7 +7341,7 @@ html.is-replay #world {
   font-weight: 700;
 }
 
-/* Maiores esperas */
+/* Longest waits */
 .ui-day__waits {
   display: flex;
   flex-direction: column;
@@ -7198,7 +7422,7 @@ html.is-replay #world {
   white-space: nowrap;
 }
 
-/* Por conta: cada conta na própria cor (chip, fio no topo e a fatia do trabalho do dia). */
+/* By account: each account in its own color (chip, wire on top, and share of day's work). */
 .ui-day__accounts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -7270,7 +7494,7 @@ html.is-replay #world {
   font-variant-numeric: tabular-nums;
 }
 
-/* Tabelas (o equivalente acessível de cada gráfico) */
+/* Tables (accessible equivalent of each chart) */
 .ui-day__table-wrap {
   overflow-x: auto;
 }
@@ -7306,7 +7530,7 @@ html.is-replay #world {
   font-variant-numeric: tabular-nums;
 }
 
-/* Dica: o valor primeiro, o status depois, com um traço da cor do status. */
+/* Tooltip: value first, status second, with dash in status color. */
 .ui-day__tip {
   position: absolute;
   z-index: 5;
@@ -7389,7 +7613,7 @@ html.is-replay #world {
   }
 }
 
-/* Celular: tela cheia, controles numa linha própria, gráficos mais baixos (sem rolagem horizontal). */
+/* Mobile: full screen, controls in their own row, shorter charts (no horizontal scroll). */
 @media (max-width: 600px) {
   .ui-dialog.ui-day {
     width: 100vw;
@@ -7424,7 +7648,7 @@ html.is-replay #world {
     min-width: 0;
   }
 
-  /* O seletor Demonstração | Dados reais fica com a largura do conteúdo (196 px); o seletor de dia, com o que sobra. */
+  /* Demo | Real data selector sized to content (196 px); day selector takes the rest. */
   .ui-day__source {
     flex: 0 0 auto;
     min-width: 0;
@@ -7451,7 +7675,7 @@ html.is-replay #world {
     padding: 12px;
   }
 
-  /* O total do projeto continua na dica e na tabela; o nome ganha espaço. */
+  /* Project total remains in tooltip and table; name gets more space. */
   .ui-day__bar-value .ui-day__muted {
     display: none;
   }
@@ -7466,14 +7690,14 @@ html.is-replay #world {
   }
 }
 
-/* Entre o celular e o tablet a barra superior fica apertada com o botão "Meu dia": a visão geral segue no atalho O. */
+/* Between mobile and tablet top bar gets tight with "My day" button: overview remains on shortcut O. */
 @media (min-width: 601px) and (max-width: 760px) {
   .ui-topbar__right .ui-btn-group:first-child {
     display: none;
   }
 }
 
-/* Linha do tempo do agente: "Mostrar mais" / "Mostrar menos" (15 itens por vez). */
+/* Agent timeline: "Show more" / "Show less" (15 items at a time). */
 .ui-timeline__more {
   display: flex;
   gap: 6px;
@@ -7484,7 +7708,7 @@ html.is-replay #world {
   display: none;
 }
 
-/* Título da sessão na lista de agentes (o mesmo do hover do personagem). */
+/* Session title in agent list (same as character hover). */
 .ui-agent__task {
   display: block;
   margin-top: 1px;
@@ -7496,7 +7720,7 @@ html.is-replay #world {
   text-overflow: ellipsis;
 }
 
-/* Há quanto tempo o agente está ocioso, na linha do nome (no lugar do "Principal"). */
+/* How long agent has been idle, on name line (in place of "Main"). */
 .ui-agent__since {
   flex: none;
   margin-left: auto;
@@ -7505,7 +7729,7 @@ html.is-replay #world {
   white-space: nowrap;
 }
 
-/* ------------------------------------------------------------------ janelas móveis (ui/movable.ts) */
+/* ------------------------------------------------------------------ movable windows (ui/movable.ts) */
 
 .ui-move-handle {
   cursor: grab;
@@ -7541,7 +7765,7 @@ html.is-replay #world {
   opacity: 0.94;
 }
 
-/* Terminal expandido na tela toda do Habblaud (botão ao lado do fechar). */
+/* Expanded terminal on entire Habblaud screen (button next to close). */
 .ui-term.is-max {
   z-index: 46;
   inset: calc(var(--top-h) + var(--gap)) var(--gap) var(--gap) !important;
@@ -7556,7 +7780,7 @@ html.is-replay #world {
   cursor: default;
 }
 
-/* Alças de redimensionar nas bordas e quinas das janelas móveis (ui/movable.ts). */
+/* Resize handles on edges and corners of movable windows (ui/movable.ts). */
 .ui-resize {
   position: absolute;
   z-index: 5;
@@ -7627,7 +7851,7 @@ html.is-replay #world {
   cursor: nwse-resize;
 }
 
-/* Expandida, em tela estreita ou fechada: sem alças. */
+/* Expanded, on narrow screen or closed: no handles. */
 .is-max > .ui-resize,
 .is-narrow .ui-resize {
   display: none;
@@ -7642,7 +7866,7 @@ html.is-replay #world {
   position: relative;
 }
 
-/* Arrastar agentes na lista lateral para reordenar (mesma ordem das abas do terminal). */
+/* Drag agents in sidebar to reorder (same order as terminal tabs). */
 .ui-node__head.is-dragging {
   opacity: 0.45;
 }
@@ -7667,32 +7891,7 @@ html.is-replay #world {
   bottom: -1px;
 }
 
-/* Arrastar salas na lista lateral para reordenar (ui/roomorder.ts). */
-.ui-room__head.is-dragging {
-  opacity: 0.45;
-}
-
-.ui-room__head.is-drop-before::before,
-.ui-room__head.is-drop-after::after {
-  content: '';
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--ui-accent);
-  z-index: 1;
-}
-
-.ui-room__head.is-drop-before::before {
-  top: -2px;
-}
-
-.ui-room__head.is-drop-after::after {
-  bottom: -2px;
-}
-
-/* Renomear sala: campo flutuante do botão direito (ui/roomrename.ts). */
+/* Rename room: right-click floating field (ui/roomrename.ts). */
 .ui-rename {
   position: fixed;
   z-index: 60;
@@ -7722,24 +7921,6 @@ html.is-replay #world {
   background: var(--ui-bg-soft);
   color: var(--ui-text);
   font: inherit;
-}
-
-.ui-spawn__label {
-  display: block;
-  margin: 8px 0 4px;
-  font: 500 12.5px/1.2 var(--font-px);
-  color: var(--ui-muted);
-}
-
-.ui-spawn__prompt {
-  resize: vertical;
-  min-height: 84px;
-}
-
-.ui-spawn__go {
-  margin-top: 10px;
-  width: 100%;
-  justify-content: center;
 }
 
 .ui-spawn__folders {
@@ -7779,8 +7960,7 @@ html.is-replay #world {
   background: color-mix(in srgb, var(--ui-accent) 14%, transparent);
 }
 
-.ui-spawn__folder:focus-visible,
-.ui-spawn__other:focus-visible {
+.ui-spawn__folder:focus-visible {
   outline: 2px solid var(--ui-accent);
   outline-offset: 1px;
 }
@@ -7802,45 +7982,6 @@ html.is-replay #world {
   white-space: nowrap;
 }
 
-.ui-spawn__folder-when {
-  grid-area: when;
-  font-size: 11px;
-  color: var(--ui-faint);
-}
-
-.ui-spawn__other {
-  margin: 6px 0 0;
-  padding: 6px 2px;
-  border: 0;
-  background: none;
-  color: var(--ui-accent);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.ui-spawn__other.is-on {
-  color: var(--ui-muted);
-}
-
-.ui-spawn__path {
-  margin-top: 4px;
-}
-
-.ui-spawn__tools {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.ui-spawn__tools .ui-btn {
-  flex: 1 1 0;
-  justify-content: center;
-  gap: 6px;
-  min-height: 40px;
-  touch-action: manipulation;
-}
-
 .ui-dictate.is-recording {
   border-color: var(--ui-danger, #ff8a8a);
   color: var(--ui-danger, #ff8a8a);
@@ -7857,65 +7998,14 @@ html.is-replay #world {
   }
 }
 
-.ui-spawn__files {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ui-spawn__files:empty {
-  display: none;
-}
-
-.ui-spawn__file {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 4px 4px 4px;
-  border-radius: 8px;
-  border: 1px solid var(--ui-line);
-  background: var(--ui-bg-soft);
-}
-
-.ui-spawn__thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  object-fit: cover;
-}
-
-.ui-spawn__thumb--doc {
-  display: grid;
-  place-items: center;
-  font: 600 9px/1 var(--font-px);
-  color: var(--ui-muted);
-  border: 1px solid var(--ui-line-strong);
-}
-
-.ui-spawn__file-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12.5px;
-}
-
-.ui-spawn__file-size {
-  font-size: 11px;
-  color: var(--ui-faint);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .ui-dictate.is-recording {
     animation: none;
   }
 }
 
-/* Celular: o Safari do iPhone dá zoom ao focar um campo com letra menor que 16 px; com 16 px ele não dá (e o
-   pinça para ampliar continua funcionando). Vale para todos os campos do app. */
+/* Mobile: iPhone Safari zooms when focusing field with font smaller than 16 px; with 16 px it doesn't
+   (and pinch to zoom still works). Applies to all app fields. */
 @media (pointer: coarse) {
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
   textarea,
@@ -7927,11 +8017,6 @@ html.is-replay #world {
   }
 }
 
-.ui-spawn__status:empty {
-  display: none;
-}
-
-.ui-spawn__status.is-error,
 .ui-rename__hint.is-error {
   color: var(--ui-danger, #ff8a8a);
 }
@@ -7951,7 +8036,7 @@ html.is-replay #world {
   color: #ff9a8a;
 }
 
-/* Editor do personagem (gaveta do agente): lápis ao lado do nome e painel com prévia, nome e peças. */
+/* Character editor (agent drawer): pencil next to name and panel with preview, name, and parts. */
 .ui-char-edit {
   align-self: center;
 }
@@ -8011,7 +8096,7 @@ html.is-replay #world {
   outline-offset: 1px;
 }
 
-/* Criando com o nome reservado no cadastro: o campo só mostra o nome. */
+/* Creating with name reserved at registration: field only displays the name. */
 .ui-char__name.is-fixed {
   border-style: dashed;
   background: rgba(0, 0, 0, 0.12);
@@ -8125,7 +8210,7 @@ html.is-replay #world {
   margin-left: auto;
 }
 
-/* ------------------------------------------------------------------ terminal interativo (ui/pty.ts) */
+/* ------------------------------------------------------------------ interactive terminal (ui/pty.ts) */
 
 .ui-actions {
   display: grid;
@@ -8201,7 +8286,7 @@ html.is-replay #world {
   height: 100%;
 }
 
-/* Atalho para o terminal do agente na lista lateral: no lugar do status, só com o mouse em cima (ou aberto). */
+/* Shortcut to agent terminal in sidebar: in place of status, only on hover (or open). */
 .ui-node__head {
   position: relative;
 }
@@ -8254,14 +8339,14 @@ html.is-replay #world {
   box-shadow: inset 0 0 0 1px var(--ui-accent);
 }
 
-/* O botão fica por cima do status: esconde o quadradinho enquanto ele aparece. */
+/* Button sits over status: hides small square while visible. */
 .ui-node__head:hover > .ui-agent > .ui-status-dot,
 .ui-node__head:has(.ui-node__term:focus-visible) > .ui-agent > .ui-status-dot,
 .ui-node__head:has(.ui-node__term.is-on) > .ui-agent > .ui-status-dot {
   visibility: hidden;
 }
 
-/* Abas da janela de terminal: os agentes do mesmo projeto. */
+/* Terminal window tabs: agents of same project. */
 .ui-ttabs {
   display: flex;
   flex: none;
@@ -8316,7 +8401,7 @@ html.is-replay #world {
   max-width: 110px;
 }
 
-/* Começo do que o agente está fazendo, ao lado do nome. */
+/* Start of what agent is doing, next to name. */
 .ui-ttab__doing {
   min-width: 0;
   max-width: 150px;
@@ -8331,7 +8416,7 @@ html.is-replay #world {
   color: var(--ui-muted);
 }
 
-/* X da aba: encerra a sessão (segundo clique confirma). */
+/* Tab X: ends session (second click confirms). */
 .ui-ttab__close {
   flex: none;
   display: grid;
@@ -8370,7 +8455,7 @@ html.is-replay #world {
   color: color-mix(in srgb, var(--st-working) 75%, #fff);
 }
 
-/* Botões do topo da janela (Assumir daqui, Encerrar). */
+/* Top of window buttons (Take over here, End). */
 .ui-termact {
   display: flex;
   align-items: center;
@@ -8391,7 +8476,7 @@ html.is-replay #world {
   color: #ff8a80;
 }
 
-/* Sessão aberta noutro terminal: aviso no lugar da tela. */
+/* Session open in another terminal: notice in place of screen. */
 .ui-pty__away {
   display: grid;
   align-content: center;
@@ -8401,6 +8486,30 @@ html.is-replay #world {
   padding: 24px;
   text-align: center;
   background: #0a0c12;
+}
+
+/* A worker's terminal, watch-only (ui/pty.ts): typing is blocked. */
+.ui-pty__watch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(106, 168, 255, 0.12);
+  border-bottom: 1px solid rgba(106, 168, 255, 0.35);
+  font-size: 12.5px;
+}
+
+.ui-pty__watch-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-pty.is-watching .ui-pty__body {
+  cursor: not-allowed;
+}
+
+.ui-pty.is-watching .ui-pty__live {
+  display: none;
 }
 
 .ui-pty__away strong {
@@ -8421,7 +8530,7 @@ html.is-replay #world {
   display: none;
 }
 
-/* Arrastar abas do terminal para reordenar (ui/termtabs.ts). */
+/* Drag terminal tabs to reorder (ui/termtabs.ts). */
 .ui-ttab {
   position: relative;
 }
@@ -8449,7 +8558,7 @@ html.is-replay #world {
   right: -2px;
 }
 
-/* ------------------------------------------------------------------ entregas */
+/* ------------------------------------------------------------------ deliveries */
 
 .ui-btn-deliv {
   position: relative;
@@ -8658,7 +8767,7 @@ html.is-replay #world {
 .ui-deliv-initial--sm { width: 22px; height: 22px; }
 .ui-deliv-initial--md { width: 40px; height: 40px; font-size: 18px; }
 
-/* Modal da entrega: folha inteira no celular, cartão central no computador. */
+/* Delivery modal: full sheet on mobile, centered card on desktop. */
 .ui-deliv-modal,
 .ui-deliv-viewer {
   padding: 0;
@@ -8825,7 +8934,7 @@ html.is-replay #world {
   min-height: 44px;
 }
 
-/* Visualizador: tela cheia, fundo escuro. */
+/* Viewer: full screen, dark background. */
 .ui-deliv-viewer {
   width: 100vw;
   height: 100dvh;
@@ -8895,7 +9004,7 @@ html.is-replay #world {
   cursor: zoom-in;
 }
 
-/* Toque na imagem: tamanho real, arrastar para ver o resto; outro toque volta a caber na tela. */
+/* Tap on image: actual size, drag to pan; another tap fits back to screen. */
 .ui-deliv-viewer__body.is-zoomed {
   display: block;
   place-items: initial;
@@ -8933,7 +9042,7 @@ html.is-replay #world {
   color: var(--ui-muted);
 }
 
-/* Aviso de entrega nova: cartão no rodapé, toque abre. */
+/* New delivery notice: card in footer, tap opens. */
 .ui-deliv-toast {
   position: fixed;
   left: 50%;
@@ -9007,7 +9116,7 @@ html.is-replay #world {
   }
 }
 
-/* App na Tela de Início (viewport-fit=cover): o que encosta no rodapé sobe acima da barra de gestos do iPhone. */
+/* Home Screen app (viewport-fit=cover): elements touching footer rise above iPhone home indicator. */
 .ui-feed {
   bottom: calc(var(--gap) + env(safe-area-inset-bottom, 0px));
 }
@@ -9018,7 +9127,7 @@ html.is-replay #world {
   }
 }
 
-/* Celular: atalhos de teclado não servem para nada; a caixa de mensagem fica sempre à mão no rodapé da gaveta. */
+/* Mobile: keyboard shortcuts are useless; composer box stays always handy in drawer footer. */
 @media (pointer: coarse) {
   .ui-kbd {
     display: none !important;
@@ -9039,11 +9148,11 @@ html.is-replay #world {
 }
 
 /* ------------------------------------------------------------------ Habblaud World (ui/world/)
-   Seção em Configurações (conta, lista de espera, personagem, visibilidade, dispositivos) e o cartão de convite.
-   Mesmas cores do resto do painel (tokens do .ui-root); o popover já ocupa a largura do celular com as margens. */
+   Settings section (account, waitlist, character, visibility, devices) and invitation card.
+   Same colors as rest of panel (.ui-root tokens); popover spans mobile width with margins. */
 
-/* A janela do Habblaud World (ui/world/world-dialog.ts): um <dialog> modal com o botão próprio na barra do topo; o
-   conteúdo (.ui-world) é o de settings-world.ts, e o chip do estado da conta fica no cabeçalho. */
+/* Habblaud World window (ui/world/world-dialog.ts): a modal <dialog> with its own top bar button;
+   content (.ui-world) is from settings-world.ts, and account status chip is in header. */
 .ui-world-dialog {
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
@@ -9290,7 +9399,7 @@ html.is-replay #world {
   gap: 8px;
 }
 
-/* Campos */
+/* Fields */
 .ui-world__field {
   display: flex;
   flex-direction: column;
@@ -9365,7 +9474,7 @@ html.is-replay #world {
   accent-color: #2f7fd1;
 }
 
-/* Resumo de privacidade (tela do cadastro) */
+/* Privacy summary (registration screen) */
 .ui-world__summary {
   display: flex;
   flex-direction: column;
@@ -9419,7 +9528,7 @@ html.is-replay #world {
   line-height: 1.45;
 }
 
-/* Conta: lote do prédio, personagem, navegação */
+/* Account: building plot, character, navigation */
 .ui-world__lot {
   display: flex;
   align-items: center;
@@ -9435,7 +9544,7 @@ html.is-replay #world {
   flex: none;
   width: 30px;
   height: 40px;
-  /* Prédio apagado em pixels: corpo, janelas e porta. */
+  /* Dimmed pixel building: body, windows, and door. */
   background:
     linear-gradient(var(--ui-faint), var(--ui-faint)) 12px 32px / 6px 8px no-repeat,
     linear-gradient(rgba(124, 200, 255, 0.35), rgba(124, 200, 255, 0.35)) 6px 8px / 6px 4px no-repeat,
@@ -9470,7 +9579,7 @@ html.is-replay #world {
   overflow-wrap: anywhere;
 }
 
-/* "Seu nome de jogador: X (reservado)", na lista de espera. */
+/* "Your player name: X (reserved)", in waitlist. */
 .ui-world__reserved {
   font-size: 12.5px;
   color: var(--ui-muted);
@@ -9543,7 +9652,7 @@ html.is-replay #world {
   gap: 4px 14px;
 }
 
-/* Personagem */
+/* Character */
 .ui-world__character .ui-char__top {
   align-items: center;
 }
@@ -9596,7 +9705,7 @@ html.is-replay #world {
   cursor: not-allowed;
 }
 
-/* Dispositivos */
+/* Devices */
 .ui-world__devices {
   display: flex;
   flex-direction: column;
@@ -9624,15 +9733,15 @@ html.is-replay #world {
   color: var(--ui-accent);
 }
 
-/* Textos do World com "C" maiúsculo e dígitos ("Criar conta", "Confirmar e-mail"): na Pixelify o "C" parece "O",
-   então os botões principais e o título do popup usam a fonte do corpo. */
+/* World strings with uppercase "C" and digits ("Create account", "Confirm email"): in Pixelify "C" looks like "O",
+   so primary buttons and popup title use body font. */
 .ui-world .ui-btn--primary,
 .ui-world-popup .ui-btn--primary {
   font: 600 13px/1 var(--font-ui);
   letter-spacing: 0;
 }
 
-/* Botões: confirmação em dois cliques e "enviando" */
+/* Buttons: two-click confirmation and "sending" */
 .ui-btn.is-danger {
   border-color: color-mix(in srgb, var(--lv-crit) 55%, transparent);
   background: color-mix(in srgb, var(--lv-crit) 14%, transparent);
@@ -9653,8 +9762,8 @@ html.is-replay #world {
   animation: ui-blink 0.8s steps(2, jump-none) infinite;
 }
 
-/* Os popups de lançamento do Habblaud World ("Novidade", "Você está na lista de espera", "Acesso liberado!"): um
-   <dialog> modal no top layer (acima de Configurações), centralizado, com o fundo escurecido e rolagem interna. */
+/* Habblaud World launch popups ("What's new", "You are on the waitlist", "Access granted!"): a
+   modal <dialog> in top layer (above Settings), centered, with backdrop and internal scroll. */
 .ui-world-popup {
   width: min(480px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
@@ -9824,9 +9933,9 @@ html.is-replay #world {
   }
 }
 
-/* ------------------------------------------------------------------ Habblaud World: prédio no mundo (Fase 2)
-   Cartão "Seu prédio" na seção (conta aprovada), a janela "Ver o que foi enviado", a dica do tema em Aparência e o
-   chip da barra do topo. A interface só tem o tema escuro: as cores saem dos tokens do .ui-root. */
+/* ------------------------------------------------------------------ Habblaud World: building in world (Phase 2)
+   "Your building" card in section (approved account), "View what was sent" window, theme tip in Appearance, and
+   top bar chip. Interface only has dark theme: colors come from .ui-root tokens. */
 
 .ui-world__building {
   --bld: var(--st-working);
@@ -9854,7 +9963,7 @@ html.is-replay #world {
   border-style: dashed;
 }
 
-/* Parado pelo servidor do mundo (atualize, outro computador, conta suspensa...): vermelho; fora do mundo: cinza. */
+/* Stopped by world server (update, another computer, suspended account...): red; outside world: gray. */
 .ui-world__building.is-stopped {
   --bld: var(--lv-crit);
 }
@@ -9864,7 +9973,7 @@ html.is-replay #world {
   border-style: dashed;
 }
 
-/* "Sair do mundo": separado das ações do dia a dia por uma linha, com a explicação em cima do botão. */
+/* "Leave the world": separated from daily actions by a line, with explanation above button. */
 .ui-world__leave {
   display: flex;
   flex-direction: column;
@@ -9878,7 +9987,7 @@ html.is-replay #world {
   line-height: 1.45;
 }
 
-/* Fase 6: recurso por e-mail (conta suspensa ou banida, prédio "não verificado") e o selo no cartão. */
+/* Phase 6: appeal by email (suspended or banned account, "unverified" building) and badge on card. */
 .ui-world__appeal {
   display: flex;
   flex-direction: column;
@@ -9902,7 +10011,7 @@ html.is-replay #world {
   line-height: 1.45;
 }
 
-/* O mundo em manutenção: aviso âmbar no topo da seção (o prédio tenta de novo sozinho). */
+/* World under maintenance: amber notice at top of section (building retries automatically). */
 .ui-world__maint {
   padding: 9px 11px;
   border-radius: 8px;
@@ -9913,7 +10022,7 @@ html.is-replay #world {
   line-height: 1.45;
 }
 
-/* "Conta e dados": blocos separados por uma linha; excluir a conta, com a borda vermelha à esquerda. */
+/* "Account and data": blocks separated by a line; delete account, with red left border. */
 .ui-world__acct {
   display: flex;
   flex-direction: column;
@@ -9944,7 +10053,7 @@ html.is-replay #world {
   min-width: 0;
 }
 
-/* Prédio em pixels: aceso (janelas amarelas) só com a conexão aberta. */
+/* Pixel building: illuminated (yellow windows) only with open connection. */
 .ui-world__bart {
   --win: rgba(124, 200, 255, 0.22);
   flex: none;
@@ -10048,7 +10157,7 @@ html.is-replay #world {
   line-height: 1.45;
 }
 
-/* Dica do tema em Aparência (o tema também vai para o prédio). */
+/* Theme tip in Appearance (theme also applies to building). */
 .ui-world-theme {
   display: block;
   margin-top: 2px;
@@ -10058,7 +10167,7 @@ html.is-replay #world {
   font-size: inherit;
 }
 
-/* Janela "Ver o que foi enviado": cartão central no computador, quase a tela toda no celular. */
+/* "View what was sent" window: centered card on desktop, almost full screen on mobile. */
 .ui-world-sent {
   width: min(620px, calc(100vw - 32px));
   max-width: none;
@@ -10175,7 +10284,7 @@ html.is-replay #world {
   outline-offset: 1px;
 }
 
-/* Chip da barra do topo: discreto como o número da versão; verde aceso, cinza pausado, âmbar reconectando. */
+/* Top bar chip: subtle like version number; lit green, paused gray, reconnecting amber. */
 .ui-world-chip {
   --chip: var(--st-working);
   display: inline-flex;
@@ -10217,8 +10326,8 @@ html.is-replay #world {
   font-size: 9px;
 }
 
-/* Barra apertada: a linha de status vira um selo no canto do logo (sem versão nem "Demonstração"); o chip sai também
-   (o prédio continua em Configurações › Habblaud World). */
+/* Tight bar: status line becomes badge on logo corner (no version or "Demo"); chip removed too
+   (building remains in Settings › Habblaud World). */
 @media (max-width: 1040px) {
   .ui-world-chip {
     display: none;
@@ -10243,9 +10352,9 @@ html.is-replay #world {
   }
 }
 
-/* ------------------------------------------------------------------ Habblaud World: a cidade (botão Mundo) */
+/* ------------------------------------------------------------------ Habblaud World: the city (World button) */
 
-/* Botão Mundo / Escritório, ao lado do Timelapse: com rótulo (é a troca de cena), em azul quando na cidade. */
+/* World / Office button, next to Timelapse: with label (it's scene switch), blue when in city. */
 .ui-scene-btn {
   display: inline-flex;
   align-items: center;
@@ -10288,7 +10397,7 @@ html.is-replay #world {
   }
 }
 
-/* Na cidade, o que é do escritório sai da frente (Configurações, ajuda e os avisos continuam). */
+/* In city, office elements move out of the way (Settings, help, and toasts remain). */
 .ui-root.is-city > .ui-sidebar,
 .ui-root.is-city > .ui-feed,
 .ui-root.is-city > .ui-drawer,
@@ -10309,7 +10418,7 @@ html.is-replay #world {
   position: fixed;
   inset: 0;
   z-index: 40;
-  /* a camada cobre a tela, mas os cliques passam para o canvas da cidade (só o cartão e o minimapa recebem) */
+  /* layer covers screen, but clicks pass through to city canvas (only card and minimap receive them) */
   pointer-events: none;
 }
 
@@ -10321,13 +10430,13 @@ html.is-replay #world {
   display: none;
 }
 
-/* Os avisos do escritório continuam na cidade, acima do minimapa. */
+/* Office toasts continue in city, above minimap. */
 .ui-root.is-city .ui-toasts {
   right: calc(12px + env(safe-area-inset-right));
   bottom: calc(150px + env(safe-area-inset-bottom));
 }
 
-/* Cartões do prédio e do jogador */
+/* Building and player cards */
 .ui-city-card {
   position: fixed;
   left: 0;
@@ -10543,7 +10652,7 @@ html.is-replay #world {
   text-decoration: underline;
 }
 
-/* Minimapa */
+/* Minimap */
 .ui-city-minimap {
   position: fixed;
   right: calc(12px + env(safe-area-inset-right));
@@ -10566,7 +10675,7 @@ html.is-replay #world {
   image-rendering: pixelated;
 }
 
-/* Dica das teclas, aviso rápido e "entrando" */
+/* Keys tooltip, quick toast, and "entering" */
 .ui-city-help {
   position: fixed;
   left: calc(12px + env(safe-area-inset-left));
@@ -10649,9 +10758,9 @@ html.is-replay #world {
   }
 }
 
-/* ===================================================================== Visita (Habblaud World, Fase 4) */
+/* ===================================================================== Visit (Habblaud World, Phase 4) */
 
-/* Dentro de um prédio: a cidade fica parada por baixo; dela, só os avisos continuam. */
+/* Inside a building: city stays paused underneath; only its toasts continue. */
 .ui-city.is-visiting > :not(.ui-city-toast) {
   display: none !important;
 }
@@ -10660,7 +10769,7 @@ html.is-replay #world {
   position: fixed;
   inset: 0;
   z-index: 41;
-  /* os cliques passam para o canvas da visita (só a faixa, o painel e os botões recebem) */
+  /* clicks pass through to visit canvas (only banner, panel, and buttons receive them) */
   pointer-events: none;
 }
 
@@ -10760,7 +10869,7 @@ html.is-replay #world {
   padding: 0 14px;
 }
 
-/* Painel lateral: salas e agentes, só leitura */
+/* Side panel: rooms and agents, read-only */
 .ui-visit-panel {
   position: fixed;
   top: calc(var(--ui-visit-top, 76px));
@@ -10926,7 +11035,7 @@ html.is-replay #world {
   white-space: nowrap;
 }
 
-/* Cartão de um agente: nome, papel, ferramenta e status (nada mais) */
+/* Agent card: name, role, tool, and status (nothing else) */
 .ui-visit-card {
   padding: 10px;
   border-radius: var(--radius-sm);
@@ -10999,7 +11108,7 @@ html.is-replay #world {
   background: #8790a6;
 }
 
-/* "Sair pelo elevador (E)" sobre o visitante */
+/* "Leave via elevator (E)" above visitor */
 .ui-visit-exit {
   position: fixed;
   left: 0;
@@ -11070,7 +11179,7 @@ html.is-replay #world {
   display: none;
 }
 
-/* Celular: a faixa ocupa a largura; o painel vira uma folha embaixo, aberta pelo botão "Salas" */
+/* Mobile: banner spans width; panel becomes bottom sheet, opened via "Rooms" button */
 @media (max-width: 760px) {
   .ui-visit-bar,
   .ui-visit.has-panel .ui-visit-bar {
@@ -11115,14 +11224,14 @@ html.is-replay #world {
   }
 }
 
-/* Na visita, os avisos do escritório desta máquina ficam ao lado do painel (e acima da folha, no celular). */
+/* During visit, toasts from this machine's office appear next to panel (and above sheet on mobile). */
 .ui-root.is-visit .ui-toasts {
   right: calc(300px + env(safe-area-inset-right));
   bottom: calc(56px + env(safe-area-inset-bottom));
 }
 
 @media (max-width: 760px) {
-  /* no celular, embaixo (a folha das salas, aberta, fica por cima) */
+  /* on mobile, at bottom (open rooms sheet stays on top) */
   .ui-root.is-visit .ui-toasts {
     right: calc(8px + env(safe-area-inset-right));
     bottom: calc(8px + env(safe-area-inset-bottom));
@@ -11133,7 +11242,7 @@ html.is-replay #world {
   }
 }
 
-/* "👀 N" no chip do mundo: gente visitando o seu prédio agora */
+/* "👀 N" on world chip: people visiting your building right now */
 .ui-world-chip__visitors {
   margin-left: 4px;
   padding: 0 5px;
@@ -11146,4 +11255,518 @@ html.is-replay #world {
 
 .ui-world-chip__visitors[hidden] {
   display: none;
+}
+
+/* Job board button in the toolbar: number of jobs in progress in the corner. */
+.ui-btn-board {
+  position: relative;
+}
+
+.ui-btn-overload {
+  position: relative;
+  font-size: 15px;
+}
+
+.ui-btn-overload::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f2b33d;
+}
+
+.ui-btn-overload.is-overloaded::after {
+  background: #e05555;
+}
+
+.ui-dialog.ui-overload {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.ui-overload__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 18px 18px;
+  overflow-y: auto;
+}
+
+.ui-overload__body > p {
+  margin: 0;
+}
+
+.ui-overload__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ui-overload__item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ui-line-strong);
+  border-left: 4px solid #f2b33d;
+}
+
+.ui-overload__item.is-overloaded {
+  border-left-color: #e05555;
+}
+
+.ui-overload__who {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ui-overload__facts {
+  margin: 4px 0 8px;
+}
+
+.ui-overload__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ui-btn-board__count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  color: #1b1f2a;
+  background: #f5c542;
+  pointer-events: none;
+}
+
+/* 📜 Rules (ui/rules-dialog.ts): the toolbar button (active rules; ⚠ with violations today) and the dialog. */
+.ui-btn-rules {
+  position: relative;
+}
+
+.ui-btn-rules__count {
+  color: var(--ui-text);
+  background: var(--ui-line-strong);
+}
+
+.ui-btn-rules__warn {
+  position: absolute;
+  top: 0;
+  right: -1px;
+  min-width: 14px;
+  border-radius: 7px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+  background: var(--ui-danger, #e05555);
+  pointer-events: none;
+}
+
+.ui-btn-rules__warn[hidden],
+.ui-btn-rules__count[hidden] {
+  display: none;
+}
+
+.ui-dialog.ui-rulesdlg {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.ui-rules__body {
+  max-height: calc(100vh - 120px);
+}
+
+.ui-rules__part {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.ui-rules__head {
+  margin: 0;
+  font: 700 13px/1.3 var(--font-ui);
+}
+
+.ui-rules__folder {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+
+.ui-rules__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ui-rules__area {
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 6px;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font: 12px/1.4 var(--font-mono);
+  resize: vertical;
+}
+
+.ui-rules__items,
+.ui-rules__proposals,
+.ui-rules__log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-rules__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-rules__item.is-off .ui-rules__text {
+  opacity: 0.55;
+}
+
+.ui-rules__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ui-rules__for {
+  flex: none;
+  padding: 4px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 6px;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.ui-rules__limits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ui-rules__num {
+  width: 110px;
+}
+
+.ui-rules__proposal {
+  padding: 6px 8px;
+  border: 1px dashed var(--ui-line-strong);
+  border-radius: 6px;
+}
+
+.ui-rules__ptext,
+.ui-rules__pmeta {
+  margin: 0;
+}
+
+.ui-rules__pmeta {
+  font-size: 11px;
+}
+
+.ui-rules__pact {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ui-rules__entry {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.ui-rules__who {
+  font-weight: 600;
+}
+
+.ui-rules__detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ui-rules__changed {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(245, 197, 66, 0.15);
+}
+
+/* An office whose folder overlaps another's (a team file from before that rule): ⚠ on its tab. */
+.ui-offices__tab.is-overlap .ui-offices__name::before {
+  content: '⚠ ';
+  color: var(--ui-danger, #ff8a8a);
+}
+
+.ui-officemenu__warn {
+  margin: 4px 0 2px;
+  font-size: 12px;
+  color: var(--ui-danger, #ff8a8a);
+}
+
+.ui-officedlg__scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+
+.ui-officedlg__scope span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hold Alt: what each button and area does (ui/hints.ts). In the top layer (popover) so it also covers dialogs. */
+.ui-hints {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: rgba(8, 10, 16, 0.55);
+  pointer-events: none;
+  color: var(--ui-text, #e8ecf5);
+}
+
+.ui-hints[hidden] {
+  display: none;
+}
+
+.ui-hints__box {
+  position: fixed;
+  border: 1.5px dashed rgba(124, 200, 255, 0.85);
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px rgba(8, 10, 16, 0.35);
+}
+
+.ui-hints__box.is-region {
+  border-color: rgba(124, 200, 255, 0.35);
+}
+
+.ui-hints__note {
+  position: fixed;
+  left: 0;
+  top: 0;
+  max-width: 220px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: #fff6c8;
+  color: #2a2000;
+  font: 600 11px/1.3 var(--font-ui, system-ui, sans-serif);
+  box-shadow: 0 4px 12px rgba(5, 7, 12, 0.45);
+  white-space: normal;
+}
+
+/* ---------------------------------------------------------------- Accounts (👤, ui/accounts.ts) */
+.ui-dialog.ui-accounts {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.ui-accounts__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 18px 18px;
+  overflow-y: auto;
+}
+
+.ui-accounts__body > p,
+.ui-accounts__body > h3 {
+  margin: 0;
+}
+
+.ui-accounts__body > h3 {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.ui-accounts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-accounts__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ui-line-strong);
+}
+
+.ui-accounts__item.is-off {
+  opacity: 0.55;
+}
+
+.ui-accounts__item.is-new {
+  border-style: dashed;
+}
+
+.ui-accounts__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ui-line-strong);
+}
+
+.ui-accounts__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ui-accounts__who > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-accounts__usage {
+  flex: none;
+  font-size: 12px;
+}
+
+/* An account at USAGE_WARN % or more of a limit (ui/accounts.ts). */
+.ui-accounts__item.is-hot .ui-accounts__usage {
+  color: var(--lv-crit);
+  font-weight: 600;
+}
+
+/* 👤 with "⚠2": accounts close to a limit. */
+.ui-btn-accounts {
+  position: relative;
+}
+
+.ui-btn-accounts__warn {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: var(--lv-crit);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 14px;
+  pointer-events: none;
+}
+
+/* The boss's and the workers' quota under their row: "5 h ▮▮▮▯▯ 42%" and "week ▮▯▯▯▯ 17%" (ui/sidebar.ts). */
+.ui-node__quota {
+  display: grid;
+  gap: 2px;
+  margin: 0 12px 6px 46px;
+}
+
+.ui-quota {
+  --lv: var(--lv-ok);
+  display: grid;
+  grid-template-columns: 34px 1fr 32px;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  line-height: 12px;
+  color: var(--ui-muted);
+}
+
+.ui-quota.is-warn {
+  --lv: var(--lv-warn);
+}
+
+.ui-quota.is-crit {
+  --lv: var(--lv-crit);
+}
+
+.ui-quota__bar {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ui-faint) 25%, transparent);
+  overflow: hidden;
+}
+
+.ui-quota__fill {
+  display: block;
+  height: 100%;
+  background: var(--lv);
+}
+
+.ui-quota__pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text);
+}
+
+.ui-quota.is-crit .ui-quota__pct {
+  color: var(--lv-crit);
+  font-weight: 600;
+}
+
+.ui-accounts__actions,
+.ui-accounts__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-accounts__form[hidden] {
+  display: none;
+}
+
+.ui-accounts__name {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--ui-line-strong);
+  background: rgba(0, 0, 0, 0.25);
+  font: 600 14px/1 var(--font-ui);
+  color: var(--ui-text);
+}
+
+@media (max-width: 520px) {
+  .ui-accounts__item {
+    flex-wrap: wrap;
+  }
 }

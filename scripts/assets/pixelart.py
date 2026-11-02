@@ -1,9 +1,9 @@
-"""Pixel art desenhada à mão (mapas de caracteres) para os tamanhos em que a redução automática
-da arte da IA não fica nítida: o mark em 32x32 e 16x16 ("hinting" do desenho da IA, com a mesma
-paleta) e a placa "Habblaud" e textos do og-image com uma fonte bitmap proporcional (5x7, com acentos).
+"""Hand-drawn pixel art (character maps) for sizes where automatic downscaling of AI art
+is not crisp: mark in 32x32 and 16x16 ("hinting" of the AI drawing, with the same
+palette) and the "Habblaud" sign and og-image text with a proportional bitmap font (5x7, with accents).
 
-O desenho de referência é a tomada escolhida de `logo-mark` (prédio frontal, telhado verde-azulado,
-faixas de madeira, janelas acesas em amarelo e duas telas azuis, porta de vidro com toldo).
+Reference drawing is the selected take of `logo-mark` (front-facing building, teal roof,
+wood bands, lit yellow windows and two blue screens, glass door with awning).
 """
 
 from __future__ import annotations
@@ -11,34 +11,34 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
-# Paleta amostrada da arte nativa da IA (logo-mark, já quantizada): um tom por material.
+# Palette sampled from native AI art (logo-mark, already quantized): one shade per material.
 PALETTE: dict[str, str] = {
-    "O": "#111931",  # contorno azul-marinho
-    "J": "#0e4060",  # contorno do telhado
-    "L": "#d2efec",  # borda clara do telhado / brilho do vidro
-    "R": "#3e8da0",  # telhado
-    "U": "#61bac5",  # telhado (luz) / toldo
-    "F": "#c9bab2",  # fachada
-    "H": "#eadacb",  # fachada (luz)
-    "f": "#8f7b7f",  # fachada (sombra)
-    "K": "#3e526f",  # moldura das janelas
-    "Y": "#fee074",  # janela acesa
-    "y": "#fab63f",  # janela acesa (sombra)
-    "S": "#20b6fd",  # tela azul
-    "s": "#0b6bf0",  # tela azul (sombra)
-    "W": "#db954f",  # madeira / vaso
-    "w": "#ecb761",  # madeira (luz)
-    "b": "#7c4116",  # madeira (sombra)
-    "u": "#b05b39",  # vaso (sombra) / batente da porta
-    "p": "#692a18",  # vaso (contorno)
-    "G": "#67c53d",  # folha
-    "g": "#198834",  # folha (meio-tom)
-    "q": "#033e1f",  # folha (contorno)
-    "D": "#a3d4e5",  # vidro da porta
+    "O": "#111931",  # navy outline
+    "J": "#0e4060",  # roof outline
+    "L": "#d2efec",  # light roof rim / glass shine
+    "R": "#3e8da0",  # roof
+    "U": "#61bac5",  # roof (highlight) / awning
+    "F": "#c9bab2",  # facade
+    "H": "#eadacb",  # facade (highlight)
+    "f": "#8f7b7f",  # facade (shadow)
+    "K": "#3e526f",  # window frame
+    "Y": "#fee074",  # lit window
+    "y": "#fab63f",  # lit window (shadow)
+    "S": "#20b6fd",  # blue screen
+    "s": "#0b6bf0",  # blue screen (shadow)
+    "W": "#db954f",  # wood / pot
+    "w": "#ecb761",  # wood (highlight)
+    "b": "#7c4116",  # wood (shadow)
+    "u": "#b05b39",  # pot (shadow) / door frame
+    "p": "#692a18",  # pot (outline)
+    "G": "#67c53d",  # leaf
+    "g": "#198834",  # leaf (mid-tone)
+    "q": "#033e1f",  # leaf (outline)
+    "D": "#a3d4e5",  # door glass
 }
 
-# Mark 32x32: telhado em laje com borda clara, vaso no canto direito, faixas de madeira, janelas
-# 6x5 com moldura (duas telas azuis no 2º andar, à esquerda e no centro) e porta de vidro com toldo.
+# Mark 32x32: flat roof with light rim, pot on right corner, wood bands, 6x5 windows
+# with frame (two blue screens on 2nd floor, left and center) and glass door with awning.
 MARK_32 = [
     "....................qGq.qGq.....",
     "...................qGgGqGgGq....",
@@ -74,7 +74,7 @@ MARK_32 = [
     "..OOOOOOOOOOOOOOOOOOOOOOOOOOOO..",
 ]
 
-# Mark 16x16 (favicon): mesmas massas de cor, janelas 2x2 sem moldura.
+# Mark 16x16 (favicon): same color masses, 2x2 frameless windows.
 MARK_16 = [
     ".........qGgGq..",
     "..........pWWp..",
@@ -94,9 +94,9 @@ MARK_16 = [
     ".OOOOOOOOOOOOOO.",
 ]
 
-# Fonte bitmap proporcional (maiúsculas 5x7). Célula de 9 linhas: maiúsculas e ascendentes nas
-# linhas 0-6, altura-x de 5 linhas (2-6), descendentes nas linhas 7-8 e acentos das minúsculas
-# nas linhas 0-1. Glifos com 7 linhas não têm descendente. Espaço entre letras: 1px.
+# Proportional bitmap font (5x7 uppercase). 9-row cell: uppercase and ascenders on
+# rows 0-6, 5-row x-height (2-6), descenders on rows 7-8, and lowercase accents
+# on rows 0-1. 7-row glyphs have no descender. Letter spacing: 1px.
 _GLYPHS: dict[str, list[str]] = {
     "A": [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
     "B": ["####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."],
@@ -172,7 +172,7 @@ _GLYPHS: dict[str, list[str]] = {
     "%": ["##..#", "##..#", "...#.", "..#..", ".#...", "#..##", "#..##"],
 }
 
-# Acentos das minúsculas (linhas 0-1), alinhados pela direita/centro conforme a largura do glifo.
+# Lowercase accents (rows 0-1), aligned right/center based on glyph width.
 _ACCENTS: dict[str, tuple[str, str]] = {
     "acute": ("...#.", "..#.."),
     "grave": (".#...", "..#.."),
@@ -192,7 +192,7 @@ def _build_font() -> dict[str, list[str]]:
         rows = list(font[base])
         width = len(rows[0])
         top, bottom = _ACCENTS[accent]
-        if width < 5:  # glifos estreitos (i): acento centralizado de 3 colunas
+        if width < 5:  # narrow glyphs (i): 3-column centered accent
             top, bottom = top[1:4], bottom[1:4]
         rows[0], rows[1] = top, bottom
         font[ch] = rows
@@ -213,10 +213,10 @@ def hex_rgba(value: str) -> tuple[int, int, int, int]:
 
 
 def render_map(rows: list[str], palette: dict[str, str] = PALETTE) -> Image.Image:
-    """Converte um mapa de caracteres em imagem RGBA ('.' = transparente)."""
+    """Converts a character map to an RGBA image ('.' = transparent)."""
     width = len(rows[0])
     if any(len(r) != width for r in rows):
-        raise ValueError("mapa com linhas de larguras diferentes")
+        raise ValueError("map with mismatched row widths")
     img = np.zeros((len(rows), width, 4), dtype=np.uint8)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
@@ -227,7 +227,7 @@ def render_map(rows: list[str], palette: dict[str, str] = PALETTE) -> Image.Imag
 
 def _glyph(ch: str) -> list[str]:
     if ch not in FONT:
-        raise KeyError(f"a fonte bitmap não tem o caractere {ch!r}")
+        raise KeyError(f"bitmap font lacks character {ch!r}")
     return FONT[ch]
 
 
@@ -236,7 +236,7 @@ def text_width(text: str) -> int:
 
 
 def draw_text(img: Image.Image, x: int, y: int, text: str, color: str) -> None:
-    """Escreve `text` com a fonte bitmap; (x, y) = canto superior esquerdo da célula (linha 0)."""
+    """Writes `text` with bitmap font; (x, y) = top-left corner of cell (row 0)."""
     px = img.load()
     rgba = hex_rgba(color)
     for ch in text:
@@ -249,7 +249,7 @@ def draw_text(img: Image.Image, x: int, y: int, text: str, color: str) -> None:
 
 
 def text_image(text: str, color: str, scale: int = 1, shadow: str | None = None) -> Image.Image:
-    """Texto como imagem RGBA (altura = célula de 9 linhas), com sombra opcional de 1px, ampliado por inteiro."""
+    """Text as RGBA image (height = 9-row cell), with optional 1px shadow, scaled by integer."""
     w, h = text_width(text) + (1 if shadow else 0), CELL_HEIGHT + (1 if shadow else 0)
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     if shadow:
@@ -259,7 +259,7 @@ def text_image(text: str, color: str, scale: int = 1, shadow: str | None = None)
 
 
 def signage() -> Image.Image:
-    """Placa da recepção, 64x16: chapa azul-marinho com bisel, parafusos e "Habblaud"."""
+    """Reception sign, 64x16: navy plate with bevel, screws and "Habblaud"."""
     w, h = 64, 16
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     px = img.load()
@@ -267,7 +267,7 @@ def signage() -> Image.Image:
     for y in range(h):
         for x in range(w):
             if x in (0, w - 1) and y in (0, h - 1):
-                continue  # cantos arredondados
+                continue  # rounded corners
             if x in (0, w - 1) or y in (0, h - 1):
                 px[x, y] = outline
             elif y == 1:
@@ -276,10 +276,10 @@ def signage() -> Image.Image:
                 px[x, y] = bottom
             else:
                 px[x, y] = face
-    for sx in (3, w - 4):  # parafusos
+    for sx in (3, w - 4):  # screws
         px[sx, 7] = hex_rgba("#c9d3e3")
         px[sx, 8] = hex_rgba("#7d8aa3")
-    # texto centralizado com sombra de 1px; "Hab" claro e "blaud" na cor das janelas acesas
+    # centered text with 1px shadow; light "Hab" and "blaud" in lit-window color
     tx, ty = (w - text_width("Habblaud")) // 2, 4
     blaud_x = tx + text_width("Hab") + 1
     draw_text(img, tx, ty + 1, "Hab", "#151c33")
@@ -294,4 +294,4 @@ def mark(size: int) -> Image.Image:
         return render_map(MARK_32)
     if size == 16:
         return render_map(MARK_16)
-    raise ValueError(f"mark desenhado só existe em 16 e 32 px (pedido: {size})")
+    raise ValueError(f"hand-drawn mark only exists in 16 and 32 px (requested: {size})")

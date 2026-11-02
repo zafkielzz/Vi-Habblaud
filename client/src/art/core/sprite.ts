@@ -1,10 +1,10 @@
-// Sprites em buffer (puros) e folhas de desenho com origem no footprint do móvel.
+// Buffer sprites (pure) and drawing sheets with origin at furniture footprint.
 import { TILE, type Rect, type SpriteRectName } from '../api';
 import { PixelBuf } from './pixbuf';
 
 export type Rects = Partial<Record<SpriteRectName, Rect>>;
 
-/** Equivalente puro de Sprite: buffer + âncora + regiões dinâmicas. */
+/** Pure equivalent of Sprite: buffer + anchor + dynamic regions. */
 export interface BufSprite {
   buf: PixelBuf;
   ax: number;
@@ -18,8 +18,8 @@ export interface BufFurniture {
 }
 
 /**
- * Folha para móveis de chão: o desenho usa coordenadas do footprint — (0, 0) é o canto superior
- * esquerdo do footprint e (w*TILE, h*TILE) o inferior direito. A âncora é o centro inferior.
+ * Sheet for floor furniture: drawing uses footprint coordinates — (0, 0) is top-left
+ * corner of footprint and (w*TILE, h*TILE) is bottom-right. Anchor is bottom center.
  */
 export function floorSheet(wTiles: number, hTiles: number, up: number, side = 4, down = 3): BufSprite {
   const buf = new PixelBuf(wTiles * TILE + side * 2, up + hTiles * TILE + down);
@@ -29,8 +29,8 @@ export function floorSheet(wTiles: number, hTiles: number, up: number, side = 4,
 }
 
 /**
- * Folha para itens de parede: x = 0 é a borda esquerda do trecho de parede e y = 0 é a linha do
- * rodapé (a face da parede vai de y = -2*TILE até 0). A âncora é o centro inferior do trecho.
+ * Sheet for wall items: x = 0 is left edge of wall segment and y = 0 is baseboard
+ * line (wall face goes from y = -2*TILE to 0). Anchor is bottom center of segment.
  */
 export function wallSheet(wTiles: number, side = 2): BufSprite {
   const up = TILE * 2 + 4;
@@ -40,12 +40,12 @@ export function wallSheet(wTiles: number, side = 2): BufSprite {
   return { buf, ax: side + (wTiles * TILE) / 2, ay: up };
 }
 
-/** Converte um retângulo em coordenadas de desenho (com origem) para px do sprite. */
+/** Converts a rectangle in drawing coordinates (with origin) to sprite px. */
 export function rectAt(s: BufSprite, x: number, y: number, w: number, h: number): Rect {
   return { x: x + s.buf.ox, y: y + s.buf.oy, w, h };
 }
 
-/** Recorta o sprite ao conteúdo visível, preservando âncora e regiões. */
+/** Crops sprite to visible content, preserving anchor and regions. */
 export function trim(s: BufSprite): BufSprite {
   const b = s.buf.bounds();
   if (!b) return s;

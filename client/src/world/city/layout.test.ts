@@ -1,5 +1,5 @@
-// Geometria da cidade vista pela cena: grade do A* igual ao `isWalkable` do city.ts (o do servidor), portas,
-// decoração determinística e fora das portas, quarteirões visíveis.
+// City geometry seen by scene: A* grid matches isWalkable from city.ts (server's), doors,
+// deterministic decoration outside doors, visible blocks.
 import { describe, expect, it } from 'vitest';
 import { BLOCK_STRIDE, FOUNTAIN, isWalkable, lotDoor, lotOrigin, lotSpiral, spawnPoint } from '../../../../shared/world/city';
 import { PathFinder } from '../path/astar';
@@ -23,7 +23,7 @@ import {
 
 const anyLot = () => true;
 
-/** Os n primeiros de um gerador (a espiral é infinita). */
+/** First n elements from a generator (spiral is infinite). */
 function take<T>(gen: Iterable<T>, n: number): T[] {
   const out: T[] = [];
   for (const v of gen) {
@@ -33,8 +33,8 @@ function take<T>(gen: Iterable<T>, n: number): T[] {
   return out;
 }
 
-describe('grade caminhável (A*)', () => {
-  it('cada célula é exatamente o isWalkable do city.ts, inclusive nos negativos', () => {
+describe('walkable grid (A*)', () => {
+  it('each cell matches isWalkable from city.ts, including negative coordinates', () => {
     const rect = { x: -60, y: -40, w: 170, h: 110 };
     const { grid, ox, oy } = buildWalkGrid(rect);
     expect(ox).toBe(-60);
@@ -42,7 +42,7 @@ describe('grade caminhável (A*)', () => {
     for (let y = 0; y < grid.h; y++) for (let x = 0; x < grid.w; x++) expect(grid.walkable(x, y)).toBe(isWalkable(ox + x + 0.5, oy + y + 0.5, anyLot));
   });
 
-  it('lotes e a fonte bloqueiam; calçadas, pistas e a frente das portas não', () => {
+  it('lots and fountain block; sidewalks, streets, and door fronts do not', () => {
     const { grid, ox, oy } = buildWalkGrid({ x: -5, y: -5, w: 110, h: 75 });
     const at = (x: number, y: number) => grid.walkable(x - ox, y - oy);
     expect(at(FOUNTAIN.x, FOUNTAIN.y)).toBe(false);
@@ -56,7 +56,7 @@ describe('grade caminhável (A*)', () => {
     }
   });
 
-  it('o A* acha caminho da praça até a porta de um lote, só por tiles caminháveis', () => {
+  it('A* finds path from plaza to lot door using only walkable tiles', () => {
     const lot = take(lotSpiral(), 8)[7]!;
     const goal = lotDoor(lot).front;
     const start = spawnPoint();
@@ -67,7 +67,7 @@ describe('grade caminhável (A*)', () => {
     for (let i = 0; i < out.length; i += 2) expect(isWalkable(out[i]! + win.ox + 0.5, out[i + 1]! + win.oy + 0.5, anyLot)).toBe(true);
   });
 
-  it('o tile caminhável mais perto de um ponto dentro de um lote fica na calçada em volta', () => {
+  it('nearest walkable tile to a point inside a lot is on surrounding sidewalk', () => {
     const o = lotOrigin({ x: 3, y: 0 });
     const t = nearestWalkableTile(o.x + 7, o.y + 1)!;
     expect(isWalkable(t.x + 0.5, t.y + 0.5, anyLot)).toBe(true);
@@ -75,8 +75,8 @@ describe('grade caminhável (A*)', () => {
   });
 });
 
-describe('célula e quarteirões visíveis', () => {
-  it('a célula tem a calçada, a pista e o quarteirão somando a distância entre quarteirões', () => {
+describe('cell and visible blocks', () => {
+  it('cell contains sidewalk, street, and block summing to block stride', () => {
     const s = cellSurfaces();
     expect(CELL.w).toBe(BLOCK_STRIDE.x);
     expect(CELL.h).toBe(BLOCK_STRIDE.y);
@@ -86,18 +86,18 @@ describe('célula e quarteirões visíveis', () => {
     expect(s.crosswalks).toHaveLength(4);
   });
 
-  it('a faixa de quarteirões cobre a vista (com margem) e só ela', () => {
+  it('block range covers view (with margin) and nothing more', () => {
     const r = blockRange({ x0: 0, y0: 0, x1: 10, y1: 10 }, 0);
     expect(r).toEqual({ bx0: 0, by0: 0, bx1: 0, by1: 0 });
     const r2 = blockRange({ x0: -1, y0: -1, x1: BLOCK_STRIDE.x * TILE * 2, y1: 5 }, 0);
     expect(r2.bx0).toBe(0);
     expect(r2.bx1).toBe(2);
-    // a calçada oeste do quarteirão 0 (x = -2 tiles) já é do quarteirão 0
+    // west sidewalk of block 0 (x = -2 tiles) belongs to block 0
     expect(blockRange({ x0: -2 * TILE, y0: 0, x1: -2 * TILE + 1, y1: 1 }, 0).bx0).toBe(0);
     expect(blockRange({ x0: -3 * TILE, y0: 0, x1: -3 * TILE + 1, y1: 1 }, 0).bx0).toBe(-1);
   });
 
-  it('a praça não tem lotes; os outros quarteirões têm 6, em ordem de linha', () => {
+  it('plaza has no lots; other blocks have 6, in row order', () => {
     expect(lotsOfBlock({ x: 0, y: 0 })).toEqual([]);
     expect(lotsOfBlock({ x: -1, y: 2 })).toEqual([
       { x: -3, y: 4 }, { x: -2, y: 4 }, { x: -1, y: 4 },
@@ -107,8 +107,8 @@ describe('célula e quarteirões visíveis', () => {
   });
 });
 
-describe('portas', () => {
-  it('acha a porta mais perto entre os lotes aceitos', () => {
+describe('doors', () => {
+  it('finds nearest door among accepted lots', () => {
     const lot = { x: 4, y: 1 };
     const f = lotDoor(lot).front;
     expect(nearestDoor(f.x, f.y + 0.4, () => true)?.lot).toEqual(lot);
@@ -117,8 +117,8 @@ describe('portas', () => {
   });
 });
 
-describe('decoração determinística', () => {
-  it('a calçada sai igual a cada chamada e deixa a frente das portas livre', () => {
+describe('deterministic decoration', () => {
+  it('sidewalk generates identically on each call and leaves door fronts clear', () => {
     for (const b of [{ x: 1, y: 0 }, { x: -2, y: 3 }, { x: 0, y: 0 }, { x: 4, y: -1 }]) {
       const a = sidewalkDecor(b);
       expect(sidewalkDecor(b)).toEqual(a);
@@ -126,7 +126,7 @@ describe('decoração determinística', () => {
       const doorsX = [0, 1, 2].map((i) => o.x + i * 14 + 7);
       for (const d of a) {
         const ty = d.y / TILE;
-        // só as calçadas norte e sul têm portas
+        // only north and south sidewalks have doors
         const onDoorRow = ty < o.y || ty > o.y + 24;
         if (!onDoorRow || d.x / TILE < o.x || d.x / TILE > o.x + 42) continue;
         for (const dx of doorsX) expect(Math.abs(d.x / TILE - dx)).toBeGreaterThanOrEqual(2.5);
@@ -134,12 +134,12 @@ describe('decoração determinística', () => {
     }
   });
 
-  it('jardins e quintais saem iguais por lote; jardim é uma das variantes', () => {
+  it('gardens and yards generate identically per lot; garden is one of variants', () => {
     const lot = { x: 7, y: -3 };
     expect(lotDecor(lot, false)).toEqual(lotDecor(lot, false));
     expect(lotDecor(lot, true)).toEqual(lotDecor(lot, true));
     expect(GARDEN_KINDS).toContain(gardenKind(lot));
-    // tudo dentro do lote
+    // entirely within the lot
     const o = lotOrigin(lot);
     for (const d of [...lotDecor(lot, false), ...lotDecor(lot, true)]) {
       expect(d.x).toBeGreaterThanOrEqual(o.x * TILE);
@@ -149,7 +149,7 @@ describe('decoração determinística', () => {
     }
   });
 
-  it('a praça tem a fonte, bancos com assento caminhável e o totem perto do nascimento', () => {
+  it('plaza has fountain, benches with walkable seats, and totem near spawn point', () => {
     const p = plazaDecor();
     expect(p.filter((d) => d.kind === 'fountain')).toHaveLength(1);
     const seats = p.filter((d) => d.seat);
@@ -159,7 +159,7 @@ describe('decoração determinística', () => {
     expect(seats.some((d) => Math.hypot(d.seat!.x - spawnPoint().x, d.seat!.y - spawnPoint().y) <= 10)).toBe(true);
   });
 
-  it('os bancos da calçada também ficam em tile caminhável', () => {
+  it('sidewalk benches are also on walkable tiles', () => {
     for (let bx = -3; bx <= 3; bx++) for (let by = -3; by <= 3; by++) for (const d of sidewalkDecor({ x: bx, y: by })) if (d.seat) expect(isWalkable(d.seat.x, d.seat.y, anyLot)).toBe(true);
   });
 });

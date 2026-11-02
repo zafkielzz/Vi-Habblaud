@@ -48,7 +48,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Montanhas ao amanhecer",
+      "title": "Mountains at dawn",
       "framed": {
         "file": "art/framed/painting-mountains.png",
         "w": 32,
@@ -62,7 +62,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Praia tropical",
+      "title": "Tropical beach",
       "framed": {
         "file": "art/framed/painting-beach.png",
         "w": 32,
@@ -76,7 +76,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Cidade à noite",
+      "title": "City at night",
       "framed": {
         "file": "art/framed/painting-city-night.png",
         "w": 32,
@@ -90,7 +90,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Formas e cores",
+      "title": "Shapes and colors",
       "framed": {
         "file": "art/framed/painting-abstract.png",
         "w": 32,
@@ -104,7 +104,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Retrato de gato",
+      "title": "Cat portrait",
       "framed": {
         "file": "art/framed/painting-cat.png",
         "w": 32,
@@ -118,7 +118,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "A grande onda",
+      "title": "The Great Wave",
       "framed": {
         "file": "art/framed/painting-wave.png",
         "w": 32,
@@ -132,7 +132,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Girassóis",
+      "title": "Sunflowers",
       "framed": {
         "file": "art/framed/painting-sunflowers.png",
         "w": 32,
@@ -146,7 +146,7 @@
       "w": 26,
       "h": 16,
       "tiles": 2,
-      "title": "Pão de Açúcar",
+      "title": "Sugarloaf Mountain",
       "framed": {
         "file": "art/framed/painting-rio.png",
         "w": 32,
@@ -160,7 +160,7 @@
       "w": 58,
       "h": 24,
       "tiles": 4,
-      "title": "Lago na floresta",
+      "title": "Forest lake",
       "framed": {
         "file": "art/framed/painting-wide-forest-lake.png",
         "w": 64,
@@ -174,7 +174,7 @@
       "w": 58,
       "h": 24,
       "tiles": 4,
-      "title": "Campos de cor",
+      "title": "Color fields",
       "framed": {
         "file": "art/framed/painting-wide-color-fields.png",
         "w": 64,
@@ -188,7 +188,7 @@
       "w": 58,
       "h": 24,
       "tiles": 4,
-      "title": "Aurora boreal",
+      "title": "Northern lights",
       "framed": {
         "file": "art/framed/painting-wide-aurora.png",
         "w": 64,
@@ -202,7 +202,7 @@
       "w": 12,
       "h": 16,
       "tiles": 1,
-      "title": "Café",
+      "title": "Coffee",
       "variant": "coffee"
     },
     {
@@ -212,7 +212,7 @@
       "w": 12,
       "h": 16,
       "tiles": 1,
-      "title": "Foguete",
+      "title": "Rocket",
       "variant": "rocket"
     },
     {
@@ -222,7 +222,7 @@
       "w": 12,
       "h": 16,
       "tiles": 1,
-      "title": "Código",
+      "title": "Code",
       "variant": "code"
     },
     {
@@ -232,7 +232,7 @@
       "w": 12,
       "h": 16,
       "tiles": 1,
-      "title": "Gato",
+      "title": "Cat",
       "variant": "cat"
     },
     {
@@ -242,7 +242,7 @@
       "w": 12,
       "h": 16,
       "tiles": 1,
-      "title": "Sem bugs",
+      "title": "No bugs",
       "variant": "bug"
     },
     {

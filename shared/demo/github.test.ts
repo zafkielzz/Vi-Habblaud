@@ -1,12 +1,12 @@
-// Modo demonstração: eventos do GitHub fictícios (PR, merge, CI, release) com festa e alarme nas salas.
+// Demo mode: fictional GitHub events (PR, merge, CI, release) with party and alarm in rooms.
 import { describe, expect, it } from 'vitest';
 import { GITHUB_TOOL, PARTY_MS } from '../github';
 import { mulberry32 } from '../hash';
 import { demoGitHubEvent } from './github';
 import { DemoSimulator } from './simulator';
 
-describe('demo: eventos do GitHub', () => {
-  it('sala com alarme tende a ver o CI voltar a passar', () => {
+describe('demo: GitHub events', () => {
+  it('room with alarm tends to see CI pass again', () => {
     const rng = mulberry32(42);
     const kinds = Array.from({ length: 200 }, () => demoGitHubEvent(rng, { branch: 'main', alarm: true, pr: 10 }).kind);
     expect(kinds.filter((k) => k === 'ci_passed').length).toBeGreaterThan(120);
@@ -14,7 +14,7 @@ describe('demo: eventos do GitHub', () => {
     for (const k of ['pr_opened', 'pr_merged', 'ci_failed', 'ci_passed', 'release']) expect(free).toContain(k);
   });
 
-  it('de tempos em tempos: avisos, atividades e festa/alarme nas salas (o alarme acaba)', () => {
+  it('periodically: notices, activities, and party/alarm in rooms (alarm ends)', () => {
     const sim = new DemoSimulator({ seed: 5, speed: 4, sessions: 5 }, 0);
     const seen = { party: 0, alarm: 0, recovered: 0, notices: 0, feed: 0 };
     let first = Infinity;
@@ -31,7 +31,7 @@ describe('demo: eventos do GitHub', () => {
         if (fx.kind === 'party') {
           seen.party++;
           expect(fx.until - fx.at).toBe(PARTY_MS);
-          if (fx.text === 'CI verde de novo!') seen.recovered++;
+          if (fx.text === 'CI green again!') seen.recovered++;
         } else seen.alarm++;
       }
     }

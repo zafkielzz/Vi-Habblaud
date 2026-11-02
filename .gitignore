@@ -3,8 +3,23 @@ dist/
 .DS_Store
 *.log
 .env
+.env.*
+!.env.example
 docker-compose.override.yml
 scripts/assets/.cache/
 
-# Configurações locais do Claude Code e caches de geração
+# Local Claude Code settings and generation caches
 .claude/
+
+# Personal notes and local state: never in the repo
+HANDOFF*.md
+team.json
+rules-log.jsonl
+*.pem
+*.key
+*.bak-*
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

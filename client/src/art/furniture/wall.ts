@@ -1,10 +1,10 @@
-// Itens montados na parede norte. Coordenadas de desenho: x = 0 na borda esquerda do trecho,
-// y = 0 na linha do rodapé; a face da parede vai de y = -32 (topo, com a tampa até -28) a 0.
+// North wall mounted items. Drawing coordinates: x = 0 at left edge of section,
+// y = 0 at baseboard line; wall face goes from y = -32 (top, cap down to -28) to 0.
 import { ramp, shade } from '../core/color';
 import { rectAt, wallSheet, type BufFurniture } from '../core/sprite';
 import { ACCENTS, M, book, foliage, glass, mug, pick, pot, rngOf, smallSucculent } from './kit';
 
-/** Sombra suave projetada na parede (abaixo/direita do objeto). */
+/** Soft shadow cast on wall (below/right of object). */
 function wallShadow(b: import('../core/pixbuf').PixelBuf, x: number, y: number, w: number, h: number): void {
   for (let yy = y + 1; yy <= y + h; yy++) b.under(x + w, yy, 'rgba(30,34,52,0.16)');
   for (let xx = x + 1; xx <= x + w; xx++) b.under(xx, y + h, 'rgba(30,34,52,0.16)');
@@ -24,10 +24,10 @@ export function whiteboard(): BufFurniture {
   b.vline(x + w - 1, y, y + h - 1, frame.dk);
   b.hline(x, x + w - 1, y + h - 1, frame.dk);
   b.rect(x + 1, y + 1, w - 2, h - 2, '#fbfcfd');
-  // Reflexo sutil.
+  // Subtle reflection.
   b.line(x + 30, y + 1, x + 24, y + h - 2, 'rgba(210,225,240,0.5)');
   b.line(x + 33, y + 1, x + 27, y + h - 2, 'rgba(210,225,240,0.35)');
-  // Bandeja com pincéis e apagador.
+  // Tray with markers and eraser.
   b.rect(x + 3, y + h, w - 6, 2, frame.base);
   b.hline(x + 3, x + w - 4, y + h, frame.lt);
   for (const [i, c] of [[0, '#e05a5a'], [3, '#3f7fd8'], [6, '#2b2f3b'], [9, '#4cae6a']] as const) {
@@ -49,18 +49,18 @@ export function windowItem(): BufFurniture {
   const y = -27;
   const w = 28;
   const h = 19;
-  // Moldura (o vidro fica transparente: o mundo desenha o céu antes).
+  // Frame (glass is transparent: world draws sky behind it first).
   b.rect(x, y, w, 2, fr.lt);
   b.rect(x, y + h - 2, w, 2, fr.base);
   b.rect(x, y, 2, h, fr.lt);
   b.rect(x + w - 2, y, 2, h, fr.base);
   b.hline(x, x + w - 1, y, fr.hi);
   b.vline(x + w - 1, y, y + h - 1, fr.dk);
-  // Montantes.
+  // Mullions.
   b.rect(x + 13, y + 2, 2, h - 4, fr.base);
   b.vline(x + 14, y + 2, y + h - 3, fr.dk);
   b.hline(x + 2, x + w - 3, y + 2, 'rgba(40,50,70,0.25)');
-  // Vidro: só reflexos semitransparentes.
+  // Glass: semitransparent reflections only.
   const gx = x + 2;
   const gy = y + 2;
   const gw = w - 4;
@@ -69,7 +69,7 @@ export function windowItem(): BufFurniture {
     b.line(gx + off + 6, gy, gx + off, gy + gh - 1, 'rgba(255,255,255,0.28)');
     b.line(gx + off + 7, gy, gx + off + 1, gy + gh - 1, 'rgba(255,255,255,0.16)');
   }
-  // Peitoril.
+  // Windowsill.
   b.rect(x - 1, y + h, w + 2, 2, fr.lt);
   b.hline(x - 1, x + w, y + h, fr.hi);
   b.hline(x - 1, x + w, y + h + 1, fr.dk);
@@ -87,7 +87,7 @@ export function clock(): BufFurniture {
   b.ellipse(cx, cy, 6.5, 6.5, '#3a3f4b');
   b.ellipse(cx, cy, 5.5, 5.5, '#fbfbf8');
   b.ellipse(cx - 1, cy - 1, 3, 3, '#ffffff');
-  // Marcações das horas.
+  // Hour markers.
   for (const [dx, dy] of [[0, -5], [5, 0], [0, 4], [-5, 0]] as const) b.set(Math.floor(cx + dx), Math.floor(cy + dy), '#5a6070');
   b.outline();
   wallShadow(b, 1, -29, 14, 14);
@@ -170,7 +170,7 @@ export function poster(variant: string | undefined): BufFurniture {
       break;
     }
     default: {
-      // code: editor escuro com linhas coloridas e "</>".
+      // code: dark editor with colored lines and "</>".
       b.rect(ix, iy, iw, ih, '#1f2433');
       const cols = ['#ff79c6', '#8be9fd', '#f1fa8c', '#50fa7b', '#bd93f9'];
       for (let i = 0; i < 6; i++) b.hline(ix + 1 + (i % 3), ix + 2 + ((i * 3) % 5) + 2, iy + 1 + i * 2, cols[i % cols.length]);
@@ -199,7 +199,7 @@ export function painting(seed: number): BufFurniture {
   const ay = y + 2;
   const aw = w - 4;
   const ah = h - 4;
-  // Paisagem padrão: céu, sol, montanhas e lago.
+  // Default landscape: sky, sun, mountains, and lake.
   const r = rngOf(seed, 41);
   const warm = r() < 0.5;
   for (let i = 0; i < ah; i++) b.hline(ax, ax + aw - 1, ay + i, shade(warm ? '#f6c48a' : '#9fd3f0', -i * 0.012));
@@ -260,19 +260,19 @@ export function elevator(state: number): BufFurniture {
   const st = Math.max(0, Math.min(4, Math.round(state)));
   const frame = ramp('#aeb6c2', 0.06);
   const door = ramp('#c9d0d9', 0.05);
-  // Moldura de aço escovado.
+  // Brushed steel frame.
   b.rect(0, -28, 32, 28, frame.base);
   b.hline(0, 31, -28, frame.hi);
   b.vline(0, -28, -1, frame.lt);
   b.vline(31, -28, -1, frame.dk);
-  // Painel indicador.
+  // Indicator panel.
   b.rect(10, -27, 12, 3, '#22262f');
   const lit = st > 0;
   b.set(13, -26, lit ? '#5fd07a' : '#3b4a3f');
   b.set(12, -25, lit ? '#5fd07a' : '#3b4a3f');
   b.set(14, -25, lit ? '#5fd07a' : '#3b4a3f');
   b.rect(16, -26, 4, 1, lit ? '#f2c14e' : '#4a4535');
-  // Vão interno (cabine): luz quente, parede de fundo e corrimão.
+  // Cabin interior: warm light, back wall, and handrail.
   const ix = 3;
   const iy = -23;
   const iw = 26;
@@ -283,7 +283,7 @@ export function elevator(state: number): BufFurniture {
   b.hline(ix + 2, ix + iw - 3, iy + 12, '#b9c0ca');
   b.rect(ix, iy + ih - 4, iw, 4, '#b89a72');
   b.hline(ix, ix + iw - 1, iy + ih - 4, '#a5865f');
-  // Portas deslizantes: cada folha recua 3px por estado.
+  // Sliding doors: each leaf retreats 3px per state.
   const leaf = 13;
   const open = st * 3;
   const drawLeaf = (x0: number, w: number) => {
@@ -297,7 +297,7 @@ export function elevator(state: number): BufFurniture {
   drawLeaf(ix, leaf - open);
   drawLeaf(ix + leaf + open, leaf - open);
   if (st === 0) b.vline(ix + leaf, iy, iy + ih - 1, door.dd);
-  // Botoeira lateral.
+  // Side button panel.
   b.rect(29, -15, 2, 4, '#22262f');
   b.set(29, -14, lit ? '#f2c14e' : '#6b7282');
   b.set(29, -12, '#6b7282');
@@ -309,7 +309,7 @@ export function doorFrame(): BufFurniture {
   const s = wallSheet(2, 3);
   const b = s.buf;
   const tr = ramp('#f2f1ed', 0.05);
-  // Batentes laterais e verga.
+  // Side jambs and lintel.
   b.rect(-2, -27, 3, 27, tr.base);
   b.vline(-2, -27, -1, tr.hi);
   b.vline(0, -26, -1, tr.dk);
@@ -337,7 +337,7 @@ export function sign(): BufFurniture {
   b.rect(x + 1, y + 1, w - 2, h - 2, '#f7f3e8');
   b.hline(x + 1, x + w - 2, y + 1, '#ffffff');
   b.hline(x + 1, x + w - 2, y + h - 2, '#e6e0cf');
-  // Parafusos.
+  // Screws.
   b.set(x + 2, y + 2, '#b9c0ca');
   b.set(x + w - 3, y + 2, '#b9c0ca');
   b.set(x + 2, y + h - 3, '#b9c0ca');
@@ -364,7 +364,7 @@ export function mirror(): BufFurniture {
   b.line(x + 8, y + 1, x + 3, y + h - 2, 'rgba(255,255,255,0.75)');
   b.outline();
   wallShadow(b, x - 1, y - 1, w + 2, h + 2);
-  // Vidro (sem a moldura): o mundo pode desenhar ali o reflexo de quem está diante da pia.
+  // Glass (without frame): world can draw reflection of whoever is in front of the sink.
   s.rects = { glass: rectAt(s, x + 1, y + 1, w - 2, h - 2) };
   return { base: s };
 }
@@ -380,7 +380,7 @@ export function shelfWall(seed: number): BufFurniture {
     b.hline(1, 30, y + 1, w.dk);
     for (const x of [4, 26]) b.rect(x, y + 2, 2, 2, '#5a6070');
   };
-  // Prateleira de cima: livros + planta; de baixo: caixas, troféu, caneca.
+  // Top shelf: books + plant; bottom: boxes, trophy, mug.
   plank(-19);
   plank(-9);
   let x = 3;
@@ -397,7 +397,7 @@ export function shelfWall(seed: number): BufFurniture {
   foliage(b, 23.5, -25, 3, 2.2, M.leaf, seed + 2);
   b.line(22, -23, 20, -20, M.leaf.dk);
   b.line(25, -23, 27, -19, M.leaf.base);
-  // Prateleira de baixo.
+  // Bottom shelf.
   const v = seed % 3;
   if (v === 0) {
     b.rect(3, -14, 6, 5, '#e9e4d6');

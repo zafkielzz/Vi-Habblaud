@@ -24,8 +24,8 @@ function spot(id: string, kind: SpotDef['kind'], extra: Partial<SpotDef> = {}): 
   return { id, kind, areaId: 'a', tx: 0, ty: 0, x: 0, y: 0, dir: 'up', ...extra };
 }
 
-describe('modos de comportamento', () => {
-  it('status -> modo', () => {
+describe('behavior modes', () => {
+  it('status -> mode', () => {
     expect(modeFor('working', { kind: 'main' })).toBe('work');
     expect(modeFor('waiting', { kind: 'main' })).toBe('wait');
     expect(modeFor('idle', { kind: 'main' })).toBe('idle');
@@ -36,7 +36,7 @@ describe('modos de comportamento', () => {
     expect(modeFor('working', { kind: 'sub', parentGone: true })).toBe('leave');
   });
 
-  it('tela do monitor segue a atividade', () => {
+  it('monitor screen follows activity', () => {
     expect(screenModeFor('edit')).toBe('code');
     expect(screenModeFor('write')).toBe('code');
     expect(screenModeFor('test')).toBe('terminal');
@@ -50,14 +50,14 @@ describe('modos de comportamento', () => {
     expect(screenModeFor(undefined)).toBe('code');
   });
 
-  it('corre quando longe (trabalho) ou quando precisa do usuário', () => {
+  it('runs when far (work) or when user attention is needed', () => {
     expect(shouldRun(20, 'work')).toBe(true);
     expect(shouldRun(5, 'work')).toBe(false);
     expect(shouldRun(4, 'wait')).toBe(true);
     expect(shouldRun(40, 'idle')).toBe(false);
   });
 
-  it('ocioso há mais de 10 min cochila', () => {
+  it('idle for over 10 min naps', () => {
     const now = 1_000_000_000;
     expect(isLongIdle('idle', now - LONG_IDLE_MS - 1, now)).toBe(true);
     expect(isLongIdle('idle', now - 1000, now)).toBe(false);
@@ -65,8 +65,8 @@ describe('modos de comportamento', () => {
   });
 });
 
-describe('passeios', () => {
-  it('sorteio ponderado respeita a disponibilidade', () => {
+describe('wanderings', () => {
+  it('weighted draw respects availability', () => {
     const rng = mulberry32(42);
     for (let i = 0; i < 200; i++) {
       const a = pickIdleActivity(rng, { pingpong: false, talk: false, bathroom: false });
@@ -77,7 +77,7 @@ describe('passeios', () => {
     expect(pickIdleActivity(rng, none)).toBeNull();
   });
 
-  it('café é o passeio mais comum', () => {
+  it('coffee is the most common wandering', () => {
     const rng = mulberry32(7);
     const count = new Map<string, number>();
     for (let i = 0; i < 4000; i++) {
@@ -88,7 +88,7 @@ describe('passeios', () => {
     expect(top).toBe('coffee');
   });
 
-  it('tempo sentado depende da animação escolhida', () => {
+  it('sit duration depends on chosen animation', () => {
     const rng = mulberry32(1);
     for (let i = 0; i < 50; i++) {
       const calm = idleSitMs(rng, 'calm');
@@ -102,7 +102,7 @@ describe('passeios', () => {
   });
 });
 
-describe('assentos e reservas', () => {
+describe('seats and reservations', () => {
   const spots: SpotDef[] = [
     spot('d0', 'desk', { rank: 0 }),
     spot('d1', 'desk', { rank: 1 }),
@@ -110,7 +110,7 @@ describe('assentos e reservas', () => {
     spot('p0', 'stand'),
   ];
 
-  it('principal e subagente pegam a primeira mesa livre; sem mesa, banqueta; depois em pé', () => {
+  it('main and subagent pick first free desk; without desk, stool; then standing', () => {
     const reg = new SpotRegistry();
     reg.setSpots(spots);
     const pick = (who: string) => {
@@ -125,7 +125,7 @@ describe('assentos e reservas', () => {
     expect(pick('e')).toBeNull();
   });
 
-  it('reserva tem um único dono e alternativas livres são encontradas', () => {
+  it('reservation has a single owner and free alternatives are found', () => {
     const reg = new SpotRegistry();
     reg.setSpots([spot('c1', 'coffee', { tx: 0 }), spot('c2', 'coffee', { tx: 10 })]);
     expect(reg.reserve('c1', 'ana')).toBe(true);
@@ -138,7 +138,7 @@ describe('assentos e reservas', () => {
     expect(reg.isFree('c1')).toBe(true);
   });
 
-  it('grupos (pares) só são oferecidos inteiros', () => {
+  it('groups (pairs) are only offered complete', () => {
     const reg = new SpotRegistry();
     reg.setSpots([spot('t1', 'talk', { group: 'g' }), spot('t2', 'talk', { group: 'g' })]);
     expect(reg.findFreeGroup('talk')?.length).toBe(2);
@@ -146,7 +146,7 @@ describe('assentos e reservas', () => {
     expect(reg.findFreeGroup('talk')).toBeNull();
   });
 
-  it('reservas de spots que deixaram de existir são devolvidas', () => {
+  it('reservations for spots that no longer exist are released', () => {
     const reg = new SpotRegistry();
     reg.setSpots([spot('a', 'desk'), spot('b', 'desk')]);
     reg.reserve('a', 'ana');
@@ -157,8 +157,8 @@ describe('assentos e reservas', () => {
   });
 });
 
-describe('salas, luz e elevador', () => {
-  it('último da sala é quem apaga a luz', () => {
+describe('rooms, light and elevator', () => {
+  it('last in room turns off the light', () => {
     const chars = [
       { id: 'a', roomId: 'r', leaving: true },
       { id: 'b', roomId: 'r', leaving: false },
@@ -169,7 +169,7 @@ describe('salas, luz e elevador', () => {
     expect(isLastInRoom('r', 'a', chars)).toBe(true);
   });
 
-  it('desmontagem só com sala fora do snapshot, vazia e apagada', () => {
+  it('dismantle only when room is unlisted, empty and dark', () => {
     const base = { listed: false, occupants: 0, lightOn: false, dark: true, unlistedForMs: 5000 };
     expect(canDismantle(base, 1500)).toBe(true);
     expect(canDismantle({ ...base, listed: true }, 1500)).toBe(false);
@@ -178,14 +178,14 @@ describe('salas, luz e elevador', () => {
     expect(canDismantle({ ...base, unlistedForMs: 100 }, 1500)).toBe(false);
   });
 
-  it('luz pisca ao acender e apaga em ~0,6 s', () => {
+  it('light flickers on and turns off in ~0.6 s', () => {
     expect(lightLevel(true, 100)).toBeLessThan(0.5);
     expect(lightLevel(true, 2000)).toBe(1);
     expect(lightLevel(false, 30)).toBeGreaterThan(0);
     expect(lightLevel(false, 600)).toBe(0);
   });
 
-  it('elevador abre enquanto há usuários e escalona as chegadas', () => {
+  it('elevator opens while there are users and staggers arrivals', () => {
     const e = new Elevator(0, 'e');
     e.request('a');
     for (let i = 0; i < 10; i++) e.update(0.05, 0);
@@ -200,8 +200,8 @@ describe('salas, luz e elevador', () => {
   });
 });
 
-describe('animações', () => {
-  it('construção: piso, paredes e móveis em sequência', () => {
+describe('animations', () => {
+  it('construction: floor, walls, and furniture in sequence', () => {
     const early = buildAnim('building', 0.1);
     expect(early.floor).toBeGreaterThan(0);
     expect(early.walls).toBe(0);
@@ -213,7 +213,7 @@ describe('animações', () => {
     expect(done.sign).toBe(1);
   });
 
-  it('desmontagem: móveis somem antes das paredes e do piso', () => {
+  it('dismantling: furniture disappears before walls and floor', () => {
     const start = buildAnim('dismantling', 0.05);
     expect(furnitureScale(start, 0)).toBe(1);
     expect(furnitureScale(start, 1)).toBeLessThan(1.2);
@@ -225,12 +225,12 @@ describe('animações', () => {
     expect(end.walls).toBe(0);
   });
 
-  it('varredura do piso começa no canto superior esquerdo', () => {
+  it('floor sweep starts at top-left corner', () => {
     expect(sweepDelay(0, 0, 16, 12)).toBe(0);
     expect(sweepDelay(15, 11, 16, 12)).toBeGreaterThan(sweepDelay(1, 1, 16, 12));
   });
 
-  it('dia e noite', () => {
+  it('day and night', () => {
     expect(ambientAt(12).night).toBe(0);
     expect(ambientAt(23).night).toBe(1);
     expect(ambientAt(3).night).toBe(1);

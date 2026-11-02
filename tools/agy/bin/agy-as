@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# agy-as <accN> [agy args...] - run `agy` confined to ~/.agy_profiles/<accN>
+# (own HOME/XDG dirs, own D-Bus session, own unlocked gnome-keyring). The daemons are
+# shared by every terminal of that account and reused if already running (same layout as the hub).
+set -eu
+acc="${1:?usage: agy-as <accN> [agy args...]}"; shift
+home="$HOME/.agy_profiles/$acc"
+[ -d "$home" ] || { echo "agy-as: no such profile $home" >&2; exit 1; }
+real_bin="$HOME/.local/bin"
+# An office's boss (AGY_BOSS=1, set by Habblaud): link the agy-boss plugin into the profile once; its SessionStart
+# hook loads the boss rules only when AGY_BOSS=1, so the link is harmless when the account works as a worker later.
+if [ "${AGY_BOSS:-}" = 1 ]; then
+  # agy skips a symlinked plugin folder: a real folder of links, so it is found and each script still resolves to the hub.
+  plug="$home/.gemini/config/plugins/agy-boss"
+  [ -e "$plug/plugin.json" ] || { mkdir -p "$plug" && ln -sf "${AGY_HUB:-$(dirname "$(dirname "$(readlink -f "$0")")")}"/agy-plugin/agy-boss/* "$plug"/; }
+fi
+
+for v in XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DBUS_STARTER_ADDRESS DBUS_STARTER_BUS_TYPE \
+         GNOME_KEYRING_CONTROL GNOME_KEYRING_PID SSH_AUTH_SOCK SSH_AGENT_PID GPG_AGENT_INFO SESSION_MANAGER; do
+  unset "$v"
+done
+export HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" \
+       XDG_CACHE_HOME="$home/.cache" XDG_STATE_HOME="$home/.local/state"
+export PATH="$real_bin:$PATH"
+run="$home/.run"; sock="$run/bus"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$sock"
+mkdir -p "$run" "$XDG_DATA_HOME/keyrings"
+
+bus_alive() { [ -S "$sock" ] && dbus-send --session --dest=org.freedesktop.DBus --print-reply \
+                /org/freedesktop/DBus org.freedesktop.DBus.GetId >/dev/null 2>&1; }
+if ! bus_alive; then
+  rm -f "$sock"
+  setsid dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --nofork --nopidfile >/dev/null 2>&1 &
+  for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
+  echo '' | setsid gnome-keyring-daemon --unlock --foreground --components=secrets >/dev/null 2>&1 &
+  sleep 1
+fi
+exec agy "$@"

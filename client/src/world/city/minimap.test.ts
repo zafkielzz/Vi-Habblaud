@@ -1,10 +1,10 @@
-// Minimapa: luz por quarteirão (prédios acesos / 6), centrado no quarteirão do jogador, e o clique de volta em tiles.
+// Minimap: light per block (lit buildings / 6), centered on player block, and click mapped back to tiles.
 import { describe, expect, it } from 'vitest';
 import { BLOCK_STRIDE, BLOCK_TILES } from '../../../../shared/world/city';
 import { blockLight, minimapModel, minimapToTile } from './minimap';
 
-describe('minimapa', () => {
-  it('a luz cresce com os acesos e vai de 0 (nenhum) a 1 (os 6)', () => {
+describe('minimap', () => {
+  it('light grows with lit buildings and ranges from 0 (none) to 1 (all 6)', () => {
     expect(blockLight(0)).toBe(0);
     expect(blockLight(1)).toBeGreaterThan(0.3);
     expect(blockLight(3)).toBeGreaterThan(blockLight(1));
@@ -12,7 +12,7 @@ describe('minimapa', () => {
     expect(blockLight(60)).toBe(1);
   });
 
-  it('centra no quarteirão do jogador, marca a praça e o que o servidor listou', () => {
+  it('centers on player block, marks plaza and server-listed blocks', () => {
     const size = { w: 176, h: 116 };
     const me = { x: BLOCK_STRIDE.x + 10, y: 5 };
     const m = minimapModel([{ x: 1, y: 0, lit: 6 }, { x: 2, y: 0, lit: 0 }], me, { x: me.x - 20, y: me.y - 10, w: 40, h: 20 }, size);
@@ -29,7 +29,7 @@ describe('minimapa', () => {
     expect(m.view.w).toBeCloseTo(40 * m.k);
   });
 
-  it('o clique no meio do minimapa leva ao meio do quarteirão do jogador', () => {
+  it('clicking middle of minimap maps to middle of player block', () => {
     const size = { w: 176, h: 116 };
     const m = minimapModel([], { x: 0, y: 0 }, { x: 0, y: 0, w: 1, h: 1 }, size);
     const t = minimapToTile(m, size, size.w / 2, size.h / 2);

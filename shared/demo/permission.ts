@@ -1,21 +1,21 @@
-// Pedidos de permissão (e perguntas) fictícios do modo demonstração (responder pelo escritório sem sessões reais),
-// do Claude Code e do Codex (só aprovação, sem "sempre permitir").
-// Puro: usado pelo simulador no servidor (HABBLAUD_DEMO=1) e no navegador (?mock=1).
+// Fictional permission requests (and questions) for demo mode (answering from office without real sessions),
+// for Claude Code and Codex (approval only, no "always allow").
+// Pure: used by simulator on server (HABBLAUD_DEMO=1) and in browser (?mock=1).
 import type { PermissionRequestInfo } from '../types';
 import { describeTool } from '../activity';
 import { tr } from '../i18n';
 
 export interface DemoPermissionSource {
-  /** Arquivos do projeto fictício (relativos à raiz). */
+  /** Fictional project files (relative to root). */
   files: readonly string[];
-  /** Comandos de terminal do projeto fictício. */
+  /** Fictional project terminal commands. */
   commands: readonly string[];
 }
 
-/** Quanto tempo o "hook" fictício espera antes de devolver o pedido ao terminal. */
+/** How long the fictional "hook" waits before falling back to the terminal. */
 export const DEMO_PERMISSION_MS = 5 * 60_000;
 
-/** Linhas de um diff fictício, no formato do terminal ("- antiga" / "+ nova"). */
+/** Lines of a fictional diff, in terminal format ("- old" / "+ new"). */
 const DEMO_DIFFS: readonly string[][] = [
   ['- const total = items.reduce((s, i) => s + i.price, 0);', '+ const total = items.reduce((s, i) => s + i.price * i.qty, 0);', '+ if (total < 0) throw new Error("total inválido");'],
   ['- export const TIMEOUT = 5_000;', '+ export const TIMEOUT = 15_000;'],
@@ -29,60 +29,60 @@ interface DemoQuestion {
   options: Array<{ label: string; description?: string }>;
 }
 
-/** Perguntas fictícias do AskUserQuestion: uma de escolha única e uma em que dá para marcar várias. */
+/** Fictional AskUserQuestion questions: one single-choice and one multi-select. */
 const DEMO_QUESTIONS: readonly DemoQuestion[][] = [
   [
     {
       header: 'Cache',
-      question: tr('Onde guardo o cache das sessões de login?'),
+      question: tr('Where should I store the login session cache?'),
       options: [
-        { label: 'Redis', description: tr('Rápido, e já roda no docker-compose do projeto') },
-        { label: 'PostgreSQL', description: tr('Uma tabela a mais no banco que já existe') },
-        { label: tr('Memória'), description: tr('Mais simples, mas some quando o servidor reinicia') },
+        { label: 'Redis', description: tr("Fast, and already runs in the project's docker-compose") },
+        { label: 'PostgreSQL', description: tr('One more table in the existing database') },
+        { label: tr('Memory'), description: tr('Simpler, but lost when the server restarts') },
       ],
     },
     {
-      header: tr('Testes'),
-      question: tr('Quais testes eu rodo antes do commit?'),
+      header: tr('Tests'),
+      question: tr('Which tests should I run before committing?'),
       multiSelect: true,
       options: [
-        { label: tr('Unidade'), description: tr('npm test, cerca de 40 s') },
-        { label: tr('Integração'), description: tr('Sobe um banco de teste no Docker') },
-        { label: 'E2E', description: tr('Playwright no navegador, uns 5 min') },
+        { label: tr('Unit'), description: tr('npm test, about 40 s') },
+        { label: tr('Integration'), description: tr('Spins up a test database in Docker') },
+        { label: 'E2E', description: tr('Playwright in the browser, about 5 min') },
       ],
     },
   ],
   [
     {
-      header: tr('Erro de rede'),
-      question: tr('Como trato a falha de rede no checkout?'),
+      header: tr('Network error'),
+      question: tr('How should I handle network failures at checkout?'),
       options: [
-        { label: tr('Tentar de novo'), description: tr('Até 3 tentativas, com espera crescente') },
-        { label: tr('Avisar o cliente'), description: tr('Mensagem com um botão para tentar de novo') },
-        { label: tr('Guardar e enviar depois'), description: tr('Fila local até a conexão voltar') },
+        { label: tr('Try again'), description: tr('Up to 3 attempts, with increasing delays') },
+        { label: tr('Notify the customer'), description: tr('Message with a button to try again') },
+        { label: tr('Save and send later'), description: tr('Local queue until the connection is back') },
       ],
     },
     {
-      header: tr('Telas'),
-      question: tr('Em quais telas aplico a mudança?'),
+      header: tr('Screens'),
+      question: tr('Which screens should I apply the change to?'),
       multiSelect: true,
-      options: [{ label: tr('Carrinho') }, { label: tr('Pagamento') }, { label: tr('Confirmação do pedido') }],
+      options: [{ label: tr('Cart') }, { label: tr('Payment') }, { label: tr('Order confirmation') }],
     },
   ],
 ];
 
-/** As perguntas em texto, como o terminal mostra os argumentos do AskUserQuestion. */
+/** Question text, as terminal displays AskUserQuestion arguments. */
 function questionsText(qs: readonly DemoQuestion[]): string {
   return qs.map((q) => [q.question, ...q.options.map((o) => `  - ${o.label}${o.description ? `: ${o.description}` : ''}`)].join('\n')).join('\n\n');
 }
 
-/** Tipo de pedido fictício: permissão (comando, edição, página) ou pergunta do AskUserQuestion. */
+/** Fictional request type: permission (command, edit, page) or AskUserQuestion question. */
 export type DemoPermissionKind = 'permission' | 'question';
 
 /**
- * Um pedido fictício (comando no terminal, edição de arquivo, leitura de página ou pergunta do AskUserQuestion),
- * com a sugestão de "sempre permitir" que o Claude Code costuma oferecer para comandos. `kind` força o tipo
- * (testes e capturas de tela); sem ele, é sorteado.
+ * A fictional request (terminal command, file edit, web page read, or AskUserQuestion question),
+ * with the "always allow" suggestion that Claude Code usually offers for commands. `kind` forces type
+ * (tests and screenshots); without it, randomly picked.
  */
 export function demoPermission(id: string, src: DemoPermissionSource, rng: () => number, now: number, kind?: DemoPermissionKind): PermissionRequestInfo {
   const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
@@ -121,34 +121,37 @@ export function demoPermission(id: string, src: DemoPermissionSource, rng: () =>
     title: `WebFetch(${url})`,
     text: d.text,
     icon: d.icon,
-    input: tr('Resuma como tratar erros de rede com fetch'),
+    input: tr('Summarize how to handle network errors with fetch'),
     inputKind: 'text',
     suggestions: [{ index: 0, rules: ['WebFetch(domain:developer.mozilla.org)'], destination: 'localSettings' }],
   };
 }
 
 /**
- * Quanto o "hook" do Codex espera pela decisão do escritório (HABBLAUD_CODEX_PERMISSION_TIMEOUT, padrão 25 s). Depois
- * disso o Codex segue o fluxo normal e a aprovação aparece no terminal.
+ * How long Codex "hook" waits for office decision (HABBLAUD_CODEX_PERMISSION_TIMEOUT, default 25 s). After
+ * that, Codex resumes normal flow and approval appears in the terminal.
  */
 export const DEMO_CODEX_PERMISSION_MS = 25_000;
 
-/** Destinos de rede fictícios (o Codex pede acesso à rede como um Bash com a descrição "network-access <alvo>"). */
+/**
+ * Fictional network destinations (Codex requests network access as a Bash with
+ * description "network-access <target>").
+ */
 const DEMO_NETWORK: ReadonlyArray<[host: string, command: string]> = [
   ['registry.npmjs.org', 'npm install'],
   ['pypi.org', 'pip install -r requirements.txt'],
   ['api.github.com', 'gh pr view --json title'],
 ];
 
-/** O diff de um apply_patch no formato do Codex (Begin/End Patch, linhas "-antiga" e "+nova"). */
+/** Diff for apply_patch in Codex format (Begin/End Patch, "-old" and "+new" lines). */
 export function demoPatchText(file: string, lines: readonly string[], add = false): string {
   const body = lines.map((l) => (l.startsWith('- ') ? `-${l.slice(2)}` : l.startsWith('+ ') ? `+${l.slice(2)}` : add ? `+${l}` : ` ${l}`));
   return ['*** Begin Patch', `*** ${add ? 'Add' : 'Update'} File: ${file}`, ...(add ? [] : ['@@']), ...body, '*** End Patch'].join('\n');
 }
 
 /**
- * Um pedido de aprovação fictício do Codex (hook PermissionRequest): comando no terminal, apply_patch ou acesso à
- * rede. Sem sugestões de "sempre permitir" (o Codex não as aceita pelo hook) e nunca uma pergunta; o prazo é curto.
+ * A fictional Codex approval request (PermissionRequest hook): terminal command, apply_patch, or network
+ * access. No "always allow" suggestions (Codex rejects them via hook) and never a question; short timeout.
  */
 export function demoCodexPermission(id: string, src: DemoPermissionSource, rng: () => number, now: number): PermissionRequestInfo {
   const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
@@ -161,7 +164,7 @@ export function demoCodexPermission(id: string, src: DemoPermissionSource, rng: 
   }
   if (roll < 0.45) {
     const [host, command] = pick(DEMO_NETWORK);
-    return { ...base, tool: 'Bash', title: `Bash(${command})`, text: tr('Acesso à rede: {0}', [host]), icon: '🌐', input: command, inputKind: 'command' };
+    return { ...base, tool: 'Bash', title: `Bash(${command})`, text: tr('Network access: {0}', [host]), icon: '🌐', input: command, inputKind: 'command' };
   }
   const command = src.commands.length ? pick(src.commands) : 'npm test';
   const d = describeTool('Bash', { command });

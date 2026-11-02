@@ -4,8 +4,8 @@ import { POSE_FRAMES, renderCharacter } from './character/render';
 import type { Dir, Pose } from './api';
 import { renderSeasonalProp } from './seasonal';
 
-describe('acessórios sazonais', () => {
-  it('mantém a aparência original e desenha os acessórios em todas as poses e direções', () => {
+describe('seasonal accessories', () => {
+  it('preserves the original appearance and draws accessories across all poses and directions', () => {
     const appearance = appearanceFromSeed(42);
     const original = { ...appearance };
     for (const dir of ['up', 'down', 'left', 'right'] as Dir[]) {
@@ -23,7 +23,7 @@ describe('acessórios sazonais', () => {
     }
     expect(appearance).toEqual(original);
   });
-  it('mantém decorações dentro das folhas de desenho, com margem transparente', () => {
+  it('keeps decorations within drawing sheets, with transparent margins', () => {
     for (const kind of ['tree', 'gift', 'pumpkin', 'ghost', 'wreath', 'bat'] as const) {
       const { buf } = renderSeasonalProp(kind);
       const bounds = buf.bounds()!;

@@ -1,4 +1,4 @@
-// Configuração do servidor a partir das variáveis de ambiente (documentadas em server/README.md).
+// Server configuration from environment variables (documented in server/README.md).
 import { existsSync, readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { homedir } from 'node:os';
@@ -13,70 +13,76 @@ import { tr } from '../shared/i18n';
 export interface ServerConfig {
   port: number;
   host: string;
-  /** `--dev`: Vite em middleware mode (HMR) no mesmo servidor. */
+  /** `--dev`: Vite in middleware mode (HMR) on the same server. */
   dev: boolean;
-  /** Liga o simulador de demonstração ao iniciar. */
+  /** Starts demo simulator on launch. */
   demo: boolean;
-  /** Rodando dentro de um container (PIDs do registro são do host: não dá para checá-los). */
+  /** Running inside a container (registry PIDs are from host: cannot check them). */
   inDocker: boolean;
   home: string;
-  /** Config dirs do Claude Code observados (um por conta). */
+  /** Observed Claude Code config dirs (one per account). */
   claudeDirs: string[];
-  /** Onde o Habblaud guarda o próprio estado (nomes persistidos). */
+  /** Where Habblaud stores its own state (persisted names). */
   dataDir: string;
   /**
-   * Pasta com o uso capturado pelo statusline do Claude Code (scripts/statusline-tap.mjs):
-   * HABBLAUD_USAGE_DIR ou ~/.habblaud/usage. No Docker, o docker-up monta essa pasta em /usage.
+   * Directory with usage captured by Claude Code statusline (scripts/statusline-tap.mjs):
+   * HABBLAUD_USAGE_DIR or ~/.habblaud/usage. In Docker, docker-up mounts this directory to /usage.
    */
   usageDir: string;
-  /** Nomes extras aceitos no cabeçalho Host/Origin (HABBLAUD_ALLOWED_HOSTS); localhost e IPs sempre valem. */
+  /** Extra names accepted in Host/Origin header (HABBLAUD_ALLOWED_HOSTS); localhost and IPs always valid. */
   allowedHosts: Set<string>;
   /**
-   * Terminal (GET /api/agents/:id/terminal) ligado: só com bind local, isto é, com o Habblaud acessível apenas
-   * pelo próprio computador (ver terminalOffReason). É a trava de tudo o que mostra ou age sobre as sessões.
+   * Terminal (GET /api/agents/:id/terminal) enabled: only with local bind, i.e., Habblaud accessible only
+   * from the computer itself (see terminalOffReason). Locks everything that displays or acts on sessions.
    */
   terminal: boolean;
   /**
-   * Mensagens pelo escritório (POST /api/messages e a caixa de entrada do plugin habblaud-mensagens) ligadas: a
-   * trava do terminal e HABBLAUD_MENSAGENS sem desligar (ver messagesOffReason).
+   * Messages across the office (POST /api/messages and habblaud-mensagens plugin inbox) enabled:
+   * terminal lock and HABBLAUD_MENSAGENS enabled (see messagesOffReason).
    */
   messages: boolean;
-  /** Grava a linha do tempo do escritório para o timelapse (<dataDir>/timeline); HABBLAUD_TIMELINE=0 desliga. */
+  /** Records office timeline for timelapse (<dataDir>/timeline); HABBLAUD_TIMELINE=0 disables it. */
   timeline: boolean;
-  /** Raiz do projeto (onde fica o package.json); serve dist/client a partir daqui. */
+  /** Project root (where package.json lives); serves dist/client from here. */
   rootDir: string;
   version: string;
-  /** Repositório no GitHub ("dono/nome", do campo `repository` do package.json) onde saem as versões novas. */
+  /** GitHub repository ("owner/repo", from package.json `repository` field) where new releases are published. */
   repo?: string;
-  /** Consulta o GitHub atrás de versão nova (server/updates/checker.ts); HABBLAUD_UPDATE_CHECK=0 desliga. */
+  /** Checks GitHub for new releases (server/updates/checker.ts); HABBLAUD_UPDATE_CHECK=0 disables it. */
   updateCheck: boolean;
-  /** Observa as sessões do Codex (sources/codex/); HABBLAUD_CODEX=0 desliga. */
+  /** Observes Codex sessions (sources/codex/); HABBLAUD_CODEX=0 disables it. */
   codex: boolean;
-  /** Segunda porta, com login, para o celular na rede local (http/remote.ts); ausente = desligada. */
+  /**
+   * Antigravity CLI workers (sources/agy/): profiles in ~/.agy_profiles; HABBLAUD_AGY=0 disables it. `room` = their
+   * room directory (HABBLAUD_AGY_ROOM; default ~/Workspace/agy-hub if present, else HOME); `usageMs` = interval for
+   * each account's `/usage` (HABBLAUD_AGY_USAGE_MIN, in minutes; 0 disables it).
+   */
+  agy: { enabled: boolean; room: string; usageMs: number };
+  /** Second port, with login, for mobile on local network (http/remote.ts); missing = disabled. */
   remote?: RemoteConfig;
-  /** Por que o acesso remoto ficou desligado quando as variáveis estão incompletas. */
+  /** Why remote access was disabled when variables are incomplete. */
   remoteWarning?: string;
-  /** Habblaud World (server/world/): conta, personagem e, nas próximas fases, o prédio no mundo. */
+  /** Habblaud World (server/world/): account, character, and, in future phases, building in the world. */
   world: WorldConfig;
 }
 
 export interface WorldConfig {
-  /** HABBLAUD_WORLD diferente de 0 (false, off, no): as rotas /api/world/* existem e a interface mostra a seção. */
+  /** HABBLAUD_WORLD other than 0 (false, off, no): /api/world/* routes exist and interface shows section. */
   enabled: boolean;
   /**
-   * Base HTTP(S) do servidor do mundo, sem barra no fim (de HABBLAUD_WORLD_URL ou, sem ela, DEFAULT_WORLD_URL;
-   * `wss://` vira `https://`). Ausente = HABBLAUD_WORLD_URL recusada (`warning` diz por quê): o recurso fica desligado
-   * e nada sai do computador. O WebSocket é a mesma origem com /v1/socket.
+   * HTTP(S) base of the world server, without trailing slash (from HABBLAUD_WORLD_URL or DEFAULT_WORLD_URL;
+   * `wss://` becomes `https://`). Missing = HABBLAUD_WORLD_URL rejected (`warning` explains why): feature stays off
+   * and nothing leaves the computer. WebSocket is the same origin with /v1/socket.
    */
   url?: string;
-  /** A URL veio do padrão (HABBLAUD_WORLD_URL ausente ou vazia). */
+  /** The URL came from default (HABBLAUD_WORLD_URL missing or empty). */
   defaultUrl?: true;
   /**
-   * `--dev` ou HABBLAUD_WORLD_DEV=1: aceita também `http://` e `ws://` para 127.0.0.1 e host.docker.internal (servidor do
-   * mundo local; do container do Habblaud, o host é host.docker.internal).
+   * `--dev` or HABBLAUD_WORLD_DEV=1: also accepts `http://` and `ws://` for 127.0.0.1 and host.docker.internal (local
+   * world server; from Habblaud container, host is host.docker.internal).
    */
   dev: boolean;
-  /** Por que HABBLAUD_WORLD_URL foi recusada (vai para o log ao iniciar). */
+  /** Why HABBLAUD_WORLD_URL was rejected (logged on start). */
   warning?: string;
 }
 
@@ -84,7 +90,7 @@ export function isTruthy(v: string | undefined): boolean {
   return !!v && /^(1|true|yes|sim|on)$/i.test(v.trim());
 }
 
-/** Sobe a partir de `from` até achar o package.json do projeto. */
+/** Walks up from `from` until finding the project package.json. */
 export function findRoot(from: string): string {
   let dir = from;
   for (let i = 0; i < 6; i++) {
@@ -94,7 +100,7 @@ export function findRoot(from: string): string {
         const name = (JSON.parse(readFileSync(pkg, 'utf8')) as { name?: unknown }).name;
         if (name === 'habblaud') return dir;
       } catch {
-        // package.json ilegível: continua subindo
+        // unreadable package.json: keep walking up
       }
     }
     const parent = dirname(dir);
@@ -104,7 +110,7 @@ export function findRoot(from: string): string {
   return resolve(from, '..');
 }
 
-/** Versão e repositório do package.json. */
+/** Version and repository from package.json. */
 function readPackage(rootDir: string): { version: string; repo?: string } {
   try {
     const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')) as { version?: unknown; repository?: unknown };
@@ -120,8 +126,8 @@ export function detectDocker(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
- * Endereço de escuta que só o próprio computador alcança: 127.0.0.0/8, `::1` (com ou sem colchetes)
- * ou `localhost`. `0.0.0.0`, `::`, IPs de rede e nomes quaisquer não contam.
+ * Listen address reachable only by the computer itself: 127.0.0.0/8, `::1` (with or without brackets),
+ * or `localhost`. `0.0.0.0`, `::`, network IPs, and arbitrary names do not count.
  */
 export function isLoopbackBind(value: string | undefined): boolean {
   let v = value?.trim().toLowerCase() ?? '';
@@ -131,7 +137,7 @@ export function isLoopbackBind(value: string | undefined): boolean {
   if (family === 4) return v.startsWith('127.');
   if (family !== 6) return false;
   try {
-    // Forma canônica (0:0:0:0:0:0:0:1 -> [::1]).
+    // Canonical form (0:0:0:0:0:0:0:1 -> [::1]).
     return new URL(`http://[${v}]/`).hostname === '[::1]';
   } catch {
     return false;
@@ -139,53 +145,54 @@ export function isLoopbackBind(value: string | undefined): boolean {
 }
 
 /**
- * Por que o terminal fica desligado (undefined = ligado). Os transcripts têm a conversa inteira, então ele
- * só liga quando o Habblaud não fica exposto além do próprio computador:
- * - Node: o HABBLAUD_HOST precisa ser loopback;
- * - Docker: o processo sempre escuta em 0.0.0.0 dentro do container e quem decide a exposição é a porta
- *   publicada no host, HABBLAUD_BIND (o docker-compose.yml repassa o mesmo valor ao container). Ausente
- *   ou vazia = desligado: sem ela não dá para saber se a porta está exposta.
- * HABBLAUD_TERMINAL com qualquer valor que não seja "ligado" (0, false, off...) desliga; não existe forma
- * de ligar com a porta exposta.
+ * Why the terminal stays disabled (undefined = enabled). Transcripts contain full conversation, so it
+ * only turns on when Habblaud is not exposed beyond the computer itself:
+ * - Node: HABBLAUD_HOST must be loopback;
+ * - Docker: process always listens on 0.0.0.0 inside container and exposure is decided by the host
+ *   published port, HABBLAUD_BIND (docker-compose.yml forwards the same value to container). Missing
+ *   or empty = disabled: without it we cannot know if the port is exposed.
+ * HABBLAUD_TERMINAL with any value other than "enabled" (0, false, off...) disables it; there is no
+ * way to enable it with an exposed port.
  */
 export function terminalOffReason(env: NodeJS.ProcessEnv, host: string, inDocker: boolean): string | undefined {
   const flag = env.HABBLAUD_TERMINAL?.trim();
   if (flag && !isTruthy(flag)) return `HABBLAUD_TERMINAL=${flag}`;
   if (inDocker) {
     const bind = env.HABBLAUD_BIND?.trim();
-    if (!bind) return tr('HABBLAUD_BIND não chegou ao container, então a porta pode estar exposta na rede');
-    return isLoopbackBind(bind) ? undefined : tr('a porta está exposta na rede: HABBLAUD_BIND={0}', [bind]);
+    if (!bind) return tr("HABBLAUD_BIND didn't reach the container, so the port may be exposed on the network");
+    return isLoopbackBind(bind) ? undefined : tr('the port is exposed on the network: HABBLAUD_BIND={0}', [bind]);
   }
-  return isLoopbackBind(host) ? undefined : tr('a porta está exposta na rede: HABBLAUD_HOST={0}', [host]);
+  return isLoopbackBind(host) ? undefined : tr('the port is exposed on the network: HABBLAUD_HOST={0}', [host]);
 }
 
 /**
- * Por que as mensagens pelo escritório ficam desligadas (undefined = ligadas). Elas entram na sessão como se você
- * as tivesse digitado, então seguem a trava do terminal; HABBLAUD_MENSAGENS com qualquer valor que não seja
- * "ligado" (0, false, off, no...) desliga só elas.
+ * Why office messages stay disabled (undefined = enabled). They enter the session as if you typed
+ * them, so they follow the terminal lock; HABBLAUD_MENSAGENS with any value other than
+ * "enabled" (0, false, off, no...) disables only them.
  */
 export function messagesOffReason(env: NodeJS.ProcessEnv, host: string, inDocker: boolean): string | undefined {
   const flag = env.HABBLAUD_MENSAGENS?.trim();
   if (flag && !isTruthy(flag)) return `HABBLAUD_MENSAGENS=${flag}`;
   const terminal = terminalOffReason(env, host, inDocker);
-  return terminal ? tr('mesma trava do terminal: {0}', [terminal]) : undefined;
+  return terminal ? tr('same lock as the terminal: {0}', [terminal]) : undefined;
 }
 
 /**
- * O servidor do Habblaud World quando HABBLAUD_WORLD_URL está ausente ou vazia: o World vem ligado por padrão, mas nada
- * sai do computador antes de a pessoa criar a conta e entrar (server/world/service.ts). HABBLAUD_WORLD=0 desliga tudo.
+ * Habblaud World server when HABBLAUD_WORLD_URL is missing or empty: World is on by default, but nothing
+ * leaves the computer until the user creates an account and logs in (server/world/service.ts).
+ * HABBLAUD_WORLD=0 disables all.
  */
 export const DEFAULT_WORLD_URL = 'https://server.habblaud.com';
 
-/** Hosts aceitos sem TLS no modo de desenvolvimento: o próprio computador e, de dentro do Docker, o host. */
+/** Hosts accepted without TLS in dev mode: the computer itself and, from inside Docker, the host. */
 const LOCAL_WORLD_HOSTS: readonly string[] = ['127.0.0.1', 'host.docker.internal'];
 
 /**
- * Habblaud World a partir do ambiente. Sem HABBLAUD_WORLD_URL, DEFAULT_WORLD_URL. A URL só vale com `https://` ou
- * `wss://` (o token do dispositivo nunca anda sem TLS); `http://` e `ws://` só no modo de desenvolvimento e só para
- * 127.0.0.1 ou host.docker.internal (o servidor do mundo rodando no próprio computador, visto de fora ou de dentro do
- * Docker). Nada de caminho, usuário, senha ou parâmetros: só o endereço do servidor. Uma URL definida e recusada não
- * cai no padrão: o recurso fica desligado, com o motivo em `warning`.
+ * Habblaud World from environment. Without HABBLAUD_WORLD_URL, DEFAULT_WORLD_URL. URL requires `https://` or
+ * `wss://` (device token never travels without TLS); `http://` and `ws://` only in dev mode and only for
+ * 127.0.0.1 or host.docker.internal (world server running locally, seen from outside or inside
+ * Docker). No path, user, password, or query params: server address only. A defined and rejected URL does not
+ * fall back to default: feature remains disabled, with reason in `warning`.
  */
 export function parseWorldConfig(env: NodeJS.ProcessEnv, argv: string[]): WorldConfig {
   const flag = env.HABBLAUD_WORLD?.trim();
@@ -198,7 +205,7 @@ export function parseWorldConfig(env: NodeJS.ProcessEnv, argv: string[]): WorldC
   try {
     u = new URL(raw);
   } catch {
-    return { enabled, dev, warning: tr('HABBLAUD_WORLD_URL não é um endereço válido') };
+    return { enabled, dev, warning: tr('HABBLAUD_WORLD_URL is not a valid address') };
   }
   const secure = u.protocol === 'https:' || u.protocol === 'wss:';
   const local = (u.protocol === 'http:' || u.protocol === 'ws:') && LOCAL_WORLD_HOSTS.includes(u.hostname);
@@ -207,17 +214,17 @@ export function parseWorldConfig(env: NodeJS.ProcessEnv, argv: string[]): WorldC
       enabled,
       dev,
       warning: local
-        ? tr('HABBLAUD_WORLD_URL com http:// (127.0.0.1 ou host.docker.internal) só vale no modo de desenvolvimento (--dev ou HABBLAUD_WORLD_DEV=1)')
-        : tr('HABBLAUD_WORLD_URL precisa começar com https:// ou wss://'),
+        ? tr('HABBLAUD_WORLD_URL with http:// (127.0.0.1 or host.docker.internal) only works in development mode (--dev or HABBLAUD_WORLD_DEV=1)')
+        : tr('HABBLAUD_WORLD_URL must start with https:// or wss://'),
     };
   }
   if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) {
-    return { enabled, dev, warning: tr('HABBLAUD_WORLD_URL deve ter só o endereço do servidor (sem caminho, usuário, senha ou parâmetros)') };
+    return { enabled, dev, warning: tr('HABBLAUD_WORLD_URL must contain only the server address (no path, user, password or parameters)') };
   }
   return { enabled, dev, url: `${secure ? 'https:' : 'http:'}//${u.host}` };
 }
 
-/** Endereço do WebSocket do mundo a partir da base HTTP(S) (ServerConfig.world.url). */
+/** World WebSocket address from HTTP(S) base (ServerConfig.world.url). */
 export function worldSocketUrl(base: string): string {
   return `${base.replace(/^http/, 'ws').replace(/\/+$/, '')}/v1/socket`;
 }
@@ -249,8 +256,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] 
     repo: pkg.repo,
     updateCheck: !env.HABBLAUD_UPDATE_CHECK?.trim() || isTruthy(env.HABBLAUD_UPDATE_CHECK),
     codex: !env.HABBLAUD_CODEX?.trim() || isTruthy(env.HABBLAUD_CODEX),
+    agy: parseAgyConfig(env, home),
     remote: remote.config,
     remoteWarning: remote.warning,
     world: parseWorldConfig(env, argv),
+  };
+}
+
+function parseAgyConfig(env: NodeJS.ProcessEnv, home: string): ServerConfig['agy'] {
+  const hub = join(home, 'Workspace', 'agy-hub');
+  const room = env.HABBLAUD_AGY_ROOM?.trim() ? resolve(env.HABBLAUD_AGY_ROOM.trim()) : existsSync(hub) ? hub : home;
+  const min = Number(env.HABBLAUD_AGY_USAGE_MIN?.trim() || 15);
+  return {
+    enabled: !env.HABBLAUD_AGY?.trim() || isTruthy(env.HABBLAUD_AGY),
+    room,
+    usageMs: Number.isFinite(min) && min > 0 ? min * 60_000 : 0,
   };
 }

@@ -10,7 +10,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
   };
 }
 
-/** Com o que a migração precisa a mais: listar (key/length) e apagar. */
+/** Additional storage methods needed for migration: list (key/length) and remove. */
 function listableStorage(initial: Record<string, string> = {}) {
   const st = memoryStorage(initial);
   return {
@@ -23,41 +23,42 @@ function listableStorage(initial: Record<string, string> = {}) {
   };
 }
 
-describe('preferências', () => {
-  it('usa o padrão sem armazenamento ou com JSON inválido', () => {
+describe('preferences', () => {
+  it('uses defaults without storage or with invalid JSON', () => {
     expect(loadPrefs(null)).toEqual(DEFAULT_PREFS);
     expect(loadPrefs(memoryStorage({ [PREFS_KEY]: '{oops' }))).toEqual(DEFAULT_PREFS);
   });
-  it('valida campo a campo', () => {
+  it('validates field by field', () => {
     const p = sanitizePrefs({ showNames: false, bubbles: 'muitos', liveliness: 'lively', sound: 'sim', hiddenAccounts: ['.claude', 3] });
     expect(p.showNames).toBe(false);
     expect(p.bubbles).toBe(DEFAULT_PREFS.bubbles);
     expect(p.liveliness).toBe('lively');
     expect(p.sound).toBe(false);
-    expect(p.hiddenAccounts).toEqual(['.claude']);
+    // no account filter anymore: a saved list of hidden accounts is dropped
+    expect(p.hiddenAccounts).toEqual([]);
   });
-  it('salva e carrega de volta', () => {
+  it('saves and reloads', () => {
     const st = memoryStorage();
     savePrefs(st, { ...DEFAULT_PREFS, bubbles: 'none', feedOpen: false });
     expect(loadPrefs(st)).toEqual({ ...DEFAULT_PREFS, bubbles: 'none', feedOpen: false });
   });
-  it('não quebra quando o armazenamento lança exceção', () => {
+  it('does not throw when storage throws an exception', () => {
     const broken = {
       getItem: () => {
-        throw new Error('bloqueado');
+        throw new Error('blocked');
       },
       setItem: () => {
-        throw new Error('cheio');
+        throw new Error('full');
       },
     };
     expect(loadPrefs(broken)).toEqual(DEFAULT_PREFS);
     expect(() => savePrefs(broken, DEFAULT_PREFS)).not.toThrow();
   });
-  it('extrai só as opções do mundo', () => {
+  it('extracts only world options', () => {
     expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'day' })).toEqual({ showNames: true, bubbles: 'important', liveliness: 'normal', dayNight: false, daylight: 'day', theme: 'auto' });
     expect(worldOptionsFrom({ ...DEFAULT_PREFS, daylight: 'night' })).toMatchObject({ dayNight: true, daylight: 'night' });
   });
-  it('ciclo dia/noite: valida o modo e migra o interruptor antigo', () => {
+  it('day/night cycle: validates mode and migrates legacy switch', () => {
     expect(DEFAULT_PREFS.daylight).toBe('auto');
     expect(sanitizePrefs({ daylight: 'night' }).daylight).toBe('night');
     expect(sanitizePrefs({ daylight: 'meio-dia' }).daylight).toBe('auto');
@@ -65,7 +66,7 @@ describe('preferências', () => {
     expect(sanitizePrefs({ dayNight: true }).daylight).toBe('auto');
     expect(sanitizePrefs({ dayNight: false, daylight: 'night' }).daylight).toBe('night');
   });
-  it('temas: preserva preferências antigas e recupera valores inválidos', () => {
+  it('themes: preserves legacy preferences and recovers from invalid values', () => {
     expect(sanitizePrefs({ daylight: 'night' })).toMatchObject({ theme: 'auto', daylight: 'night' });
     expect(sanitizePrefs({ theme: 'invalid' }).theme).toBe('auto');
     for (const theme of ['christmas', 'halloween', 'none', 'auto'] as const) {
@@ -75,7 +76,7 @@ describe('preferências', () => {
       expect(worldOptionsFrom(loadPrefs(st)).theme).toBe(theme);
     }
   });
-  it('sons: desligados por padrão; volume e categorias validados', () => {
+  it('sounds: off by default; volume and categories validated', () => {
     expect(DEFAULT_PREFS.sound).toBe(false);
     const p = sanitizePrefs({ sound: true, sounds: { volume: 3, keys: false, elevator: 'sim' } });
     expect(p.sound).toBe(true);
@@ -85,8 +86,8 @@ describe('preferências', () => {
   });
 });
 
-describe('migração do nome antigo (CodeTown)', () => {
-  it('move as chaves para o prefixo novo e apaga as antigas', () => {
+describe('migration from legacy name (CodeTown)', () => {
+  it('moves keys to the new prefix and removes old ones', () => {
     const prefs = JSON.stringify({ ...DEFAULT_PREFS, bubbles: 'none' });
     const wallets = JSON.stringify({ v: 1, wallets: { a1: { name: 'Ana', coins: 250 } } });
     const st = listableStorage({ 'codetown:prefs': prefs, 'codetown:update-seen': '0.3.2', 'codetown.wallets.v1': wallets });
@@ -94,30 +95,30 @@ describe('migração do nome antigo (CodeTown)', () => {
     expect(Object.fromEntries(st.data)).toEqual({ 'habblaud:prefs': prefs, 'habblaud:update-seen': '0.3.2', 'habblaud.wallets.v1': wallets });
     expect(loadPrefs(st).bubbles).toBe('none');
   });
-  it('não sobrescreve a chave nova que já existe, mas apaga a antiga', () => {
+  it('does not overwrite existing new key, but deletes old one', () => {
     const st = listableStorage({ 'codetown:prefs': '{"bubbles":"none"}', [PREFS_KEY]: '{"bubbles":"all"}' });
     expect(migrateLegacyKeys(st)).toBe(0);
     expect(Object.fromEntries(st.data)).toEqual({ [PREFS_KEY]: '{"bubbles":"all"}' });
   });
-  it('ignora chaves sem o prefixo antigo', () => {
+  it('ignores keys without the legacy prefix', () => {
     const st = listableStorage({ 'outra:coisa': '1', codetown: '2', 'codetownx:prefs': '3', 'meu.codetown:prefs': '4' });
     expect(migrateLegacyKeys(st)).toBe(0);
     expect(st.data.size).toBe(4);
     expect(migrateLegacyKeys(listableStorage())).toBe(0);
   });
-  it('não quebra sem armazenamento ou quando ele lança exceção', () => {
+  it('does not throw without storage or when storage throws an exception', () => {
     expect(migrateLegacyKeys(null)).toBe(0);
     const blocked = {
       ...listableStorage(),
       get length(): number {
-        throw new Error('bloqueado');
+        throw new Error('blocked');
       },
     };
     expect(migrateLegacyKeys(blocked)).toBe(0);
-    // cota cheia: a chave antiga fica para a próxima vez
+    // quota exceeded: old key remains for next time
     const full = listableStorage({ 'codetown:prefs': '{}' });
     full.setItem = () => {
-      throw new Error('cheio');
+      throw new Error('full');
     };
     expect(migrateLegacyKeys(full)).toBe(0);
     expect(Object.fromEntries(full.data)).toEqual({ 'codetown:prefs': '{}' });

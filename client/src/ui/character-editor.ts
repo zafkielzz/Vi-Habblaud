@@ -1,6 +1,6 @@
-// Editor do personagem na gaveta do agente: nome, "Sortear" e as peças (pele, cabelo, roupa...) com prévia de corpo
-// inteiro (appearance-fields.ts, o mesmo do personagem do Habblaud World). "Salvar" grava o personagem do projeto (a
-// sala) no servidor; as regras puras (quando aparece, rótulos, o que vai em `parts`) estão em character-model.ts.
+// Character editor in agent drawer: name, "Randomize", and parts (skin, hair, clothes...) with full-body
+// preview (appearance-fields.ts, same as Habblaud World character). "Save" writes project character
+// (the room) to server; pure rules (when visible, labels, what goes into `parts`) live in character-model.ts.
 import { NAME_MAX } from '../../../shared/appearance';
 import type { AgentInfo } from '../../../shared/types';
 import { appearanceFromSeed } from '../art';
@@ -18,9 +18,9 @@ function randomSeed(): number {
 }
 
 export class CharacterEditor {
-  /** Lápis "Editar personagem", ao lado do nome no topo da gaveta. */
+  /** "Edit character" pencil, next to name at top of drawer. */
   readonly button: HTMLButtonElement;
-  /** Painel do editor (escondido enquanto não está editando). */
+  /** Editor panel (hidden when not editing). */
   readonly el: HTMLElement;
   private agentId = '';
   private editId = 0;
@@ -29,7 +29,7 @@ export class CharacterEditor {
   private confirmingReset = false;
   private seed = 0;
   private look: 'f' | 'm' = 'f';
-  /** Aparência sorteada pela seed (sem peças): o que não mudar não vai em `parts`. */
+  /** Seed-generated base appearance (without parts): unchanged properties are omitted from `parts`. */
   private base: Appearance | null = null;
   private readonly fields = new AppearanceFields();
   private readonly nameInput: HTMLInputElement;
@@ -38,39 +38,39 @@ export class CharacterEditor {
   private readonly resetBtn: HTMLButtonElement;
 
   constructor(private ctx: UiContext) {
-    this.button = iconButton(ICONS.pencil, tr('Editar personagem'), () => (this.editing ? this.cancel() : this.start()), 'ui-icon-btn--sm ui-char-edit');
+    this.button = iconButton(ICONS.pencil, tr('Edit character'), () => (this.editing ? this.cancel() : this.start()), 'ui-icon-btn--sm ui-char-edit');
     setAttr(this.button, 'aria-expanded', 'false');
     this.button.hidden = true;
 
     this.nameInput = h('input', { class: 'ui-char__name', type: 'text', attrs: { maxlength: NAME_MAX, autocomplete: 'off', spellcheck: 'false' } });
-    const roll = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Sortear'), title: tr('Sortear outra aparência (desfaz as peças escolhidas)'), on: { click: () => this.roll() } });
+    const roll = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Randomize'), title: tr('Randomize another look (undoes the pieces you chose)'), on: { click: () => this.roll() } });
     this.error = h('p', { class: 'ui-char__error', role: 'alert', hidden: true });
-    this.saveBtn = h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Salvar'), on: { click: () => void this.save() } });
-    const cancel = h('button', { class: 'ui-btn', type: 'button', text: tr('Cancelar'), on: { click: () => this.cancel() } });
-    this.resetBtn = h('button', { class: 'ui-link-btn ui-char__reset', type: 'button', text: tr('Voltar ao sorteio'), on: { click: () => void this.reset() } });
+    this.saveBtn = h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Save'), on: { click: () => void this.save() } });
+    const cancel = h('button', { class: 'ui-btn', type: 'button', text: tr('Cancel'), on: { click: () => this.cancel() } });
+    this.resetBtn = h('button', { class: 'ui-link-btn ui-char__reset', type: 'button', text: tr('Back to random'), on: { click: () => void this.reset() } });
     this.el = h(
       'section',
-      { class: 'ui-char', hidden: true, attrs: { 'aria-label': tr('Editar personagem') }, on: { keydown: (ev) => this.onKey(ev) } },
+      { class: 'ui-char', hidden: true, attrs: { 'aria-label': tr('Edit character') }, on: { keydown: (ev) => this.onKey(ev) } },
       h(
         'div',
         { class: 'ui-char__top' },
         this.fields.preview,
-        h('div', { class: 'ui-char__head' }, h('label', { class: 'ui-char__label' }, h('span', { text: tr('Nome') }), this.nameInput), roll),
+        h('div', { class: 'ui-char__head' }, h('label', { class: 'ui-char__label' }, h('span', { text: tr('Name') }), this.nameInput), roll),
       ),
-      h('p', { class: 'ui-muted ui-small', text: tr('Vale para o projeto: a próxima sessão nesta sala chega com este personagem.') }),
+      h('p', { class: 'ui-muted ui-small', text: tr('Applies to the project: the next session in this room arrives as this character.') }),
       this.fields.groups,
       this.error,
       h('div', { class: 'ui-char__actions' }, this.saveBtn, cancel, this.resetBtn),
     );
   }
 
-  /** Outro agente na gaveta: descarta a edição em andamento. */
+  /** Different agent in drawer: discards in-progress edit. */
   open(id: string): void {
     if (id !== this.agentId) this.close();
     this.agentId = id;
   }
 
-  /** A cada render da gaveta: o lápis só aparece quando dá para editar; o editor fecha se o agente saiu. */
+  /** On each drawer render: pencil only appears when editable; editor closes if agent left. */
   render(a: AgentInfo, live: boolean): void {
     const store = this.ctx.store;
     const allowed = canEditCharacter(a, {
@@ -83,7 +83,7 @@ export class CharacterEditor {
     setHidden(this.button, !allowed);
     if (this.editing && !allowed) {
       this.close();
-      if (!live || a.status === 'offline') this.ctx.announce(tr('O agente saiu do escritório.'));
+      if (!live || a.status === 'offline') this.ctx.announce(tr('The agent left the office.'));
     }
     if (this.editing && !this.confirmingReset) setHidden(this.resetBtn, !a.custom);
   }
@@ -97,7 +97,7 @@ export class CharacterEditor {
     this.base = appearanceFromSeed(a.seed, { look: a.look });
     this.nameInput.value = a.name;
     this.confirmingReset = false;
-    setText(this.resetBtn, tr('Voltar ao sorteio'));
+    setText(this.resetBtn, tr('Back to random'));
     setHidden(this.resetBtn, !a.custom);
     this.showError(null);
     this.editing = true;
@@ -108,7 +108,7 @@ export class CharacterEditor {
     this.nameInput.select();
   }
 
-  /** Fecha o editor e descarta o rascunho (também quando a gaveta fecha ou sai do agente). */
+  /** Closes editor and discards draft (also when drawer closes or switches agent). */
   close(): void {
     if (!this.editing) return;
     this.editing = false;
@@ -133,7 +133,7 @@ export class CharacterEditor {
     const draft = this.fields.value;
     if (this.busy || !this.base || !draft) return;
     const name = this.nameInput.value.trim();
-    if (!name) return this.showError(tr('Dê um nome ao personagem.'));
+    if (!name) return this.showError(tr('Give the character a name.'));
     const id = this.agentId;
     const editId = this.editId;
     this.busy = true;
@@ -145,14 +145,14 @@ export class CharacterEditor {
     if (err) return this.showError(err);
     this.close();
     this.button.focus();
-    this.ctx.announce(tr('Personagem salvo: {0}.', [name]));
+    this.ctx.announce(tr('Character saved: {0}.', [name]));
   }
 
   private async reset(): Promise<void> {
     if (this.busy) return;
     if (!this.confirmingReset) {
       this.confirmingReset = true;
-      setText(this.resetBtn, tr('Confirmar: voltar ao sorteio'));
+      setText(this.resetBtn, tr('Confirm: back to random'));
       return;
     }
     const id = this.agentId;
@@ -164,7 +164,7 @@ export class CharacterEditor {
     if (err) return this.showError(err);
     this.close();
     this.button.focus();
-    this.ctx.announce(tr('O personagem voltou ao sorteio.'));
+    this.ctx.announce(tr('The character is back to random.'));
   }
 
   private showError(message: string | null): void {

@@ -1,7 +1,7 @@
 {
   "name": "Habblaud",
   "short_name": "Habblaud",
-  "description": "O escritório dos seus agentes: quem trabalha, quem precisa de você e o que foi entregue.",
+  "description": "The office for your agents: who's working, who needs you, and what was delivered.",
   "lang": "pt-BR",
   "start_url": "/?app=1",
   "scope": "/",

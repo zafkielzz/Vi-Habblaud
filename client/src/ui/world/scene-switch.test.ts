@@ -1,6 +1,6 @@
-// O botão Mundo: só com `meta.world.scene.available` e pela página do próprio computador (o snapshot também vai ao
-// celular, mas as rotas da cena não); no modo demonstração, sem as travas. E a volta ao escritório quando a interface
-// escolhe um agente ou sala com a cidade aberta (aviso, Responder).
+// The World button: only with `meta.world.scene.available` and on the machine's own page (snapshot also goes to
+// mobile, but scene routes do not); in demo mode, without restrictions. And returning to the office when UI
+// selects an agent or room while city is open (notice, Reply).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorldMeta, WorldSource } from '../../net/world';
 import type { Selection } from '../../world/api';
@@ -13,14 +13,14 @@ const src = (m: WorldMeta | undefined, fake = false): WorldSource => ({ client: 
 const LOCAL: WorldGate = { remote: false, local: true, terminal: true, fake: false };
 
 describe('citySceneAvailable', () => {
-  it('com a cena disponível e a página do próprio computador', () => {
+  it('with scene available and on the local computer page', () => {
     expect(citySceneAvailable(src(meta({ available: true })), LOCAL)).toBe(true);
     expect(citySceneAvailable(src(meta({ available: false })), LOCAL)).toBe(false);
     expect(citySceneAvailable(src(meta()), LOCAL)).toBe(false);
     expect(citySceneAvailable(src(undefined), LOCAL)).toBe(false);
   });
 
-  it('nunca pelo celular nem sem a trava do terminal; no modo demonstração, sem as travas', () => {
+  it('never on mobile or without terminal gate; in demo mode, without restrictions', () => {
     const on = meta({ available: true });
     expect(citySceneAvailable(src(on), { ...LOCAL, remote: true })).toBe(false);
     expect(citySceneAvailable(src(on), { ...LOCAL, local: false })).toBe(false);
@@ -29,7 +29,7 @@ describe('citySceneAvailable', () => {
   });
 });
 
-/** Elemento mínimo para o botão Mundo no ambiente Node (só o que `h()` e `render()` tocam). */
+/** Minimal element for World button in Node environment (only what `h()` and `render()` touch). */
 class ElementStub {
   className = '';
   textContent = '';
@@ -45,7 +45,7 @@ class ElementStub {
 describe('SceneSwitch.leaveFor', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  /** A cena (host falso) e a interface como em ui/index.ts: `ctx.select` passa pela guarda antes de selecionar. */
+  /** The scene (fake host) and UI as in ui/index.ts: `ctx.select` goes through guard before selecting. */
   function setup() {
     vi.stubGlobal('document', { createElement: () => new ElementStub() });
     const host = {
@@ -77,7 +77,7 @@ describe('SceneSwitch.leaveFor', () => {
     return { host, ctx, sw, onChange, selected, inCityAtSelect, setSelection: (s: Selection) => (selection = s) };
   }
 
-  it('com a cidade aberta, escolher um agente ou uma sala volta ao escritório antes de selecionar', () => {
+  it('with city open, selecting an agent or room returns to office before selecting', () => {
     for (const sel of [{ type: 'agent', id: 'a1' }, { type: 'room', id: 'r1' }] as const) {
       const { host, ctx, sw, onChange, inCityAtSelect } = setup();
       host.open = true;
@@ -89,7 +89,7 @@ describe('SceneSwitch.leaveFor', () => {
     }
   });
 
-  it('desmarcar (null) não fecha a cidade, e fora da cidade nada muda', () => {
+  it('deselecting (null) does not close city, and outside city nothing changes', () => {
     const a = setup();
     a.host.open = true;
     a.ctx.select(null);
@@ -103,7 +103,7 @@ describe('SceneSwitch.leaveFor', () => {
     expect(b.onChange).not.toHaveBeenCalled();
   });
 
-  it('abrir a cidade com um agente selecionado desmarca sem voltar ao escritório', async () => {
+  it('opening city with an agent selected deselects without returning to office', async () => {
     const { host, sw, selected, setSelection } = setup();
     setSelection({ type: 'agent', id: 'a1' });
     await sw.open();

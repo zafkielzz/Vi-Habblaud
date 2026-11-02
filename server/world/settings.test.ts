@@ -24,7 +24,7 @@ function store(now = () => 1_000) {
 }
 
 describe('WorldSettingsStore', () => {
-  it('grava com modo 600 (sem temporário sobrando) e relê igual', () => {
+  it('saves with mode 600 (without leftover temporary file) and reads back identical', () => {
     const { file, dir, store: s } = store();
     expect(s.load()).toBeUndefined();
     expect(s.save(SESSION)).toBe(true);
@@ -34,7 +34,7 @@ describe('WorldSettingsStore', () => {
     expect(new WorldSettingsStore(file).load()).toEqual({ ...SESSION, updatedAt: 1_000 });
   });
 
-  it('fecha a permissão de um arquivo aberto demais ao ler', () => {
+  it('tightens permissions of an overly permissive file when reading', () => {
     const { file, store: s } = store();
     s.save(SESSION);
     chmodSync(file, 0o644);
@@ -42,18 +42,18 @@ describe('WorldSettingsStore', () => {
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it('o 600 vale também por cima de um temporário velho com outra permissão', () => {
+  it('mode 600 also applies over an old temporary file with different permissions', () => {
     const { file, dir, store: s } = store();
     mkdirSync(dir, { recursive: true });
-    writeFileSync(`${file}.${process.pid}.tmp`, 'velho', { mode: 0o644 });
+    writeFileSync(`${file}.${process.pid}.tmp`, 'old', { mode: 0o644 });
     s.save(SESSION);
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it('update muda só acesso e personagem; clear apaga o arquivo', () => {
+  it('update changes only access and character; clear deletes the file', () => {
     let now = 1_000;
     const { file, store: s } = store(() => now);
-    expect(s.update({ access: 'approved' })).toBe(false); // sem sessão, nada
+    expect(s.update({ access: 'approved' })).toBe(false); // without session, nothing
     s.save(SESSION);
     now = 2_000;
     s.update({ access: 'approved' });
@@ -63,7 +63,7 @@ describe('WorldSettingsStore', () => {
     expect(existsSync(file)).toBe(false);
   });
 
-  it('tema: fica no world.json com ou sem sessão e sobrevive a sair; só o tema não é arquivo estragado', () => {
+  it('theme: stays in world.json with or without session and survives logout; theme alone is not a corrupted file', () => {
     const { file, store: s } = store();
     expect(s.getTheme()).toBe('auto');
     s.setTheme('halloween');
@@ -81,12 +81,12 @@ describe('WorldSettingsStore', () => {
     expect(again.getTheme()).toBe('halloween');
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
-    // De volta ao automático e sem sessão: o arquivo some.
+    // Back to auto and without session: file disappears.
     again.setTheme('auto');
     expect(existsSync(file)).toBe(false);
   });
 
-  it('conta excluída (erase): o world.json some inteiro, tema junto; de novo, nada quebra', () => {
+  it('deleted account (erase): entire world.json disappears including theme; again, nothing breaks', () => {
     const { file, store: s } = store();
     s.save(SESSION);
     s.setTheme('christmas');
@@ -98,7 +98,7 @@ describe('WorldSettingsStore', () => {
     expect(existsSync(file)).toBe(false);
   });
 
-  it('pausa: fica na sessão e sai com undefined', () => {
+  it('pause: stays in session and removes with undefined', () => {
     const { file, store: s } = store();
     s.save(SESSION);
     s.update({ paused: true });
@@ -108,12 +108,12 @@ describe('WorldSettingsStore', () => {
     expect(new WorldSettingsStore(file).load()?.paused).toBeUndefined();
   });
 
-  it('arquivo estragado ou fora do formato: ignorado, e o log nunca mostra o conteúdo', () => {
+  it('corrupted or malformed file: ignored, and log never displays content', () => {
     const { file, dir, store: s } = store();
     mkdirSync(dir, { recursive: true });
     setQuiet(false);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    writeFileSync(file, `{"token": "${TOKEN}", lixo`, { mode: 0o600 });
+    writeFileSync(file, `{"token": "${TOKEN}", junk`, { mode: 0o600 });
     expect(s.load()).toBeUndefined();
     writeFileSync(file, JSON.stringify({ ...SESSION, access: 'banido' }), { mode: 0o600 });
     expect(s.load()).toBeUndefined();
@@ -122,11 +122,11 @@ describe('WorldSettingsStore', () => {
     warn.mockRestore();
   });
 
-  it('disco que recusa: a sessão vale na memória e o aviso não leva o token', () => {
+  it('disk failure: session remains valid in memory and warning does not leak token', () => {
     const { dir, store: _ } = store();
     mkdirSync(dir, { recursive: true });
-    // Um arquivo no lugar da pasta: o mkdir/rename falham.
-    const blocker = join(dir, 'bloqueio');
+    // A file in place of directory: mkdir/rename fail.
+    const blocker = join(dir, 'blocker');
     writeFileSync(blocker, '');
     const s = new WorldSettingsStore(join(blocker, 'world.json'));
     setQuiet(false);
@@ -139,7 +139,7 @@ describe('WorldSettingsStore', () => {
 });
 
 describe('parseWorldSession', () => {
-  it('confere cada campo', () => {
+  it('checks each field', () => {
     expect(parseWorldSession({ ...SESSION, updatedAt: 5 })).toEqual({ ...SESSION, updatedAt: 5 });
     expect(parseWorldSession({ ...SESSION, token: 'curto' })).toBeUndefined();
     expect(parseWorldSession({ ...SESSION, deviceId: '../x' })).toBeUndefined();

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# agy-sync - name every running agy agent "<acc>-<role>" and set its default mode, from ~/.agy_profiles/roles.conf.
+# Re-run after (re)starting an agent: names are cleared when an agent exits. Mode is only changed on idle agents.
+set -eu
+conf="$HOME/.agy_profiles/roles.conf"
+herdr agent list | python3 -c '
+import sys,json
+for a in json.load(sys.stdin)["result"]["agents"]:
+    if a["agent"]=="agy": print(a["pane_id"], a["agent_status"])' |
+while read -r pane st; do
+  pid=$(herdr pane process-info --pane "$pane" | python3 -c '
+import sys,json
+for p in json.load(sys.stdin)["result"]["process_info"]["foreground_processes"]:
+    if p["name"]=="agy": print(p["pid"]); break')
+  acc=$(tr '\0' '\n' </proc/$pid/environ | sed -n 's|^HOME=.*/\.agy_profiles/||p')
+  read -r _ role mode < <(grep -E "^$acc[[:space:]]" "$conf" || echo "$acc ? default")
+  name="$acc-$role"
+  herdr agent rename "$pane" "$name" >/dev/null
+  if [ "$st" = idle ] || [ "$st" = done ]; then agy-mode "$name" "$mode" >/dev/null && m=$mode || m="mode?"; else m="(busy, mode skipped)"; fi
+  echo "$pane  $name  $m"
+done

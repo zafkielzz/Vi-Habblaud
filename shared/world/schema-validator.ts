@@ -1,6 +1,6 @@
-// Validador mínimo de JSON Schema, para os testes conferirem pacotes contra shared/world/schema.json (o Habblaud não tem
-// dependências de runtime nem o Ajv; o servidor do mundo valida o mesmo arquivo com o Ajv). Só as palavras-chave que o
-// schema.json usa: qualquer outra derruba quem chamou, para nenhuma regra ser ignorada em silêncio. Usado só por testes.
+// Minimal JSON Schema validator for tests checking packets against shared/world/schema.json (Habblaud has
+// no runtime dependencies or Ajv; world server validates same file with Ajv). Supports only keywords used by
+// schema.json: any other throws, so no rule is silently ignored. Used by tests only.
 
 export type Schema = boolean | { [k: string]: unknown };
 export interface SchemaError { keyword: string; path: string }
@@ -28,7 +28,7 @@ function typeOk(type: string, v: unknown): boolean {
     case 'null':
       return v === null;
     default:
-      throw new Error(`tipo não suportado: ${type}`);
+      throw new Error(`unsupported type: ${type}`);
   }
 }
 
@@ -36,14 +36,14 @@ export function compileValidator(root: { [k: string]: unknown }): (data: unknown
   const resolve = (ref: string): Schema => {
     const m = /^#\/\$defs\/([\w-]+)$/.exec(ref);
     const defs = root.$defs as Record<string, Schema> | undefined;
-    if (!m || !defs || !(m[1] in defs)) throw new Error(`$ref não suportado: ${ref}`);
+    if (!m || !defs || !(m[1] in defs)) throw new Error(`unsupported $ref: ${ref}`);
     return defs[m[1]];
   };
   const check = (schema: Schema, v: unknown, path: string, out: SchemaError[]): void => {
     if (schema === true) return;
     if (schema === false) return void out.push({ keyword: 'false schema', path });
     for (const k of Object.keys(schema)) {
-      if (!KEYWORDS.has(k) && !ANNOTATIONS.has(k)) throw new Error(`palavra-chave não suportada: ${k} (${path || '/'})`);
+      if (!KEYWORDS.has(k) && !ANNOTATIONS.has(k)) throw new Error(`unsupported keyword: ${k} (${path || '/'})`);
     }
     const s = schema as Record<string, unknown>;
     const fail = (keyword: string, at = path): void => void out.push({ keyword, path: at });
@@ -98,8 +98,8 @@ export function compileValidator(root: { [k: string]: unknown }): (data: unknown
 }
 
 /**
- * Caminho de cada chave que o esquema permite, seguindo `$ref`, `items` e os ramos `then`/`else`: "v", "floors",
- * "floors[].agents[].parts.skin"... É a lista fechada do pacote, tirada do próprio schema.json.
+ * Path of each key allowed by schema, following `$ref`, `items`, and `then`/`else` branches: "v", "floors",
+ * "floors[].agents[].parts.skin"... The closed list for packets, extracted from schema.json itself.
  */
 export function schemaKeyPaths(root: { [k: string]: unknown }): Set<string> {
   const out = new Set<string>();
@@ -121,7 +121,7 @@ export function schemaKeyPaths(root: { [k: string]: unknown }): Set<string> {
   return out;
 }
 
-/** Caminho de cada chave de um JSON, no mesmo formato de schemaKeyPaths. */
+/** Path of each key in JSON, matching schemaKeyPaths format. */
 export function jsonKeyPaths(value: unknown, path = '', out = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
     for (const item of value) jsonKeyPaths(item, `${path}[]`, out);

@@ -35,7 +35,7 @@ async function start(): Promise<Env> {
   const dir = join(tmp.dir, 'timeline');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, '2026-10-07.jsonl'), `${DAY}\n`);
-  writeFileSync(join(tmp.dir, 'segredo.jsonl'), 'não pode sair');
+  writeFileSync(join(tmp.dir, 'secret.jsonl'), 'cannot leak');
   const accounts = new AccountsService({ dirs: [], home: tmp.dir, env: {}, onChange: () => {} });
   const office = new Office({ names: new NameStore(null), version: 't', startedAt: Date.now(), accounts: (s) => accounts.list(s), sources: () => [], accountName: () => undefined });
   const hub = new Hub(office, { throttleMs: 10 });
@@ -63,7 +63,7 @@ async function start(): Promise<Env> {
   };
 }
 
-/** Requisição crua: o caminho vai exatamente como escrito (o fetch normalizaria "..", "%2F" etc.). */
+/** Raw request: path is sent exactly as written (fetch would normalize "..", "%2F", etc.). */
 function raw(base: string, path: string, opts: { method?: string; headers?: Record<string, string> } = {}): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }> {
   const u = new URL(base);
   return new Promise((ok, fail) => {
@@ -77,7 +77,7 @@ function raw(base: string, path: string, opts: { method?: string; headers?: Reco
   });
 }
 
-describe('API da linha do tempo', () => {
+describe('timeline API', () => {
   let env: Env;
   beforeEach(async () => {
     env = await start();
@@ -94,7 +94,7 @@ describe('API da linha do tempo', () => {
     expect(await res.json()).toEqual({ recording: true, days: [{ day: '2026-10-07', bytes: DAY.length + 1, from: 1_000, to: 3_000 }] });
   });
 
-  it('GET /api/timeline/:dia em JSONL, com gzip quando aceito', async () => {
+  it('GET /api/timeline/:day in JSONL, with gzip when accepted', async () => {
     const plain = await raw(env.base, '/api/timeline/2026-10-07');
     expect(plain.status).toBe(200);
     expect(plain.headers['content-type']).toBe('application/x-ndjson; charset=utf-8');
@@ -112,31 +112,31 @@ describe('API da linha do tempo', () => {
     expect(head.body.length).toBe(0);
   });
 
-  it('valida o dia com rigor (nada de path traversal)', async () => {
+  it('strictly validates day (no path traversal)', async () => {
     for (const path of [
-      '/api/timeline/..%2Fsegredo',
-      '/api/timeline/%2e%2e%2Fsegredo',
-      '/api/timeline/2026-10-07%2F..%2F..%2Fsegredo',
+      '/api/timeline/..%2Fsecret',
+      '/api/timeline/%2e%2e%2Fsecret',
+      '/api/timeline/2026-10-07%2F..%2F..%2Fsecret',
       '/api/timeline/2026-10-07.jsonl',
       '/api/timeline/2026-02-30',
       '/api/timeline/2026-13-01',
-      '/api/timeline/hoje',
+      '/api/timeline/today',
       '/api/timeline/%E0%A4%A',
       '/api/timeline/2026-10-07%00',
       '/api/timeline',
     ]) {
       const res = await raw(env.base, path);
       expect(res.status, path).toBe(400);
-      expect(res.body.toString()).not.toContain('não pode sair');
+      expect(res.body.toString()).not.toContain('cannot leak');
     }
-    // Caminhos com mais segmentos não casam com a rota do dia.
-    expect((await raw(env.base, '/api/timeline/2026-10-07/../../segredo.jsonl')).status).not.toBe(200);
+    // Paths with extra segments do not match the day route.
+    expect((await raw(env.base, '/api/timeline/2026-10-07/../../secret.jsonl')).status).not.toBe(200);
     expect((await raw(env.base, '/api/timeline/x/2026-10-07')).status).toBe(400);
   });
 
-  it('dia sem gravação = 404; outros métodos = 405', async () => {
+  it('day without recording = 404; other methods = 405', async () => {
     expect((await raw(env.base, '/api/timeline/2026-10-01')).status).toBe(404);
-    // (o guard da borda já exige JSON em métodos que não são leitura)
+    // (edge guard already requires JSON for non-read methods)
     const post = await raw(env.base, '/api/timeline/days', { method: 'DELETE', headers: { 'Content-Type': 'application/json' } });
     expect(post.status).toBe(405);
     expect(post.headers.allow).toBe('GET');

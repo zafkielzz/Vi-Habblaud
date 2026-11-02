@@ -1,37 +1,47 @@
-// Entrada: arrastar (mouse/toque), roda/pinça (zoom no cursor), clique/duplo clique e teclado.
+// Input: drag (mouse/touch), wheel/pinch (cursor zoom), click/double click, and keyboard.
 import type { Camera } from './camera';
 
 export type Hit = { type: 'agent'; id: string } | { type: 'room'; id: string } | null;
 
 export interface InputHandlers {
   pick(sx: number, sy: number): Hit;
-  /** Clique (ou toque) sem arrastar: o que foi tocado e onde (px CSS do canvas). */
+  /** Click (or tap) without dragging: what was touched and where (canvas CSS px). */
   click(hit: Hit, at: { x: number; y: number }): void;
   doubleClick(hit: Hit): void;
   hover(sx: number, sy: number, inside: boolean): void;
-  /** O usuário mexeu na câmera (cancela "seguir"). */
+  /** User moved the camera (cancels "follow"). */
   interact(): void;
   overview(): void;
   zoomStep(steps: number, sx?: number, sy?: number): void;
-  /** (Opcional) O escritório está na tela? Com a cena da cidade aberta, o teclado não mexe na câmera escondida. */
+  /** (Optional) Is the office visible? With the city scene open, keyboard does not move hidden camera. */
   active?(): boolean;
-  /** (Opcional) O teclado mexe na câmera? (Na visita, as setas e o WASD andam com o visitante.) Padrão: sim. */
+  /** (Optional) Does the keyboard move the camera? (During visits, arrows and WASD move the visitor.) Default: yes. */
   keys?(): boolean;
+  /**
+   * (Optional) Drag an agent: pressing on it and dragging (past threshold) picks it up instead of moving the camera.
+   * `start` returns false if it cannot be picked up now (then dragging moves the camera as usual). Without dragging,
+   * it remains a click.
+   */
+  grab?: {
+    start(hit: { type: 'agent'; id: string }, at: { x: number; y: number }): boolean;
+    move(at: { x: number; y: number }): void;
+    end(at: { x: number; y: number }): void;
+  };
 }
 
 const DRAG_THRESHOLD = 5;
 const PAN_KEY_STEP = 90;
 
-/** Há um diálogo modal/popover aberto, ou o foco do teclado está dentro de um? */
+/** Is a modal dialog/popover open, or is keyboard focus inside one? */
 export function modalOpen(target: HTMLElement | null): boolean {
   if (target?.closest?.('dialog, [popover], [role="dialog"], [aria-modal="true"]')) return true;
   if (typeof document === 'undefined') return false;
-  // Um <dialog> fechado continua no DOM (com os atributos que tiver): só o aberto conta.
+  // A closed <dialog> remains in the DOM (with whatever attributes it has): only open counts.
   if (document.querySelector('dialog[open], :not(dialog)[aria-modal="true"]')) return true;
   try {
     return !!document.querySelector(':popover-open');
   } catch {
-    // navegador sem suporte a :popover-open
+    // browser without :popover-open support
     return false;
   }
 }
@@ -45,6 +55,10 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
   let wheelAcc = 0;
   let wheelSettle: ReturnType<typeof setTimeout> | null = null;
   let lastTap = { t: 0, x: 0, y: 0 };
+  /** Agent under pointer on pointerdown (candidate to be picked up) and whether it is picked up. */
+  let grabHit: { type: 'agent'; id: string } | null = null;
+  let grabbing = false;
+  let lastP = { x: 0, y: 0 };
   canvas.style.touchAction = 'none';
   canvas.style.cursor = 'grab';
 
@@ -60,13 +74,19 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
-      // ponteiro já liberado
+      // pointer already released
     }
     if (pointers.size === 1) {
       downX = p.x;
       downY = p.y;
       dragging = false;
+      const hit = h.grab ? h.pick(p.x, p.y) : null;
+      grabHit = hit?.type === 'agent' ? hit : null;
     } else if (pointers.size === 2) {
+      // second finger: pinch; any picked up agent is dropped in place
+      if (grabbing) h.grab?.end(lastP);
+      grabbing = false;
+      grabHit = null;
       const [a, b] = [...pointers.values()];
       pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: camera.zoom, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
       dragging = true;
@@ -96,9 +116,13 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
     if (!dragging && Math.hypot(p.x - downX, p.y - downY) > DRAG_THRESHOLD) {
       dragging = true;
       canvas.style.cursor = 'grabbing';
-      h.interact();
+      if (grabHit && h.grab?.start(grabHit, p)) grabbing = true;
+      else h.interact();
+      grabHit = null;
     }
-    if (dragging) camera.panBy(p.x - prev.x, p.y - prev.y);
+    lastP = p;
+    if (grabbing) h.grab?.move(p);
+    else if (dragging) camera.panBy(p.x - prev.x, p.y - prev.y);
   };
 
   const onUp = (e: PointerEvent) => {
@@ -112,13 +136,20 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
     }
     if (pointers.size > 0) return;
     canvas.style.cursor = 'grab';
+    grabHit = null;
+    if (grabbing) {
+      grabbing = false;
+      dragging = false;
+      h.grab?.end(p);
+      return;
+    }
     if (dragging) {
       dragging = false;
       return;
     }
     const hit = h.pick(p.x, p.y);
     if (e.pointerType !== 'mouse') {
-      // duplo toque
+      // double tap
       const now = performance.now();
       if (now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 24) {
         h.doubleClick(hit);
@@ -134,6 +165,9 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinch = null;
     if (!pointers.size) {
+      if (grabbing) h.grab?.end(lastP);
+      grabbing = false;
+      grabHit = null;
       dragging = false;
       canvas.style.cursor = 'grab';
     }
@@ -152,7 +186,7 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
     h.interact();
     const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
     if (e.ctrlKey) {
-      // pinça do trackpad: zoom contínuo, encaixa num nível nítido ao parar
+      // trackpad pinch: continuous zoom, settles to a crisp level on release
       camera.zoomAt(camera.zoom * Math.exp(-delta * 0.012), p.x, p.y, Date.now(), false);
       if (wheelSettle) clearTimeout(wheelSettle);
       wheelSettle = setTimeout(() => camera.settle(Date.now()), 180);
@@ -170,9 +204,9 @@ export function attachInput(canvas: HTMLCanvasElement, camera: Camera, h: InputH
     if (h.active && !h.active()) return;
     if (h.keys && !h.keys()) return;
     const t = e.target as HTMLElement | null;
-    // Campo ou rádio em foco (velocidade do replay): as setas são do controle, não da câmera.
+    // Focused field or radio (replay speed): arrow keys belong to the control, not the camera.
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.getAttribute?.('role') === 'radio')) return;
-    // modal/popover aberto (ajuda, configurações...): o teclado é dele, não da câmera
+    // open modal/popover (help, settings...): keyboard belongs to it, not the camera
     if (modalOpen(t)) return;
     let dx = 0;
     let dy = 0;

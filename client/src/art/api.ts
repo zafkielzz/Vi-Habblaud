@@ -1,26 +1,26 @@
-// CONTRATO do módulo de arte (pixel art procedural).
+// CONTRACT for the art module (procedural pixel art).
 //
-// - Implementação: client/src/art/index.ts (+ arquivos internos de art/).
-// - Consumidores: client/src/world/** (render do escritório) e client/src/ui/** (avatares).
-// - Regra: mudanças aqui devem ser ADITIVAS. Não renomeie/remova tipos, kinds ou funções.
+// - Implementation: client/src/art/index.ts (+ internal files in art/).
+// - Consumers: client/src/world/** (office rendering) and client/src/ui/** (avatars).
+// - Rule: changes here must be ADDITIVE. Do not rename/remove types, kinds, or functions.
 //
-// Convenções gerais
-// - Mundo em "pixels de mundo"; 1 tile = TILE px. Tudo é pixel art em 1x, ampliado pela câmera
-//   com imageSmoothingEnabled = false.
-// - Perspectiva: top-down 3/4, como em tilesets de escritório moderno em pixel art. Ver DIREÇÃO DE ARTE abaixo. Vemos o topo e a FRENTE (face sul)
-//   dos objetos. Paredes norte mostram a face (2 tiles de altura); paredes laterais e sul aparecem
-//   só como "tampa" fina para não esconder o interior das salas.
-// - Luz vem de cima/esquerda: topos mais claros, faces frontais mais escuras, sombra suave embaixo.
-// - Sprites são HTMLCanvasElement em cache (gere uma vez, reutilize sempre).
+// General conventions
+// - World in "world pixels"; 1 tile = TILE px. Everything is 1x pixel art, scaled by the camera
+//   with imageSmoothingEnabled = false.
+// - Perspective: top-down 3/4, as in modern pixel art office tilesets. See ART DIRECTION below. We see the top and FRONT (south face)
+//   of objects. North walls show the face (2 tiles high); side and south walls appear
+//   only as a thin "cap" to avoid hiding room interiors.
+// - Light comes from top/left: lighter tops, darker front faces, soft shadow underneath.
+// - Sprites are cached HTMLCanvasElement instances (generate once, reuse always).
 
-// DIREÇÃO DE ARTE (pixel art top-down 3/4 de escritório moderno, claro e detalhado)
-// - Escritório claro e limpo: porcelanato claro com rejunte sutil, madeira quente no lounge, paredes claras,
-//   divisórias de vidro azulado, estantes com pastas coloridas, plantas em vasos, quadros, placa com o nome.
-// - Ilhas de mesas com 1–2 monitores de tela azulada brilhante, teclado, mouse, caneca, papéis; cadeiras grafite.
-// - Copa com bancada clara e frontão de mármore, pia inox, cafeteira, geladeira; bebedouro com galão azul.
-// - Lounge com sofá azul/cinza-azulado e almofadas laranja, tapete, mesa de centro, bonsai, impressora grande.
-// - Paleta clara (neutros frios + madeira quente + acentos saturados nos objetos); contorno 1px cinza-azulado
-//   escuro (não preto); 3–4 tons por material; brilhos especulares; sombras de contato; muitos detalhes pequenos.
+// ART DIRECTION (modern, clean, and detailed top-down 3/4 pixel art office)
+// - Bright and clean office: light porcelain tile with subtle grout, warm wood in lounge, light walls,
+//   bluish glass partitions, bookshelves with colorful binders, potted plants, paintings, nameplate.
+// - Desk clusters with 1–2 glowing bluish screen monitors, keyboard, mouse, mug, papers; graphite chairs.
+// - Kitchenette with light countertop and marble backsplash, stainless sink, coffee maker, fridge; water cooler with blue jug.
+// - Lounge with blue/slate sofa and orange cushions, rug, coffee table, bonsai, large printer.
+// - Light palette (cool neutrals + warm wood + saturated accents on objects); 1px dark slate outline
+//   (not black); 3–4 tones per material; specular highlights; contact shadows; plenty of small details.
 
 import type { AppearanceParts } from '../../../shared/appearance';
 
@@ -29,42 +29,42 @@ export const TILE = 16;
 export type Dir = 'down' | 'up' | 'left' | 'right';
 
 /**
- * Poses do personagem. Entre parênteses: nº de frames esperado.
- * Poses "sentadas" (sit/type/sleep) assumem que o personagem está sobre um assento: as pernas
- * ficam escondidas/dobradas e o corpo fica ~4px mais baixo que em pé.
+ * Character poses. In parentheses: expected frame count.
+ * "Seated" poses (sit/type/sleep) assume the character is on a seat: legs
+ * are hidden/folded and the body is ~4px lower than standing.
  */
 export type Pose =
-  | 'stand' // em pé parado, respiração sutil (2)
-  | 'walk' // andando (4)
-  | 'run' // correndo, passos mais largos e corpo inclinado (4)
-  | 'sit' // sentado parado (2)
-  | 'type' // sentado digitando — normalmente dir 'up', de costas para a câmera, braços alternando (4)
-  | 'sleep' // sentado cochilando: cabeça baixa (2)
-  | 'drink' // em pé levando o copo à boca (2) — use com held 'coffee' ou 'water'
-  | 'use' // em pé operando máquina: braço estendido para frente (2)
-  | 'raise_hand' // braço levantado acenando — pedindo atenção (2); funciona em pé e sentado (opts.seated)
-  | 'talk' // em pé conversando, gesticulando (2)
-  | 'stretch' // em pé se espreguiçando, braços para cima (2)
-  | 'read' // em pé ou sentado segurando livro/papéis à frente (2)
-  | 'play' // ping-pong: raquete na mão, alternando braço (2)
-  | 'wait' // sentado esperando algo terminar (ex.: um shell), recostado (2). Com held 'popcorn': mão do balde à boca, comendo pipoca; sem item: braços cruzados, dedos/pé batendo
-  // --- vida social (aditivo)
-  | 'cheer' // comemorando: os dois braços para o alto, punhos cerrados, boca aberta, pulinho no quadro 1 (2). Em pé ou sentado (opts.seated)
-  | 'laugh' // gargalhando: olhos fechados em arco, boca aberta, uma mão na barriga, corpo sacudindo 1px (2). Em pé ou sentado
-  | 'game' // jogando videogame: controle (held 'controller') nas duas mãos à frente do peito, polegares mexendo, corpo inclinado para a tela (2). Em pé ou sentado
-  | 'rps' // pedra-papel-tesoura. held 'none': punho fechado subindo (quadro 0) e descendo (1) na contagem "jo-ken-pô"; held 'rock'|'paper'|'scissors': braço estendido à frente mostrando o gesto (2). Em pé (sentado também funciona)
-  | 'groom' // diante do espelho (normalmente dir 'up', de costas): uma mão perto do rosto/cabelo indo e voltando — batom, pente, ajeitar o cabelo (2). held opcional 'lipstick'|'comb'. Em pé
-  | 'sulk'; // chateado (perdeu a aposta/partida): ombros caídos, cabeça baixa, olhos semicerrados, braços pendurados (2). Em pé ou sentado
+  | 'stand' // standing idle, subtle breathing (2)
+  | 'walk' // walking (4)
+  | 'run' // running, wider strides and leaning body (4)
+  | 'sit' // seated idle (2)
+  | 'type' // seated typing — usually dir 'up', back to camera, alternating arms (4)
+  | 'sleep' // seated dozing off: head down (2)
+  | 'drink' // standing bringing cup to mouth (2) — use with held 'coffee' or 'water'
+  | 'use' // standing operating machine: arm extended forward (2)
+  | 'raise_hand' // arm raised waving — requesting attention (2); works standing and seated (opts.seated)
+  | 'talk' // standing talking, gesturing (2)
+  | 'stretch' // standing stretching, arms up (2)
+  | 'read' // standing or seated holding book/papers in front (2)
+  | 'play' // ping-pong: paddle in hand, alternating arm (2)
+  | 'wait' // seated waiting for something to finish (e.g. a shell), leaning back (2). With held 'popcorn': hand moves from bucket to mouth, eating popcorn; without item: arms crossed, tapping fingers/foot
+  // --- social life (additive)
+  | 'cheer' // cheering: both arms up, clenched fists, open mouth, small hop on frame 1 (2). Standing or seated (opts.seated)
+  | 'laugh' // laughing out loud: arched closed eyes, open mouth, one hand on belly, body shaking 1px (2). Standing or seated
+  | 'game' // playing videogame: controller (held 'controller') in both hands in front of chest, thumbs moving, body leaning toward screen (2). Standing or seated
+  | 'rps' // rock-paper-scissors. held 'none': closed fist moving up (frame 0) and down (1) on "rock-paper-scissors" count; held 'rock'|'paper'|'scissors': arm extended forward showing gesture (2). Standing (seated also works)
+  | 'groom' // in front of mirror (usually dir 'up', back turned): one hand near face/hair moving back and forth — lipstick, comb, fixing hair (2). optional held 'lipstick'|'comb'. Standing
+  | 'sulk'; // sulking (lost bet/match): slumped shoulders, head down, half-closed eyes, hanging arms (2). Standing or seated
 
 export type HeldItem = 'none' | 'coffee' | 'water' | 'papers' | 'laptop' | 'book' | 'box' | 'paddle' | 'popcorn'
-  // --- vida social (aditivo)
-  | 'controller' // controle de videogame (pose 'game'; em pé/andando, numa mão)
-  | 'rock' // pose 'rps': mão fechada (pedra)
-  | 'paper' // pose 'rps': mão aberta, palma para baixo (papel)
-  | 'scissors' // pose 'rps': indicador e médio em V (tesoura)
-  | 'phone' // celular (com 'read' ou 'sit': olhando a tela, polegar rolando; tela acesa azulada)
-  | 'lipstick' // batom (pose 'groom')
-  | 'comb'; // pente (pose 'groom')
+  // --- social life (additive)
+  | 'controller' // game controller (pose 'game'; standing/walking, in one hand)
+  | 'rock' // pose 'rps': closed fist (rock)
+  | 'paper' // pose 'rps': open hand, palm down (paper)
+  | 'scissors' // pose 'rps': index and middle fingers in V (scissors)
+  | 'phone' // phone (with 'read' or 'sit': looking at screen, scrolling thumb; glowing bluish screen)
+  | 'lipstick' // lipstick (pose 'groom')
+  | 'comb'; // comb (pose 'groom')
 
 export type HairStyle =
   | 'short' | 'buzz' | 'spiky' | 'side_part' | 'curly' | 'afro' | 'bob' | 'long' | 'ponytail' | 'bun' | 'pigtails'
@@ -86,12 +86,12 @@ export interface Appearance {
   shoes: string;
   accessory: Accessory;
   accessoryColor: string;
-  /** Crachá/cordão no pescoço (usado para distinguir subagentes). null = sem crachá. */
+  /** Lanyard around the neck (used to distinguish subagents). null = no lanyard. */
   lanyard: string | null;
   look: 'f' | 'm';
-  /** (Opcional, aditivo) Barba/bigode — só sorteado para look 'm'. Ausente = sem pelos faciais. */
+  /** (Optional, additive) Facial hair — only drawn for look 'm'. Absent = no facial hair. */
   facialHair?: 'none' | 'stubble' | 'beard' | 'mustache' | 'goatee';
-  /** (Opcional, aditivo) Parte de baixo da roupa. Ausente = calça. */
+  /** (Optional, additive) Bottom clothing style. Absent = pants. */
   bottomStyle?: 'pants' | 'shorts' | 'skirt';
 }
 
@@ -102,24 +102,24 @@ export interface Rect {
   h: number;
 }
 
-/** Regiões dinâmicas dentro de um sprite (em px do sprite, relativas ao canto superior esquerdo). */
+/** Dynamic regions inside a sprite (in sprite px, relative to top-left corner). */
 export type SpriteRectName = 'screen' | 'board' | 'glass' | 'face' | 'tv' | 'sign' | 'art' | 'glow'
   /**
-   * (Aditivo) 2º monitor/notebook da `desk`, quando existe. O sprite já traz um conteúdo fixo
-   * escurecido (planilha/editor/painel); o mundo PODE desenhar por cima (ex.: drawScreen 'off'
-   * quando a sala apaga, ou outro modo quando o dono trabalha). Ignorar também funciona.
+   * (Additive) 2nd monitor/laptop of `desk`, when present. Sprite already includes fixed dimmed
+   * content (spreadsheet/editor/dashboard); world MAY draw on top (e.g. drawScreen 'off'
+   * when room lights go out, or another mode when owner is working). Ignoring also works.
    */
   | 'screen2';
 
 export interface Sprite {
   canvas: HTMLCanvasElement;
-  /** Ponto de ancoragem dentro do sprite (px). Ver convenções em FurnitureDef / characterSprite. */
+  /** Anchor point inside the sprite (px). See conventions in FurnitureDef / characterSprite. */
   ax: number;
   ay: number;
   rects?: Partial<Record<SpriteRectName, Rect>>;
 }
 
-/** `front` é desenhado POR CIMA de quem está sentado/dentro (ex.: encosto da cadeira, porta da cabine). */
+/** `front` is drawn ON TOP of whoever is sitting/inside (e.g. chair backrest, stall door). */
 export interface FurnitureSprites {
   base: Sprite;
   front?: Sprite;
@@ -131,90 +131,90 @@ export interface CharacterFrameRequest {
   pose: Pose;
   frame: number;
   held?: HeldItem;
-  /** Para poses que podem ser em pé ou sentado (raise_hand, read, talk). */
+  /** For poses that can be standing or seated (raise_hand, read, talk). */
   seated?: boolean;
-  /** Acessório sazonal; ausente mantém a aparência original. */
+  /** Seasonal accessory; absent keeps original appearance. */
   costume?: 'santa' | 'witch' | 'pumpkin' | 'vampire';
 }
 
 export type FurnitureKind =
-  // --- escritório (salas de projeto)
-  | 'desk' // 2x1. Mesa com monitor virado para o SUL (tela visível para a câmera), teclado e caneca. rects.screen = área da tela.
-  | 'desk_back' // 2x1. Mesa vista pelo outro lado: vemos a TRASEIRA do monitor; a pessoa senta ao NORTE dela, virada para baixo (rosto visível). Para ilhas de mesas face a face. Mesmas variants de desk.
-  | 'office_chair_front' // 1x1 assento virado para BAIXO (encosto ao norte, desenhado ANTES do personagem; sem front). Par da desk_back.
-  | 'office_chair' // 1x1 assento. Encosto ao sul (personagem senta virado para cima, de costas). front = encosto.
-  | 'bookshelf' // 2x1 encostada na parede norte. Livros coloridos.
-  | 'filing_cabinet' // 1x1 arquivo de gavetas.
-  | 'printer' // 1x1 impressora sobre móvel baixo.
-  | 'trash_bin' // 1x1 lixeira pequena (pode ser bem menor que o tile).
-  | 'plant_small' // 1x1 vaso pequeno. variants: 'fern' | 'succulent' | 'flower'
-  | 'plant_tall' // 1x1 planta alta (até ~2 tiles de altura). variants: 'palm' | 'ficus' | 'monstera' | 'bonsai'
-  | 'glass_partition' // 1x1 segmento de divisória de vidro sobre base branca (meia-parede + vidro azulado com reflexo). variants: 'h' (corre leste-oeste) | 'v' (corre norte-sul) | 'end' (ponta/coluna)
-  | 'binder_shelf' // 1x1 estante alta e estreita com pastas coloridas (azul/laranja/verde) e caixas.
-  | 'meeting_table' // 3x2 mesa de reunião/bancada para subagentes.
-  | 'stool' // 1x1 assento simples (banqueta). Personagem pode sentar em qualquer direção.
-  | 'floor_lamp' // 1x1 luminária de chão. rects.glow = centro da luz.
-  | 'water_cooler' // 1x1 bebedouro com galão azul. Uso: personagem fica ao SUL, virado para cima.
-  // --- montados na parede norte (mount: 'wall')
-  | 'whiteboard' // 3 tiles de largura. Quadro kanban. rects.board = área onde o render desenha post-its.
-  | 'window' // 2 tiles. Janela; rects.glass = vidro (o render desenha o céu antes da moldura).
-  | 'clock' // 1 tile. Relógio; rects.face = mostrador (ponteiros desenhados pelo render).
+  // --- office (project rooms)
+  | 'desk' // 2x1. Desk with monitor facing SOUTH (screen visible to camera), keyboard and mug. rects.screen = screen area.
+  | 'desk_back' // 2x1. Desk seen from the other side: we see the BACK of the monitor; person sits NORTH of it, facing down (face visible). For face-to-face desk clusters. Same variants as desk.
+  | 'office_chair_front' // 1x1 seat facing DOWN (backrest to north, drawn BEFORE the character; no front). Counterpart of desk_back.
+  | 'office_chair' // 1x1 seat. Backrest to south (character sits facing up, back turned). front = backrest.
+  | 'bookshelf' // 2x1 against north wall. Colorful books.
+  | 'filing_cabinet' // 1x1 filing cabinet.
+  | 'printer' // 1x1 printer on low credenza.
+  | 'trash_bin' // 1x1 small trash bin (can be much smaller than the tile).
+  | 'plant_small' // 1x1 small potted plant. variants: 'fern' | 'succulent' | 'flower'
+  | 'plant_tall' // 1x1 tall plant (up to ~2 tiles high). variants: 'palm' | 'ficus' | 'monstera' | 'bonsai'
+  | 'glass_partition' // 1x1 glass partition segment on white base (half-wall + bluish glass with reflection). variants: 'h' (runs east-west) | 'v' (runs north-south) | 'end' (post/column)
+  | 'binder_shelf' // 1x1 tall and narrow shelving unit with colorful binders (blue/orange/green) and boxes.
+  | 'meeting_table' // 3x2 meeting table / workbench for subagents.
+  | 'stool' // 1x1 simple seat (stool). Character can sit in any direction.
+  | 'floor_lamp' // 1x1 floor lamp. rects.glow = center of light.
+  | 'water_cooler' // 1x1 water cooler with blue jug. Usage: character stands SOUTH, facing up.
+  // --- mounted on north wall (mount: 'wall')
+  | 'whiteboard' // 3 tiles wide. Kanban board. rects.board = area where render draws post-its.
+  | 'window' // 2 tiles. Window; rects.glass = glass (render draws sky before frame).
+  | 'clock' // 1 tile. Clock; rects.face = clock face (hands drawn by render).
   | 'poster' // 1 tile. variants: 'code' | 'coffee' | 'rocket' | 'cat' | 'bug' | 'ship_it'
-  | 'painting' // 2 tiles. Quadro com moldura; rects.art = área da pintura (pode receber imagem gerada por IA).
-  | 'tv' // 2 tiles. TV de parede; rects.tv = tela.
-  | 'light_switch' // 1 tile (o sprite é pequeno). variants: 'on' | 'off'
-  | 'elevator' // 2 tiles. Porta de elevador; state 0..4 = porta fechada .. totalmente aberta. Inclui luz/seta acima.
-  | 'door_frame' // 2 tiles. Batente desenhado sobre a passagem na face da parede norte.
-  | 'sign' // 3 tiles. Placa com o nome da sala; rects.sign = área do texto (o render escreve o nome).
-  | 'mirror' // 1 tile. Espelho (acima das pias do banheiro). (Aditivo) rects.glass = área refletora (o mundo pode desenhar o reflexo de quem está na frente).
-  | 'shelf_wall' // 2 tiles. Prateleira de parede com objetos.
-  // --- copa / café
-  | 'counter' // 1x1 segmento de bancada (encostado na parede norte). variants: 'plain' | 'drawers'
-  | 'counter_sink' // 1x1 bancada com pia.
-  | 'coffee_machine' // 1x1 bancada com cafeteira em cima. Uso: personagem ao SUL, virado para cima. state 0 = parada, 1 = passando café.
-  | 'microwave' // 1x1 bancada com micro-ondas.
-  | 'fridge' // 1x1 geladeira alta.
-  | 'vending_machine' // 1x1 máquina de snacks alta e iluminada.
-  | 'cafe_table' // 1x1 mesinha redonda.
-  | 'cafe_chair' // 1x1 assento. variant = direção para onde quem senta olha: 'up' | 'down' | 'left' | 'right'. front quando 'up'.
+  | 'painting' // 2 tiles. Framed painting; rects.art = painting area (can receive AI-generated image).
+  | 'tv' // 2 tiles. Wall-mounted TV; rects.tv = screen.
+  | 'light_switch' // 1 tile (sprite is small). variants: 'on' | 'off'
+  | 'elevator' // 2 tiles. Elevator door; state 0..4 = closed door .. fully open. Includes light/arrow above.
+  | 'door_frame' // 2 tiles. Door frame drawn over doorway on north wall face.
+  | 'sign' // 3 tiles. Room nameplate; rects.sign = text area (render writes name).
+  | 'mirror' // 1 tile. Mirror (above bathroom sinks). (Additive) rects.glass = reflective area (world can draw reflection of whoever stands in front).
+  | 'shelf_wall' // 2 tiles. Wall shelf with objects.
+  // --- kitchenette / coffee
+  | 'counter' // 1x1 counter segment (against north wall). variants: 'plain' | 'drawers'
+  | 'counter_sink' // 1x1 counter with sink.
+  | 'coffee_machine' // 1x1 counter with coffee machine on top. Usage: character SOUTH, facing up. state 0 = idle, 1 = brewing coffee.
+  | 'microwave' // 1x1 counter with microwave.
+  | 'fridge' // 1x1 tall refrigerator.
+  | 'vending_machine' // 1x1 tall illuminated snack vending machine.
+  | 'cafe_table' // 1x1 small round table.
+  | 'cafe_chair' // 1x1 seat. variant = direction seated person faces: 'up' | 'down' | 'left' | 'right'. front when 'up'.
   // --- lounge
-  | 'sofa' // 3x1 assento. variant 'down' (de frente p/ câmera) | 'up' (de costas, front = encosto).
-  | 'armchair' // 1x1 assento. variants como cafe_chair.
-  | 'coffee_table' // 2x1 mesa de centro.
-  | 'pingpong_table' // 3x2 mesa de ping-pong (rede vertical no meio; jogadores nas pontas oeste/leste).
-  | 'beanbag' // 1x1 puff (assento). variants de cor: 'red' | 'blue' | 'yellow' | 'green'
-  | 'arcade' // 1x1 fliperama (uso como máquina: personagem ao sul virado para cima). (Aditivo) rects.screen = tela (o mundo pode desenhar drawScreen 'game' por cima durante uma partida).
-  // --- banheiro
-  | 'toilet_stall' // 2x2 cabine com vaso. Personagem entra pela porta (lado SUL) e some. front = divisória/porta. state 0 = livre (porta entreaberta), 1 = ocupada (porta fechada, indicador vermelho).
-  | 'sink' // 1x1 pia com gabinete (encostada na parede norte; use 'mirror' na parede acima).
-  // --- recepção
-  | 'reception_desk' // 3x1 balcão de recepção.
-  | 'bench'; // 2x1 banco de espera (assento, olhando para baixo).
+  | 'sofa' // 3x1 seat. variant 'down' (facing camera) | 'up' (back turned, front = backrest).
+  | 'armchair' // 1x1 seat. variants same as cafe_chair.
+  | 'coffee_table' // 2x1 coffee table.
+  | 'pingpong_table' // 3x2 ping-pong table (vertical net in middle; players at west/east ends).
+  | 'beanbag' // 1x1 beanbag (seat). color variants: 'red' | 'blue' | 'yellow' | 'green'
+  | 'arcade' // 1x1 arcade cabinet (usage as machine: character south facing up). (Additive) rects.screen = screen (world can draw drawScreen 'game' on top during a match).
+  // --- bathroom
+  | 'toilet_stall' // 2x2 toilet stall. Character enters through door (SOUTH side) and vanishes. front = partition/door. state 0 = vacant (ajar door), 1 = occupied (closed door, red indicator).
+  | 'sink' // 1x1 sink with cabinet (against north wall; use 'mirror' on wall above).
+  // --- reception
+  | 'reception_desk' // 3x1 reception desk.
+  | 'bench'; // 2x1 waiting bench (seat, facing down).
 
 export interface FurnitureDef {
   mount: 'floor' | 'wall';
   /**
-   * Floor: tiles ocupados no chão (w x h).
-   * Wall: largura em tiles na face da parede (h ignorado).
+   * Floor: tiles occupied on ground (w x h).
+   * Wall: width in tiles on wall face (h ignored).
    */
   footprint: { w: number; h: number };
-  /** Floor: se os tiles bloqueiam a passagem. Assentos não bloqueiam (o personagem "entra" neles). */
+  /** Floor: whether tiles block movement. Seats do not block (character "enters" them). */
   blocks: boolean;
-  /** É um assento (personagem pode sentar sobre ele). */
+  /** Is a seat (character can sit on it). */
   seat?: boolean;
   variants?: readonly string[];
-  /** Quantidade de estados visuais (ex.: elevator 5, toilet_stall 2). */
+  /** Number of visual states (e.g. elevator 5, toilet_stall 2). */
   states?: number;
 }
 
 /**
- * Catálogo de móveis. Ancoragem (ax, ay) dos sprites de móveis:
- * - mount 'floor': (ax, ay) corresponde ao ponto CENTRAL INFERIOR do footprint no mundo,
- *   ou seja, (x0 + w*TILE/2, y0 + h*TILE) onde (x0, y0) é o canto superior esquerdo do footprint.
- *   O sprite pode se estender para cima (altura) e um pouco para os lados.
- * - mount 'wall': (ax, ay) corresponde ao ponto CENTRAL INFERIOR do trecho de parede, isto é,
- *   na linha do rodapé (base da face da parede). O sprite "flutua" na altura certa por conta própria.
- * Ordenação de profundidade: por y da âncora no mundo (maior y = desenhado depois).
+ * Furniture catalog. Anchor (ax, ay) of furniture sprites:
+ * - mount 'floor': (ax, ay) corresponds to the BOTTOM CENTER point of footprint in world,
+ *   i.e. (x0 + w*TILE/2, y0 + h*TILE) where (x0, y0) is top-left corner of footprint.
+ *   The sprite can extend upward (height) and slightly to the sides.
+ * - mount 'wall': (ax, ay) corresponds to the BOTTOM CENTER point of wall segment, i.e.,
+ *   at the baseboard line (base of wall face). Sprite "floats" at the correct height on its own.
+ * Depth sorting: by world anchor y (larger y = drawn later).
  */
 export const FURNITURE: Readonly<Record<FurnitureKind, FurnitureDef>> = {
   desk: { mount: 'floor', footprint: { w: 2, h: 1 }, blocks: true, variants: ['wood', 'white', 'dark'] },
@@ -266,50 +266,50 @@ export const FURNITURE: Readonly<Record<FurnitureKind, FurnitureDef>> = {
 };
 
 export type FloorKind =
-  | 'carpet' // salas de projeto (usa tint/tint2 do tema da sala)
+  | 'carpet' // project rooms (uses room theme tint/tint2)
   | 'wood' // lounge
-  | 'tile_check' // copa (xadrez)
-  | 'tile_white' // banheiro
-  | 'concrete' // corredor (cimento queimado/polido)
-  | 'marble' // recepção
-  | 'grass' // área externa
-  | 'sidewalk' // calçada externa
-  | 'street'; // rua externa (faixas desenhadas pelo render se quiser)
+  | 'tile_check' // kitchenette (checkerboard)
+  | 'tile_white' // bathroom
+  | 'concrete' // hallway (polished/burnished concrete)
+  | 'marble' // reception
+  | 'grass' // outdoor area
+  | 'sidewalk' // outdoor sidewalk
+  | 'street'; // outdoor street (lanes drawn by render if desired)
 
 export type WallPattern = 'plain' | 'stripes' | 'tiles' | 'wood_panel' | 'brick' | 'glass' | 'marble';
 
 export interface WallStyle {
-  /** Cor base da face da parede. */
+  /** Base color of wall face. */
   base: string;
-  /** Cor de detalhes (rodapé/faixa). */
+  /** Accent color (baseboard/trim). */
   trim?: string;
   pattern?: WallPattern;
-  /** Parede externa do prédio (tom mais sóbrio, pode ter textura de tijolo/concreto). */
+  /** Building exterior wall (more subdued tone, may have brick/concrete texture). */
   exterior?: boolean;
 }
 
 export interface Doorway {
-  /** Início da passagem em px de mundo (absoluto) e largura em px. */
+  /** Doorway start in world px (absolute) and width in px. */
   x: number;
   w: number;
 }
 
 export type ScreenMode =
-  | 'off' // monitor desligado (azul-marinho fosco com reflexo diagonal; nunca quase preto)
-  | 'standby' // (aditivo) ligado sem uso: fundo azul com logo pulsando devagar — p.ex. mesa vaga com a sala acesa
-  | 'idle' // descanso de tela suave
-  | 'code' // editor com linhas de código coloridas rolando
-  | 'terminal' // terminal escuro com texto verde surgindo
-  | 'browser' // página web (barra de endereço + blocos)
-  | 'search' // resultados de busca / lupa
-  | 'chat' // conversa (balões alternados)
-  | 'docs' // documento de texto
-  | 'tasks' // lista de checkboxes
-  | 'alert' // tela piscando em âmbar (precisa de atenção)
-  | 'progress' // terminal escuro com uma barra de progresso/spinner andando (esperando um comando terminar)
-  // --- vida social (aditivo; pensados para a TV do lounge e o fliperama, mas valem para qualquer tela)
-  | 'show' // programa de TV animado; mapeamento FIXO pelo `seed`: seed % 3 === 0 futebol (campo, jogadores, bola; de tempos em tempos a bola entra no gol e a tela pisca "GOL"), 1 novela (dois rostos em close, corações), 2 desenho animado (cores vivas)
-  | 'game'; // videogame (dois jogadores); mapeamento FIXO pelo `seed`: seed % 2 === 0 corrida em tela dividida (dois carrinhos na pista), 1 luta (dois bonecos e barras de vida)
+  | 'off' // monitor off (matte navy blue with diagonal reflection; never pitch black)
+  | 'standby' // (additive) on but unused: blue background with slowly pulsing logo — e.g. vacant desk with room lit
+  | 'idle' // subtle screensaver
+  | 'code' // editor with scrolling colored lines of code
+  | 'terminal' // dark terminal with appearing green text
+  | 'browser' // web page (address bar + blocks)
+  | 'search' // search results / magnifying glass
+  | 'chat' // chat (alternating bubbles)
+  | 'docs' // text document
+  | 'tasks' // checklist
+  | 'alert' // blinking amber screen (needs attention)
+  | 'progress' // dark terminal with progress bar / spinner moving (waiting for command to finish)
+  // --- social life (additive; designed for lounge TV and arcade, but valid for any screen)
+  | 'show' // animated TV show; FIXED mapping by `seed`: seed % 3 === 0 soccer (field, players, ball; periodically ball enters goal and screen flashes "GOAL"), 1 soap opera (two faces in close-up, hearts), 2 cartoon (vivid colors)
+  | 'game'; // videogame (two players); FIXED mapping by `seed`: seed % 2 === 0 split-screen racing (two cars on track), 1 fighting (two fighters and health bars)
 
 export interface RoomTheme {
   carpet: string;
@@ -320,58 +320,58 @@ export interface RoomTheme {
   chairVariant: string;
 }
 
-/** Ícones pixel art pequenos (~8–12px) para estados acima da cabeça. */
+/** Small pixel art icons (~8–12px) for above-head states. */
 export type IconName = 'alert' | 'question' | 'zzz' | 'check' | 'heart' | 'coffee' | 'music' | 'idea' | 'sweat' | 'star' | 'lightning' | 'chat' | 'box' | 'wave'
-  | 'hourglass' // ampulheta (esperando um shell)
-  | 'hourglass_flip' // a mesma ampulheta virando (alterne com 'hourglass' para animar)
-  | 'cobweb' // teia de aranha (~12px) para o canto da cadeira/personagem quando a espera fica longa
-  | 'storm' // nuvenzinha de chuva com raio (algo falhou)
-  // --- vida social (aditivo)
-  | 'coin' // moeda dourada com brilho (~8px) — ganhou dinheiro
-  | 'sparkle' // brilho de 4 pontas (~9px) — ficou arrumado(a) no espelho
-  | 'trophy' // troféu dourado (~10px) — venceu a partida/aposta
-  | 'hand_rock' // gesto de pedra (punho) (~10px) — revelação do jokenpô
-  | 'hand_paper' // gesto de papel (mão aberta) (~10px)
-  | 'hand_scissors'; // gesto de tesoura (V) (~10px)
+  | 'hourglass' // hourglass (waiting for a shell)
+  | 'hourglass_flip' // same hourglass flipping (alternate with 'hourglass' to animate)
+  | 'cobweb' // cobweb (~12px) for corner of chair/character when wait gets long
+  | 'storm' // small rain cloud with lightning (something failed)
+  // --- social life (additive)
+  | 'coin' // gold coin with sparkle (~8px) — earned money
+  | 'sparkle' // 4-pointed sparkle (~9px) — groomed in mirror
+  | 'trophy' // gold trophy (~10px) — won match/bet
+  | 'hand_rock' // rock gesture (fist) (~10px) — rock-paper-scissors reveal
+  | 'hand_paper' // paper gesture (open hand) (~10px)
+  | 'hand_scissors'; // scissors gesture (V) (~10px)
 
-/** Assinatura que art/index.ts deve exportar (o mundo e a UI dependem disto). */
+/** Signature that art/index.ts must export (world and UI depend on this). */
 export interface ArtModule {
   appearanceFromSeed(seed: number, opts?: { look?: 'f' | 'm'; sub?: boolean; parts?: AppearanceParts }): Appearance;
-  /** Ancoragem: (ax, ay) = centro dos pés (ponto no chão). Personagem ocupa ~14–18px de largura e ~24–28px de altura. */
+  /** Anchor: (ax, ay) = center of feet (point on floor). Character occupies ~14–18px width and ~24–28px height. */
   characterSprite(req: CharacterFrameRequest): Sprite;
   poseFrameCount(pose: Pose): number;
-  /** Duração de cada frame da pose em ms. */
+  /** Duration of each pose frame in ms. */
   poseFrameDuration(pose: Pose): number;
   /**
-   * `opts.seed` (opcional, aditivo) varia os detalhes de itens repetidos (objetos sobre a mesa, livros da
-   * estante, pastas...). Sem seed, usa a variação 0. Sprites continuam em cache por (kind, variant, state, seed % N).
+   * `opts.seed` (optional, additive) varies details of repeated items (desk objects, bookshelf
+   * books, binders...). Without seed, uses variation 0. Sprites stay cached by (kind, variant, state, seed % N).
    */
   furnitureSprites(kind: FurnitureKind, variant?: string, state?: number, opts?: { seed?: number }): FurnitureSprites;
-  /** Desenha uma área de piso (px de mundo, múltiplos de TILE). `seed` varia detalhes por tile. */
+  /** Draws floor area (world px, multiples of TILE). `seed` varies per-tile details. */
   drawFloor(ctx: CanvasRenderingContext2D, kind: FloorKind, x: number, y: number, w: number, h: number, opts: { seed: number; tint?: string; tint2?: string }): void;
-  /** Tapete decorativo sobre o piso. */
+  /** Decorative rug over floor. */
   drawRug(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, seed: number): void;
-  /** Face de parede norte: altura 2*TILE a partir de y, com "tampa" escura no topo e rodapé na base. */
+  /** North wall face: height 2*TILE from y, with dark "cap" on top and baseboard at base. */
   drawWallFace(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, style: WallStyle, opts?: { doorways?: Doorway[] }): void;
-  /** Tampa de parede (laterais e trechos sem face), retângulo arbitrário. */
+  /** Wall cap (sides and sections without face), arbitrary rectangle. */
   drawWallTop(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, style: WallStyle): void;
-  /** Parede sul: 1 tile de altura (tampa + mureta curta), com passagens opcionais. */
+  /** South wall: 1 tile high (cap + low parapet), with optional doorways. */
   drawSouthWall(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, style: WallStyle, opts?: { doorways?: Doorway[] }): void;
-  /** Conteúdo animado de tela (monitor/TV). `r` em px de mundo. `t` em ms. */
+  /** Animated screen content (monitor/TV). `r` in world px. `t` in ms. */
   drawScreen(ctx: CanvasRenderingContext2D, r: Rect, mode: ScreenMode, t: number, seed: number): void;
-  /** Post-its do quadro kanban (colunas: a fazer / fazendo / feito). */
+  /** Kanban board post-its (columns: to do / doing / done). */
   drawBoard(ctx: CanvasRenderingContext2D, r: Rect, items: readonly { status: 'pending' | 'in_progress' | 'completed' }[], t: number): void;
-  /** Céu + horizonte visto pela janela conforme a hora local (0–24, fracionária). */
+  /** Sky + horizon seen through window according to local hour (0–24, fractional). */
   drawWindowView(ctx: CanvasRenderingContext2D, r: Rect, hour: number, t: number, seed: number): void;
   drawClock(ctx: CanvasRenderingContext2D, r: Rect, date: Date): void;
   roomTheme(seed: number): RoomTheme;
   iconSprite(name: IconName): Sprite;
   /**
-   * (Opcional, aditivo) Lance do futebol de drawScreen('show') com seed % 3 === 0, no instante `t`:
-   * a partir de `progress >= goalAt` a tela pisca "GOL" (bola no gol da direita se `right`). O mundo
-   * usa para a torcida comemorar junto com a TV.
+   * (Optional, additive) Soccer play from drawScreen('show') with seed % 3 === 0, at time `t`:
+   * from `progress >= goalAt` onward screen flashes "GOAL" (ball into right goal if `right`). World
+   * uses this so crowd cheers along with TV.
    */
   footballLance?(t: number, seed: number): { lance: number; progress: number; right: boolean; period: number; goalAt: number };
-  /** Avatar (cabeça + ombros) ampliado para a UI. `parts`: peças do personagem editado (ver AgentInfo.parts). */
+  /** Avatar (head + shoulders) scaled for UI. `parts`: pieces of edited character (see AgentInfo.parts). */
   avatarCanvas(seed: number, opts?: { look?: 'f' | 'm'; sub?: boolean; scale?: number; parts?: AppearanceParts }): HTMLCanvasElement;
 }

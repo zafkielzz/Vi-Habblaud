@@ -1,24 +1,24 @@
-// Pastas sugeridas no "Novo agente": os projetos em que você trabalhou por último, para escolher com um toque em vez de
-// lembrar o caminho. Vêm do histórico de sessões (o `cwd` dos transcripts, de todas as contas e ferramentas) e das salas
-// do escritório. Worktrees de agentes (<projeto>/.claude/worktrees/<nome>) contam como o projeto; pastas temporárias
-// (e as scratch-workspaces do app do Claude) ficam de fora. Node puro: só junta e ordena (quem lê os transcripts é
-// sources/history.ts).
+// Suggested folders in "New agent": projects you worked on most recently, to choose with a tap instead of
+// remembering the path. Sourced from session history (transcript `cwd`, across all accounts and tools) and office
+// rooms. Agent worktrees (<project>/.claude/worktrees/<name>) count as the project; temporary folders
+// (and Claude desktop app scratch-workspaces) are excluded. Pure Node: only combines and sorts (transcript reading
+// is in sources/history.ts).
 
 export interface SpawnFolder {
-  /** Caminho absoluto no computador do app do Claude. */
+  /** Absolute path on Claude app's machine. */
   path: string;
-  /** Nome curto (última parte do caminho). */
+  /** Short name (last part of the path). */
   name: string;
-  /** Atividade mais recente (epoch ms; 0 = só a sala, sem horário). */
+  /** Most recent activity (epoch ms; 0 = room only, no timestamp). */
   lastAt: number;
-  /** Sessões recentes nesta pasta. */
+  /** Recent sessions in this folder. */
   sessions: number;
 }
 
 export const FOLDERS_LIMIT = 15;
 
 const TEMP = /^(\/private)?\/(tmp|var\/folders|var\/tmp)(\/|$)/;
-/** Pastas descartáveis que o app desktop do Claude cria para sessões sem projeto. */
+/** Disposable folders that Claude desktop app creates for projectless sessions. */
 const SCRATCH = /\/Application Support\/Claude\/scratch-workspaces\//;
 const WORKTREE = /^(.*?)\/\.(claude|codex)\/worktrees\/[^/]+(\/.*)?$/;
 
@@ -26,7 +26,7 @@ function absolute(p: string): boolean {
   return p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p);
 }
 
-/** A pasta do projeto para um caminho de sessão (worktree vira o projeto; temporária ou relativa = undefined). */
+/** Project folder for a session path (worktree becomes project; temp or relative = undefined). */
 export function projectFolder(raw: string | undefined): string | undefined {
   const p = raw?.trim().replace(/[\\/]+$/, '');
   if (!p || !absolute(p) || TEMP.test(p) || SCRATCH.test(p)) return undefined;
@@ -34,7 +34,7 @@ export function projectFolder(raw: string | undefined): string | undefined {
   return wt ? wt[1] || undefined : p;
 }
 
-/** Junta sessões e salas em pastas únicas, da atividade mais recente para a mais antiga. */
+/** Combines sessions and rooms into unique folders, ordered from most recent to oldest activity. */
 export function recentFolders(
   sessions: ReadonlyArray<{ project?: string; lastAt: number }>,
   rooms: ReadonlyArray<{ path?: string; lastAt?: number }>,

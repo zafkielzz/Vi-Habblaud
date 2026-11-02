@@ -1,5 +1,5 @@
-// WorldService: a releitura automática de /v1/me na lista de espera (relógio falso; o resto do serviço é coberto pelas
-// rotas em http.test.ts).
+// WorldService: automatic re-reading of /v1/me on the waiting list (fake clock; rest of service covered by
+// routes in http.test.ts).
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse, WorldAccess } from '../../shared/world/protocol';
@@ -13,7 +13,7 @@ setQuiet(true);
 
 const TOKEN = 't'.repeat(43);
 
-/** `extra`: campos a mais do /v1/me (`player`, `account.reservedName`...). */
+/** `extra`: additional fields of /v1/me (`player`, `account.reservedName`...). */
 function me(access: WorldAccess, extra: Omit<Partial<MeResponse>, 'account'> & { account?: Partial<MeResponse['account']> } = {}): WorldResult<MeResponse> {
   const { account, ...rest } = extra;
   return {
@@ -25,7 +25,7 @@ function me(access: WorldAccess, extra: Omit<Partial<MeResponse>, 'account'> & {
 
 const PLAYER = { name: 'Ana Pixel', look: 'f' as const, parts: {}, traits: ['games' as const, 'cafeina' as const], intro: 'coffee' as const, visibility: { mode: 'live' as const, closed: false, hideCountry: false, tokensVisible: true, leaderboard: false, compactions: false }, updatedAt: '' };
 
-describe('WorldService: lista de espera', () => {
+describe('WorldService: waiting list', () => {
   let cleanup: () => void;
   let store: WorldSettingsStore;
   let services: WorldService[];
@@ -56,7 +56,7 @@ describe('WorldService: lista de espera', () => {
     return { service, meFn, logout, onChange };
   }
 
-  it('relê /v1/me a cada 30 min enquanto espera e vira "approved" sozinho, avisando o snapshot', async () => {
+  it('re-reads /v1/me every 30 min while waiting and becomes "approved" on its own, notifying snapshot', async () => {
     let access: WorldAccess = 'waiting';
     const { service, meFn, onChange } = start({ meFn: async () => me(access) });
     expect(WAITING_POLL_MS).toBe(30 * 60_000);
@@ -76,12 +76,12 @@ describe('WorldService: lista de espera', () => {
     expect(store.get()?.access).toBe('approved');
     expect(onChange).toHaveBeenCalledTimes(1);
 
-    // Aprovada: para de perguntar.
+    // Approved: stops asking.
     await vi.advanceTimersByTimeAsync(4 * WAITING_POLL_MS);
     expect(meFn).toHaveBeenCalledTimes(2);
   });
 
-  it('o nome reservado no cadastro vai ao status (/v1/me com reservedName) e some com o personagem', async () => {
+  it('reserved name at registration goes to status (/v1/me with reservedName) and disappears with character', async () => {
     const a = start({ meFn: async () => me('waiting', { account: { reservedName: 'Ana Pixel' } }) });
     expect((await a.service.status(true)).account).toEqual({ emailMasked: 'a***@exemplo.com', access: 'waiting', reservedName: 'Ana Pixel' });
     const b = start({ meFn: async () => me('waiting') });
@@ -90,7 +90,7 @@ describe('WorldService: lista de espera', () => {
     expect((await c.service.status(true)).account).not.toHaveProperty('reservedName');
   });
 
-  it('criar o personagem: sem name com a reserva (o pedido vai sem name); conta antiga sem reserva exige o name', async () => {
+  it('creating character: without name when reserved (request sent without name); old account without reservation requires name', async () => {
     const putPlayer = vi.fn(async (_token: string, body: unknown) => ({ ok: true as const, status: 200, data: { ...PLAYER, ...(body as object) } }));
     const withReserve = start({ meFn: async () => me('waiting', { account: { reservedName: 'Ana Pixel' } }), putPlayer });
     await withReserve.service.status(true);
@@ -108,7 +108,7 @@ describe('WorldService: lista de espera', () => {
     expect(putPlayer.mock.calls[1][1]).toMatchObject({ name: 'Ana Pixel' });
   });
 
-  it('meta.world.scene: só com a conta aprovada e o personagem; available pede a trava do terminal', () => {
+  it('meta.world.scene: only with approved account and character; available requires terminal lock', () => {
     const player = PLAYER;
     const a = start({ access: 'approved' });
     expect(a.service.meta()).not.toHaveProperty('scene');
@@ -119,7 +119,7 @@ describe('WorldService: lista de espera', () => {
     expect(b.service.meta().scene).toEqual({ available: false });
   });
 
-  it('servidor fora do ar: continua tentando no mesmo ritmo, com lastError network', async () => {
+  it('server offline: keeps retrying at same rate, with network lastError', async () => {
     const { service, meFn } = start({ meFn: async () => ({ ok: false, status: 502, code: 'world_unreachable' }) });
     await vi.advanceTimersByTimeAsync(2 * WAITING_POLL_MS);
     expect(meFn).toHaveBeenCalledTimes(2);
@@ -127,7 +127,7 @@ describe('WorldService: lista de espera', () => {
     expect((await service.status()).lastError).toBe('network');
   });
 
-  it('token recusado (401): apaga a sessão e para', async () => {
+  it('rejected token (401): deletes session and stops', async () => {
     const { service, meFn } = start({ meFn: async () => ({ ok: false, status: 401, code: 'unauthorized' }) });
     await vi.advanceTimersByTimeAsync(WAITING_POLL_MS);
     expect(service.state()).toBe('logged_out');
@@ -135,7 +135,7 @@ describe('WorldService: lista de espera', () => {
     expect(meFn).toHaveBeenCalledTimes(1);
   });
 
-  it('não relê sem conta, já aprovado, sem a trava do terminal, depois de sair ou de stop()', async () => {
+  it('does not re-read without account, already approved, without terminal lock, after logout or stop()', async () => {
     const none = start({ access: null });
     const approved = start({ access: 'approved' });
     await vi.advanceTimersByTimeAsync(2 * WAITING_POLL_MS);
@@ -160,8 +160,8 @@ describe('WorldService: lista de espera', () => {
   });
 });
 
-describe('WorldService: status barato', () => {
-  it('sem refresh: responde da memória e relê em segundo plano quando venceu; com refresh, espera', async () => {
+describe('WorldService: cheap status', () => {
+  it('without refresh: answers from memory and re-reads in background when expired; with refresh, waits', async () => {
     const t = tempDir();
     try {
       const store = new WorldSettingsStore(join(t.dir, 'world.json'));
@@ -175,14 +175,14 @@ describe('WorldService: status barato', () => {
       });
       const client = { me: meFn } as unknown as WorldClient;
       const service = new WorldService({ config: { enabled: true, dev: true, url: 'http://127.0.0.1:1' }, terminal: true, store, client, now: () => now, meTtlMs: 30_000 });
-      // Nada guardado ainda: espera a primeira leitura.
+      // Nothing stored yet: waits for first read.
       expect((await service.status()).account?.emailMasked).toBe('a***@exemplo.com');
       expect(meFn).toHaveBeenCalledTimes(1);
-      // Dentro do prazo: nem toca na rede.
+      // Within TTL: does not touch network.
       now += 10_000;
       await service.status();
       expect(meFn).toHaveBeenCalledTimes(1);
-      // Venceu e o servidor demora: responde na hora com o que tem e relê por trás.
+      // Expired and server is slow: responds immediately with what it has and re-reads in background.
       now += 30_000;
       slow = true;
       const st = await service.status();
@@ -190,7 +190,7 @@ describe('WorldService: status barato', () => {
       expect(meFn).toHaveBeenCalledTimes(2);
       release!();
       await new Promise((ok) => setImmediate(ok));
-      // Com refresh, espera a leitura.
+      // With refresh, waits for read.
       slow = false;
       await service.status(true);
       expect(meFn).toHaveBeenCalledTimes(3);
@@ -201,7 +201,7 @@ describe('WorldService: status barato', () => {
   });
 });
 
-describe('WorldService: retomada sem resposta do servidor do mundo', () => {
+describe('WorldService: resume without response from world server', () => {
   let cleanup: () => void;
   let store: WorldSettingsStore;
   let services: WorldService[];
@@ -225,18 +225,18 @@ describe('WorldService: retomada sem resposta do servidor do mundo', () => {
   const ok: Reply = { ok: true, status: 200, data: { state: 'online' } };
   const down: Reply = { ok: false, status: 502, code: 'world_unreachable' };
 
-  /** `replies`: as respostas do resume, em ordem (depois delas, sempre ok). */
+  /** `replies`: resume responses, in order (after them, always ok). */
   function start(replies: Reply[]) {
     const resumeBuilding = vi.fn(async () => replies.shift() ?? ok);
     const pauseBuilding = vi.fn(async () => ({ ok: true as const, status: 200, data: { state: 'paused' as const } }));
     const client = { me: async () => me('approved'), resumeBuilding, pauseBuilding } as unknown as WorldClient;
-    // random 0.5: a espera é exatamente a base (2 s, 4 s, 8 s...).
+    // random 0.5: wait time is exactly the base (2 s, 4 s, 8 s...).
     const service = new WorldService({ config: { enabled: true, dev: true, url: 'http://127.0.0.1:1' }, terminal: true, store, client, random: () => 0.5 });
     services.push(service);
     return { service, resumeBuilding, pauseBuilding };
   }
 
-  it('tenta de novo com a espera crescente da reconexão (2 s, 4 s...) até o servidor confirmar', async () => {
+  it('retries with exponential reconnection backoff (2 s, 4 s...) until server confirms', async () => {
     const { service, resumeBuilding } = start([down, down, { ok: false, status: 503, code: 'unavailable' }]);
     await service.pause();
     expect((await service.resume()).ok).toBe(true);
@@ -250,12 +250,12 @@ describe('WorldService: retomada sem resposta do servidor do mundo', () => {
     expect(resumeBuilding).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(8_000);
     expect(resumeBuilding).toHaveBeenCalledTimes(4);
-    // Confirmada: para de tentar.
+    // Confirmed: stops retrying.
     await vi.advanceTimersByTimeAsync(120_000);
     expect(resumeBuilding).toHaveBeenCalledTimes(4);
   });
 
-  it('pausar (ou sair) de novo cancela as tentativas; 4xx não insiste; o Retry-After maior vale', async () => {
+  it('pausing (or logging out) again cancels attempts; 4xx does not retry; larger Retry-After applies', async () => {
     const a = start([down]);
     await a.service.pause();
     a.service.resume();

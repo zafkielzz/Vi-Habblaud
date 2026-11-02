@@ -1,15 +1,15 @@
-// Contas do Codex: uma pasta CODEX_HOME por conta (~/.codex, ~/.codex-trabalho...). Node puro e sem dependências
-// do servidor: também é importado por scripts/docker-up.ts (via tsx) no host.
+// Codex accounts: one CODEX_HOME directory per account (~/.codex, ~/.codex-work...). Pure Node and no server
+// dependencies: also imported by scripts/docker-up.ts (via tsx) on the host.
 //
-// Descoberta: HABBLAUD_CODEX_DIRS (lista separada por vírgula) substitui tudo; senão CODEX_HOME e `$HOME/.codex*`
-// que tenham cara de pasta do Codex (isCodexHome). Letra da conta: o alias de shell `alias x='CODEX_HOME=... codex'`
-// (sem CODEX_HOME = a pasta padrão); sem alias, uma letra derivada que não colide com as do Claude Code. Cor: da
-// paleta das contas, sem repetir as do Claude Code. Nome: "Codex" (ou "Codex X" com mais de uma conta). O plano
-// vem depois, dos arquivos de sessão (rate_limits.plan_type).
+// Discovery: HABBLAUD_CODEX_DIRS (comma-separated list) overrides everything; otherwise CODEX_HOME and `$HOME/.codex*`
+// that look like a Codex directory (isCodexHome). Account letter: shell alias `alias x='CODEX_HOME=... codex'`
+// (without CODEX_HOME = the default directory); without alias, a derived letter that does not collide with Claude Code.
+// Color: from account palette, avoiding Claude Code colors. Name: "Codex" (or "Codex X" with multiple accounts).
+// The plan comes later, from session files (rate_limits.plan_type).
 //
-// Privacidade: NUNCA lê `auth.json` nem `config.toml` (só confere se existem, em isCodexHome); dos arquivos de shell,
-// só as linhas `alias X='... codex ...'`. No Docker o host manda tudo pronto em HABBLAUD_ACCOUNTS (`provider:
-// 'codex'`, com o `configDir` do host: é nele que o `codex queue` roda).
+// Privacy: NEVER reads `auth.json` or `config.toml` (only checks if they exist, in isCodexHome); from shell files,
+// only `alias X='... codex ...'` lines. In Docker the host sends everything ready in HABBLAUD_ACCOUNTS (`provider:
+// 'codex'`, with the host `configDir`: that is where `codex queue` runs).
 import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -44,16 +44,16 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
-/** Pasta padrão do Codex: CODEX_HOME ou $HOME/.codex. */
+/** Default Codex directory: CODEX_HOME or $HOME/.codex. */
 export function defaultCodexHome(env: NodeJS.ProcessEnv, home: string): string {
   const raw = env.CODEX_HOME?.trim();
   return raw ? expandHome(raw, home) : join(home, '.codex');
 }
 
 /**
- * Pastas do Codex observadas. HABBLAUD_CODEX_DIRS (lista separada por vírgula) substitui a detecção e vale como
- * veio (só precisa existir: uma conta recém-criada ainda não tem sessões). Senão: CODEX_HOME e `$HOME/.codex*` que
- * passem em isCodexHome. Ordem estável: a padrão primeiro, depois alfabética.
+ * Observed Codex directories. HABBLAUD_CODEX_DIRS (comma-separated list) overrides detection and is used
+ * as-provided (only needs to exist: a newly created account has no sessions yet). Otherwise: CODEX_HOME and
+ * `$HOME/.codex*` that pass isCodexHome. Stable order: default first, then alphabetical.
  */
 export function discoverCodexDirs(env: NodeJS.ProcessEnv = process.env, home: string = env.HOME || homedir()): string[] {
   const override = splitList(env.HABBLAUD_CODEX_DIRS);
@@ -69,14 +69,14 @@ export function discoverCodexDirs(env: NodeJS.ProcessEnv = process.env, home: st
       if (isCodexHome(p)) found.push(p);
     }
   } catch {
-    // $HOME ilegível (ex.: container sem home)
+    // $HOME unreadable (e.g. container without home)
   }
   const dirs = [...new Set(found.map((p) => expandHome(p, home)))];
   dirs.sort((a, b) => (a === main ? 0 : 1) - (b === main ? 0 : 1) || a.localeCompare(b));
   return dirs;
 }
 
-/** Overrides das contas do Codex em HABBLAUD_ACCOUNTS (vindos do host, no Docker). */
+/** Codex account overrides in HABBLAUD_ACCOUNTS (from the host, in Docker). */
 export function codexOverrides(raw: string | undefined): AccountOverride[] {
   return parseAccountOverrides(raw).filter((o) => o.provider === 'codex');
 }
@@ -86,7 +86,7 @@ function matchOverride(overrides: AccountOverride[], id: string, dir: string, ho
   return overrides.find((o) => norm(o.mountDir) === dir) ?? overrides.find((o) => norm(o.configDir) === dir) ?? overrides.find((o) => o.id === id);
 }
 
-/** Letras candidatas de uma conta sem alias: a inicial do sufixo (".codex-trabalho" → T), X, Y, Z... e o alfabeto. */
+/** Candidate letters for account without alias: suffix initial (".codex-work" → W), X, Y, Z... and the alphabet. */
 function letterCandidates(dir: string): string[] {
   const suffix = /^\.?codex[-_.]+([A-Za-z])/i.exec(basename(dir))?.[1]?.toUpperCase();
   const out = suffix ? [suffix] : [];
@@ -98,14 +98,14 @@ function letterCandidates(dir: string): string[] {
 export interface CodexDetectOptions {
   home?: string;
   env?: NodeJS.ProcessEnv;
-  /** Letras e cores já usadas pelas contas do Claude Code (não se repetem). */
+  /** Letters and colors already used by Claude Code accounts (will not repeat). */
   taken?: { shorts?: Iterable<string>; colors?: Iterable<string> };
 }
 
 /**
- * Uma conta por pasta do Codex, NA MESMA ORDEM de `dirs`. `configDir` é o caminho para exibição e para o `codex
- * queue` (no Docker, o do host, vindo de HABBLAUD_ACCOUNTS). Sem e-mail (não sai sem ler credenciais) e sem plano
- * (vem dos arquivos de sessão).
+ * One account per Codex directory, IN THE SAME ORDER as `dirs`. `configDir` is the path for display and for
+ * `codex queue` (in Docker, the host path from HABBLAUD_ACCOUNTS). No email (not available without reading credentials)
+ * and no plan (comes from session files).
  */
 export function detectCodexAccounts(dirs: string[], opts: CodexDetectOptions = {}): DetectedAccount[] {
   const env = opts.env ?? process.env;
@@ -160,7 +160,7 @@ const PLAN_NAMES: Record<string, string> = {
   edu_pro: 'Edu Pro',
 };
 
-/** `rate_limits.plan_type` do Codex ("plus", "pro", "self_serve_business_usage_based"...) para exibir. */
+/** Codex `rate_limits.plan_type` ("plus", "pro", "self_serve_business_usage_based"...) for display. */
 export function codexPlanLabel(raw: unknown): string | undefined {
   const v = str(raw)?.toLowerCase();
   if (!v || v === 'unknown') return undefined;

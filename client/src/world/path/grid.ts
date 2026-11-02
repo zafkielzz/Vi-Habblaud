@@ -1,5 +1,5 @@
-// Grade de caminhabilidade do prédio (1 célula por tile).
-//   0 = bloqueado, 1 = livre, 2 = livre porém evitado (assentos: o A* só passa se precisar).
+// Building walkability grid (1 cell per tile).
+//   0 = blocked, 1 = free, 2 = free but avoided (seats: A* only steps on if needed).
 
 export const BLOCKED = 0;
 export const FREE = 1;
@@ -36,7 +36,7 @@ export class WalkGrid {
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) this.set(xx, yy, v);
   }
 
-  /** Tile caminhável mais próximo (busca em anel), ou null. */
+  /** Nearest walkable tile (ring search), or null. */
   nearestWalkable(x: number, y: number, maxR = 12): { x: number; y: number } | null {
     if (this.walkable(x, y)) return { x, y };
     for (let r = 1; r <= maxR; r++) {
@@ -58,7 +58,7 @@ export class WalkGrid {
     return null;
   }
 
-  /** BFS: conjunto de índices alcançáveis a partir de (x, y). */
+  /** BFS: set of reachable indices starting from (x, y). */
   reachableFrom(x: number, y: number): Uint8Array {
     const seen = new Uint8Array(this.w * this.h);
     if (!this.walkable(x, y)) return seen;

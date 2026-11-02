@@ -1,20 +1,20 @@
 # syntax=docker/dockerfile:1
 #
-# Habblaud em container: escritório virtual dos agentes do Claude Code.
+# Containerized Habblaud: virtual office for Claude Code agents.
 #
-# Use `npm run docker:up` (scripts/docker-up.ts): ele detecta as contas do Claude Code no host,
-# gera o docker-compose.override.yml com as montagens SOMENTE LEITURA de <conta>/projects,
-# <conta>/sessions e ~/.habblaud/usage e sobe o serviço. Este Dockerfile sozinho não monta nada do host.
+# Use `npm run docker:up` (scripts/docker-up.ts): it detects Claude Code accounts on the host,
+# generates docker-compose.override.yml with READ-ONLY mounts of <account>/projects,
+# <account>/sessions and ~/.habblaud/usage, and starts the service. This Dockerfile alone mounts nothing from the host.
 
 # ---------------------------------------------------------------------------------------------
-# Estágio 1: compila o cliente (Vite) e empacota o servidor (esbuild) em dist/.
+# Stage 1: build the client (Vite) and bundle the server (esbuild) into dist/.
 # ---------------------------------------------------------------------------------------------
-# A imagem base fica presa pelo digest (o mesmo nos dois estágios), para o build ser reproduzível; o Dependabot
-# (.github/dependabot.yml, ecossistema docker) troca a tag e o digest juntos quando sai versão nova.
+# The base image is pinned by digest (same across both stages) for reproducible builds; Dependabot
+# (.github/dependabot.yml, docker ecosystem) updates tag and digest together when a new version is released.
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS builder
 WORKDIR /app
 
-# Dependências primeiro: a camada fica em cache enquanto o lockfile não mudar.
+# Dependencies first: the layer stays cached as long as the lockfile does not change.
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
@@ -22,12 +22,12 @@ COPY . .
 RUN npm run build
 
 # ---------------------------------------------------------------------------------------------
-# Estágio 2: runtime enxuto. O servidor não tem dependências de runtime (só módulos node:*),
-# então basta o dist/ e o package.json (nome, versão e "type": "module").
+# Stage 2: lean runtime. The server has no runtime dependencies (only node:* modules),
+# so dist/ and package.json (name, version, and "type": "module") are all that is needed.
 # ---------------------------------------------------------------------------------------------
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 
-# HABBLAUD_USAGE_DIR: onde o docker-up monta (somente leitura) o uso capturado pelo tap de statusline.
+# HABBLAUD_USAGE_DIR: where docker-up mounts (read-only) the usage captured by the statusline tap.
 ENV NODE_ENV=production \
     HABBLAUD_HOST=0.0.0.0 \
     HABBLAUD_PORT=4747 \
@@ -40,11 +40,11 @@ WORKDIR /app
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/dist ./dist
 
-# Estado do Habblaud (nomes persistidos). O volume nomeado herda este dono na primeira montagem.
+# Habblaud state (persisted names). The named volume inherits this owner on the first mount.
 RUN mkdir -p /data && chown node:node /data
 
-# Usuário sem privilégios (já existe na imagem oficial do Node). O código fica com dono root,
-# então o processo não consegue alterá-lo; só /data é gravável.
+# Unprivileged user (already exists in the official Node image). Code is owned by root,
+# so the process cannot modify it; only /data is writable.
 USER node
 
 EXPOSE 4747

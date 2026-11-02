@@ -1,0 +1,11 @@
+{
+  "boss-rules": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python3 ./boss-rules",
+        "timeout": 10
+      }
+    ]
+  }
+}

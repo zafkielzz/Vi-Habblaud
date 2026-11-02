@@ -1,31 +1,31 @@
-// Ferramentas do terminal: busca na conversa (casamentos sem diferenciar maiúsculas nem acentos,
-// navegação com contador "3/17"), filtro "Tudo / Só prompts / Sem ferramentas" e o texto copiado de cada entrada.
-// As funções do modelo são puras e testadas em ui/termtools.test.ts. O destaque dos resultados troca nós de texto
-// por spans criados com createElement/textContent: nenhum texto do transcript passa por innerHTML.
+// Terminal tools: conversation search (case and accent-insensitive matching,
+// navigation with "3/17" counter), "All / Prompts only / No tools" filter and copied text for each entry.
+// Model functions are pure and tested in ui/termtools.test.ts. Result highlighting replaces text nodes
+// with spans created via createElement/textContent: no transcript text passes through innerHTML.
 import type { TerminalEntry } from '../../../shared/types';
 import type { TerminalItem } from './terminal';
 import { tr } from '../../../shared/i18n';
 
-// ---------------------------------------------------------------- filtro
+// ---------------------------------------------------------------- filter
 
 export type TerminalFilter = 'all' | 'prompts' | 'noTools';
 
 export const TERMINAL_FILTERS: readonly [TerminalFilter, string, string][] = [
-  ['all', tr('Tudo'), tr('Toda a conversa')],
-  ['prompts', tr('Só prompts'), tr('Só os seus prompts e as respostas finais do agente')],
-  ['noTools', tr('Sem ferramentas'), tr('Esconde as ferramentas e os resultados')],
+  ['all', tr('All'), tr('The whole conversation')],
+  ['prompts', tr('Prompts only'), tr("Only your prompts and the agent's final replies")],
+  ['noTools', tr('No tools'), tr('Hides tools and their results')],
 ];
 
 /**
- * Respostas finais de cada turno: os textos do agente sem nenhuma ferramenta depois deles até o próximo prompt
- * (ou o fim da conversa). Os textos intermediários ("Vou ler o arquivo.") ficam de fora.
+ * Final replies for each turn: agent text with no tools after it until the next prompt
+ * (or the end of conversation). Intermediate texts ("Let me read the file.") are omitted.
  */
 export function finalAnswerKeys(items: Iterable<TerminalItem>): Set<string> {
   const finals = new Set<string>();
   let pending: string[] = [];
   for (const item of items) {
     if (item.type !== 'entry') {
-      // Ferramenta (ou resultado avulso) depois do texto: ele era só um passo intermediário.
+      // Tool (or standalone result) after text: it was only an intermediate step.
       pending = [];
       continue;
     }
@@ -40,7 +40,7 @@ export function finalAnswerKeys(items: Iterable<TerminalItem>): Set<string> {
   return finals;
 }
 
-/** O item aparece com o filtro? (`finals` = finalAnswerKeys, usado só por "Só prompts".) */
+/** Is the item visible under the filter? (`finals` = finalAnswerKeys, used only by "Prompts only".) */
 export function itemVisible(item: TerminalItem, filter: TerminalFilter, finals: ReadonlySet<string>): boolean {
   if (filter === 'all') return true;
   if (item.type !== 'entry') return false;
@@ -48,12 +48,12 @@ export function itemVisible(item: TerminalItem, filter: TerminalFilter, finals: 
   return item.entry.kind === 'user' || (item.entry.kind === 'assistant' && finals.has(item.key));
 }
 
-// ---------------------------------------------------------------- busca
+// ---------------------------------------------------------------- search
 
-/** Texto "dobrado" para a busca (minúsculas, sem acentos) e, para cada caractere dele, de onde veio no original. */
+/** "Folded" text for search (lowercase, without accents) and, for each character, where it originated in the source. */
 export interface FoldedText {
   text: string;
-  /** Início e fim (no original) do caractere que gerou cada posição de `text`; ausentes = identidade (ASCII). */
+  /** Start and end (in original) of the character that generated each position of `text`; absent = identity (ASCII). */
   starts?: number[];
   ends?: number[];
 }
@@ -61,7 +61,7 @@ export interface FoldedText {
 const ASCII = /^[\x00-\x7f]*$/;
 const COMBINING = /[̀-ͯ]/g;
 
-/** Minúsculas e sem acentos ("Ação" -> "acao"), guardando as posições originais para o destaque. */
+/** Lowercase and without accents ("Action" -> "action"), saving original positions for highlighting. */
 export function foldText(s: string): FoldedText {
   if (ASCII.test(s)) return { text: s.toLowerCase() };
   let text = '';
@@ -70,7 +70,7 @@ export function foldText(s: string): FoldedText {
   let i = 0;
   for (const ch of s) {
     const f = ch.normalize('NFD').replace(COMBINING, '').toLowerCase();
-    // Acento solto (e + U+0301): some do texto dobrado, mas o destaque da letra anterior o inclui.
+    // Combining accent (e + U+0301): omitted from folded text, but previous character highlight includes it.
     if (!f && ends.length) ends[ends.length - 1] = i + ch.length;
     for (let k = 0; k < f.length; k++) {
       starts.push(i);
@@ -82,17 +82,17 @@ export function foldText(s: string): FoldedText {
   return { text, starts, ends };
 }
 
-/** Só o texto dobrado, sem o mapa de posições (para descartar rápido o que não tem o termo). */
+/** Folded text only, without position map (to quickly discard strings not matching the query). */
 function foldPlain(s: string): string {
   return ASCII.test(s) ? s.toLowerCase() : s.normalize('NFD').replace(COMBINING, '').toLowerCase();
 }
 
-/** Termo da busca já dobrado; só espaços = sem busca (''). */
+/** Search query already folded; whitespace only = no search (''). */
 export function foldQuery(query: string): string {
   return query.trim() ? foldText(query).text : '';
 }
 
-/** Trechos [início, fim) do original que casam com o termo (já dobrado por foldQuery), sem sobreposição. */
+/** Slices [start, end) of original matching the query (already folded by foldQuery), non-overlapping. */
 export function findMatches(text: string, folded: string): [number, number][] {
   if (!folded || !text) return [];
   const f = foldText(text);
@@ -104,14 +104,14 @@ export function findMatches(text: string, folded: string): [number, number][] {
   return out;
 }
 
-/** Próximo (dir = 1) ou anterior (-1) resultado, dando a volta; sem resultado atual (-1), começa do primeiro ou do último. */
+/** Next (dir = 1) or previous (-1) match, wrapping around; with no current match (-1), starts from first or last. */
 export function stepMatch(current: number, total: number, dir: 1 | -1): number {
   if (total <= 0) return -1;
   if (current < 0 || current >= total) return dir === 1 ? 0 : total - 1;
   return (current + dir + total) % total;
 }
 
-/** Posição do resultado atual numa lista de [chave da linha, nº de resultados] (na ordem da tela); -1 se não estiver lá. */
+/** Position of current match in a list of [row key, count of matches] (in display order); -1 if not found. */
 export function globalIndex(counts: readonly (readonly [string, number])[], ref: { key: string; index: number } | null): number {
   if (!ref) return -1;
   let base = 0;
@@ -122,7 +122,7 @@ export function globalIndex(counts: readonly (readonly [string, number])[], ref:
   return -1;
 }
 
-/** O resultado de número `index` (0 = primeiro) na mesma lista. */
+/** Match at `index` (0 = first) in the same list. */
 export function refAt(counts: readonly (readonly [string, number])[], index: number): { key: string; index: number } | null {
   if (index < 0) return null;
   let rest = index;
@@ -133,14 +133,14 @@ export function refAt(counts: readonly (readonly [string, number])[], index: num
   return null;
 }
 
-/** Contador da busca: "3/17"; sem resultado atual, "0/17". */
+/** Search counter: "3/17"; with no current match, "0/17". */
 export function searchCounter(index: number, total: number): string {
   return `${index >= 0 && index < total ? index + 1 : 0}/${total}`;
 }
 
-// ---------------------------------------------------------------- cópia
+// ---------------------------------------------------------------- copy
 
-/** O que o botão de copiar de uma entrada põe na área de transferência (o comando, no caso de uma ferramenta). */
+/** What the copy button on an entry puts in the clipboard (the command, in case of a tool). */
 export function copyTextOf(e: TerminalEntry): string {
   switch (e.kind) {
     case 'tool':
@@ -154,16 +154,16 @@ export function copyTextOf(e: TerminalEntry): string {
   }
 }
 
-// ---------------------------------------------------------------- destaque (DOM)
+// ---------------------------------------------------------------- highlight (DOM)
 
 export const HIT_CLASS = 'ui-term__hit';
 
-/** Elementos que não fazem parte da conversa: botões, marcas decorativas e rótulos (ex.: "Pensando…", "$", "⎿"). */
+/** Elements that are not part of the conversation: buttons, decorative marks and tags (e.g.: "Thinking…", "$", "⎿"). */
 function isChrome(el: Element): boolean {
   return el.tagName === 'BUTTON' || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('data-chrome') || el.classList.contains('ui-md__lang');
 }
 
-/** Desfaz os destaques (`hits`) de uma linha, juntando de novo os nós de texto. */
+/** Clears highlights (`hits`) from a row, rejoining text nodes. */
 export function clearHits(hits: readonly HTMLElement[]): void {
   const parents = new Set<Node>();
   for (const span of hits) {
@@ -176,9 +176,9 @@ export function clearHits(hits: readonly HTMLElement[]): void {
 }
 
 /**
- * Destaca em `root` os trechos que casam com o termo (já dobrado) e devolve os spans na ordem do documento. Só olha
- * nós de texto da conversa (inclusive os de blocos recolhidos, que ficam no DOM escondidos); um trecho que atravessa
- * dois elementos (ex.: **neg**rito) não casa.
+ * Highlights matches with the query (already folded) in `root` and returns spans in document order. Only inspects
+ * conversation text nodes (including collapsed blocks hidden in DOM); matches spanning across two elements
+ * (e.g. **bo**ld) do not match.
  */
 export function highlightHits(root: HTMLElement, folded: string): HTMLElement[] {
   if (!folded || !foldPlain(root.textContent ?? '').includes(folded)) return [];

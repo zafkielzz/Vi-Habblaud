@@ -1,20 +1,20 @@
-// Gerador de imagens via OpenRouter para os assets do Habblaud.
+// Image generator via OpenRouter for Habblaud assets.
 //
-// Uso (a partir da raiz do projeto, com OPENROUTER_KEY exportada):
-//   node scripts/assets/generate.mjs models                 lista os modelos com saída de imagem
-//   node scripts/assets/generate.mjs list                   lista os assets de specs.json e o estado do cache
-//   node scripts/assets/generate.mjs gen [ids...]           gera os assets ainda sem imagem bruta em cache
-//        [--force]            regera mesmo com cache (a tomada anterior fica em .cache/takes/)
-//        [--model <id>]       sobrescreve o modelo definido em specs.json
-//        [--as <sufixo>]      grava como "<id>@<sufixo>" (comparações/tomadas extras sem trocar a escolhida)
-//        [--concurrency <n>]  requisições simultâneas (padrão 3)
-//        [--budget <n>]       limite total de requisições registradas no log (padrão 45)
-//   node scripts/assets/generate.mjs pick <id> <sufixo>     escolhe a tomada "<id>@<sufixo>" como imagem bruta oficial
+// Usage (from project root, with OPENROUTER_KEY exported):
+//   node scripts/assets/generate.mjs models                 list models with image output
+//   node scripts/assets/generate.mjs list                   list assets from specs.json and cache state
+//   node scripts/assets/generate.mjs gen [ids...]           generate assets not yet cached in raw/
+//        [--force]            regenerate even if cached (previous take moved to .cache/takes/)
+//        [--model <id>]       override model defined in specs.json
+//        [--as <suffix>]      save as "<id>@<suffix>" (comparisons/extra takes without changing picked)
+//        [--concurrency <n>]  concurrent requests (default 3)
+//        [--budget <n>]       total requests limit recorded in log (default 45)
+//   node scripts/assets/generate.mjs pick <id> <suffix>     select take "<id>@<suffix>" as official raw image
 //
-// As imagens brutas ficam em scripts/assets/.cache/raw/<id>.png; o pós-processamento
-// (scripts/assets/postprocess.py) gera os arquivos finais em client/public/assets/.
-// Cada requisição é registrada em scripts/assets/generation-log.json (modelo, prompt, arquivo, custo).
-// A chave nunca é impressa nem gravada: só vai no header Authorization.
+// Raw images are saved to scripts/assets/.cache/raw/<id>.png; postprocessing
+// (scripts/assets/postprocess.py) generates final files in client/public/assets/.
+// Each request is recorded in scripts/assets/generation-log.json (model, prompt, file, cost).
+// The key is never printed or saved: it is only passed in the Authorization header.
 import { mkdir, readFile, writeFile, copyFile, access, open, rm } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,13 +26,13 @@ const RAW = join(CACHE, 'raw');
 const TAKES = join(CACHE, 'takes');
 const SPECS = join(HERE, 'specs.json');
 const LOG = join(HERE, 'generation-log.json');
-// Trava contra execuções simultâneas (cada uma reescreveria o log da outra).
+// Lock against concurrent runs (each would overwrite the other's log).
 const LOCK = join(CACHE, 'generate.lock');
 const API = 'https://openrouter.ai/api/v1';
 const MAX_RETRIES = 2;
 const TIMEOUT_MS = 240_000;
 
-// Argumentos: primeiro o comando, depois ids posicionais e flags (--force, --model <id>...).
+// Arguments: command first, then positional ids and flags (--force, --model <id>...).
 const VALUE_FLAGS = new Set(['model', 'as', 'concurrency', 'budget']);
 const BOOL_FLAGS = new Set(['force']);
 
@@ -49,7 +49,7 @@ function parseArgs(argv) {
     const name = arg.slice(2);
     if (BOOL_FLAGS.has(name)) flags[name] = true;
     else if (VALUE_FLAGS.has(name) && rest[i + 1] !== undefined) flags[name] = rest[++i];
-    else throw new Error(`opção desconhecida ou sem valor: ${arg}`);
+    else throw new Error(`unknown option or missing value: ${arg}`);
   }
   return { command, flags, positional };
 }
@@ -58,7 +58,7 @@ let args;
 try {
   args = parseArgs(process.argv.slice(2));
 } catch (err) {
-  console.error(`erro: ${err.message}`);
+  console.error(`error: ${err.message}`);
   process.exit(2);
 }
 const { command, flags, positional } = args;
@@ -80,15 +80,15 @@ async function loadLog() {
     if (err.code === 'ENOENT') return { budget: 45, entries: [] };
     throw err;
   }
-  // JSON inválido aborta (nunca reinicia o log por engano)
+  // Invalid JSON aborts (never restarts the log by mistake)
   return JSON.parse(text);
 }
 
-/** Monta o prompt final: o pedido do asset seguido dos estilos compartilhados que ele referencia (specs.styles). */
+/** Builds final prompt: asset request followed by shared styles it references (specs.styles). */
 function buildPrompt(specs, asset) {
   const styles = (asset.styles ?? []).map((key) => {
     const text = specs.styles[key];
-    if (!text) throw new Error(`estilo desconhecido "${key}" em ${asset.id}`);
+    if (!text) throw new Error(`unknown style "${key}" in ${asset.id}`);
     return text;
   });
   return [asset.prompt, ...styles].join('\n\n');
@@ -96,7 +96,7 @@ function buildPrompt(specs, asset) {
 
 function apiKey() {
   const key = process.env.OPENROUTER_KEY;
-  if (!key) throw new Error('OPENROUTER_KEY não definida no ambiente.');
+  if (!key) throw new Error('OPENROUTER_KEY not defined in environment.');
   return key;
 }
 
@@ -107,12 +107,13 @@ async function listModels() {
   const image = data.filter((m) => (m.architecture?.output_modalities ?? []).includes('image'));
   for (const m of image) {
     const created = new Date(m.created * 1000).toISOString().slice(0, 10);
-    console.log(`${m.id.padEnd(48)} entrada: ${(m.architecture.input_modalities ?? []).join(',').padEnd(28)} criado: ${created}`);
+    const inputs = (m.architecture.input_modalities ?? []).join(',').padEnd(28);
+    console.log(`${m.id.padEnd(48)} input: ${inputs} created: ${created}`);
   }
-  console.log(`\n${image.length} modelos com saída de imagem (de ${data.length}).`);
+  console.log(`\n${image.length} models with image output (of ${data.length}).`);
 }
 
-/** Uma requisição de geração. Lança erro com mensagem curta (sem dados sensíveis) em caso de falha. */
+/** One generation request. Throws error with short message (no sensitive data) on failure. */
 async function requestImage(model, prompt, aspect) {
   const body = {
     model,
@@ -136,7 +137,7 @@ async function requestImage(model, prompt, aspect) {
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(`HTTP ${res.status}: resposta não-JSON`);
+    throw new Error(`HTTP ${res.status}: non-JSON response`);
   }
   if (!res.ok || json.error) {
     const msg = json.error?.message ?? `HTTP ${res.status}`;
@@ -145,7 +146,7 @@ async function requestImage(model, prompt, aspect) {
   const message = json.choices?.[0]?.message;
   const url = message?.images?.[0]?.image_url?.url;
   if (!url?.startsWith('data:image/')) {
-    throw new Error(`sem imagem na resposta (texto: ${String(message?.content ?? '').slice(0, 120)})`);
+    throw new Error(`no image in response (text: ${String(message?.content ?? '').slice(0, 120)})`);
   }
   const b64 = url.slice(url.indexOf(',') + 1);
   return {
@@ -156,7 +157,7 @@ async function requestImage(model, prompt, aspect) {
   };
 }
 
-/** Executa tarefas com limite de concorrência. */
+/** Runs tasks with concurrency limit. */
 async function pool(items, limit, worker) {
   const queue = [...items];
   const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
@@ -177,7 +178,7 @@ async function generate() {
 
   const assets = specs.assets.filter((a) => a.prompt && (wanted.length === 0 || wanted.includes(a.id)));
   const unknown = wanted.filter((id) => !specs.assets.some((a) => a.id === id));
-  if (unknown.length) throw new Error(`ids desconhecidos: ${unknown.join(', ')}`);
+  if (unknown.length) throw new Error(`unknown ids: ${unknown.join(', ')}`);
 
   const todo = [];
   for (const asset of assets) {
@@ -187,14 +188,14 @@ async function generate() {
     todo.push({ asset, key, out });
   }
   if (!todo.length) {
-    console.log('Nada a gerar (tudo em cache). Use --force para regerar.');
+    console.log('Nothing to generate (everything cached). Use --force to regenerate.');
     return;
   }
 
   await mkdir(RAW, { recursive: true });
   await mkdir(TAKES, { recursive: true });
   const lock = await open(LOCK, 'wx').catch(() => {
-    throw new Error(`outra geração em andamento (${rel(LOCK)}); use --concurrency em vez de processos paralelos.`);
+    throw new Error(`another generation in progress (${rel(LOCK)}); use --concurrency instead of parallel processes.`);
   });
   try {
     await runJobs(specs, log, todo, { budget, modelOverride, concurrency });
@@ -217,7 +218,7 @@ async function runJobs(specs, log, todo, { budget, modelOverride, concurrency })
     const prompt = buildPrompt(specs, asset);
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (used >= budget) {
-        console.error(`[${key}] orçamento esgotado (${used}/${budget} requisições).`);
+        console.error(`[${key}] budget exhausted (${used}/${budget} requests).`);
         return;
       }
       used++;
@@ -246,41 +247,43 @@ async function runJobs(specs, log, todo, { budget, modelOverride, concurrency })
           cost: img.cost ?? null,
           ms: Date.now() - started,
         });
-        console.log(`[${key}] ok em ${((Date.now() - started) / 1000).toFixed(1)}s (${model}) -> ${rel(out)}`);
+        console.log(`[${key}] ok in ${((Date.now() - started) / 1000).toFixed(1)}s (${model}) -> ${rel(out)}`);
         await persist();
         return;
       } catch (err) {
         Object.assign(entry, { status: 'error', error: String(err.message ?? err), ms: Date.now() - started });
-        console.error(`[${key}] tentativa ${attempt + 1} falhou: ${entry.error}`);
+        console.error(`[${key}] attempt ${attempt + 1} failed: ${entry.error}`);
         await persist();
       }
     }
   });
   await saving;
   const spent = log.entries.reduce((s, e) => s + (typeof e.cost === 'number' ? e.cost : 0), 0);
-  console.log(`\nRequisições registradas: ${log.entries.length}/${budget}. Custo acumulado informado: US$ ${spent.toFixed(4)}.`);
+  console.log(
+    `\nRecorded requests: ${log.entries.length}/${budget}. Reported cumulative cost: US$ ${spent.toFixed(4)}.`
+  );
 }
 
-/** Copia raw/<id>@<sufixo>.png para raw/<id>.png e registra a escolha em log.picks. */
+/** Copies raw/<id>@<suffix>.png to raw/<id>.png and records choice in log.picks. */
 async function pick() {
   const [id, suffix] = positional;
-  if (!id || !suffix) throw new Error('uso: pick <id> <sufixo>');
+  if (!id || !suffix) throw new Error('usage: pick <id> <suffix>');
   const specs = await loadSpecs();
-  if (!specs.assets.some((a) => a.id === id)) throw new Error(`id desconhecido: ${id}`);
+  if (!specs.assets.some((a) => a.id === id)) throw new Error(`unknown id: ${id}`);
   const from = join(RAW, `${id}@${suffix}.png`);
-  if (!(await exists(from))) throw new Error(`tomada inexistente: ${rel(from)}`);
+  if (!(await exists(from))) throw new Error(`take does not exist: ${rel(from)}`);
   await copyFile(from, join(RAW, `${id}.png`));
   const log = await loadLog();
   const take = log.entries.findLast((e) => e.id === `${id}@${suffix}` && e.status === 'ok');
   log.picks = { ...log.picks, [id]: { take: `${id}@${suffix}`, model: take?.model ?? null, entry: take?.n ?? null } };
   await writeFile(LOG, `${JSON.stringify(log, null, 2)}\n`);
-  console.log(`[${id}] tomada escolhida: ${id}@${suffix} (${take?.model ?? 'modelo desconhecido'})`);
+  console.log(`[${id}] chosen take: ${id}@${suffix} (${take?.model ?? 'unknown model'})`);
 }
 
 async function list() {
   const specs = await loadSpecs();
   for (const a of specs.assets) {
-    const cached = a.prompt ? ((await exists(join(RAW, `${a.id}.png`))) ? 'em cache' : 'pendente') : 'sem IA';
+    const cached = a.prompt ? ((await exists(join(RAW, `${a.id}.png`))) ? 'cached' : 'pending') : 'no AI';
     console.log(`${a.id.padEnd(26)} ${cached.padEnd(9)} ${a.model ?? specs.defaultModel}`);
   }
 }
@@ -288,10 +291,13 @@ async function list() {
 const commands = { models: listModels, gen: generate, list, pick };
 const run = commands[command];
 if (!run) {
-  console.log('Comandos: models | list | gen [ids...] [--force] [--model id] [--as sufixo] [--concurrency n] [--budget n] | pick <id> <sufixo>');
+  console.log(
+    'Commands: models | list | gen [ids...] [--force] [--model id] [--as suffix]' +
+    ' [--concurrency n] [--budget n] | pick <id> <suffix>'
+  );
   process.exit(command === 'help' ? 0 : 2);
 }
 run().catch((err) => {
-  console.error(`erro: ${err.message ?? err}`);
+  console.error(`error: ${err.message ?? err}`);
   process.exit(1);
 });

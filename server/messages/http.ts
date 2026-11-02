@@ -1,13 +1,13 @@
-// Rotas das mensagens pelo escritório. A trava (recurso ligado + Host local) já foi conferida em http/app.ts; o
-// guard (http/guard.ts) já exigiu JSON e Origin local nos POST (contra CSRF).
+// Routes for messages from the office. The lock (feature enabled + local Host) was already checked in http/app.ts;
+// guard (http/guard.ts) already required JSON and local Origin on POST (against CSRF).
 //
-//   POST /api/messages          (página)  {agentId, text}: 201 OutboxMessage (queued) | 400 | 404 | 409 | 429
-//   GET  /api/messages/:id      (página)  situação da mensagem: 200 OutboxMessage | 404
-//   POST /api/mod/inbox         (plugin)  {session, account?}: 200 {messages: InboxMessage[]} (e marca a presença)
+//   POST /api/messages          (page)    {agentId, text}: 201 OutboxMessage (queued) | 400 | 404 | 409 | 429
+//   GET  /api/messages/:id      (page)    message status: 200 OutboxMessage | 404
+//   POST /api/mod/inbox         (plugin)  {session, account?}: 200 {messages: InboxMessage[]} (and marks presence)
 //   POST /api/mod/inbox/ack     (plugin)  {session, results: [{id, ok, error?}]}: 200 {ok: true}
-//   POST /api/codex/bridge/poll (auxiliar do Codex no host, npm run codex:bridge)
-//                                         {}: 200 {messages: [{id, account, codexHome, thread, text}]} (marca a presença)
-//   POST /api/codex/bridge/ack  (auxiliar) {results: [{id, ok, error?}]}: 200 {ok: true}
+//   POST /api/codex/bridge/poll (Codex host helper, npm run codex:bridge)
+//                                         {}: 200 {messages: [{id, account, codexHome, thread, text}]} (marks presence)
+//   POST /api/codex/bridge/ack  (helper)  {results: [{id, ok, error?}]}: 200 {ok: true}
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HttpError, readJson, sendJson } from '../http/app';
 import { InvalidRequest, MAX_OPEN, type MessageRegistry } from './registry';
@@ -17,14 +17,14 @@ const ITEM = /^\/api\/messages\/([^/]+)$/;
 
 function methodNotAllowed(res: ServerResponse, allow: string): void {
   res.setHeader('Allow', allow);
-  sendJson(res, 405, { error: tr('método não permitido') });
+  sendJson(res, 405, { error: tr('method not allowed') });
 }
 
 function fail(res: ServerResponse, err: unknown): void {
   if (res.headersSent) return void res.destroy();
   if (err instanceof HttpError) sendJson(res, err.status, { error: err.message });
   else if (err instanceof InvalidRequest) sendJson(res, 400, { error: err.message });
-  else sendJson(res, 500, { error: tr('erro interno') });
+  else sendJson(res, 500, { error: tr('internal error') });
 }
 
 export function createMessageRoutes(registry: MessageRegistry): (req: IncomingMessage, res: ServerResponse, path: string) => void {
@@ -33,11 +33,11 @@ export function createMessageRoutes(registry: MessageRegistry): (req: IncomingMe
     if ('message' in r) return sendJson(res, 201, r.message);
     switch (r.error) {
       case 'not-found':
-        return sendJson(res, 404, { error: tr('agente desconhecido: ele já saiu do escritório?') });
+        return sendJson(res, 404, { error: tr('unknown agent: has it already left the office?') });
       case 'unavailable':
         return sendJson(res, 409, { error: r.reason });
       case 'too-many':
-        return sendJson(res, 429, { error: tr('já há {0} mensagens esperando a entrega para este agente: espere a sessão buscar', [MAX_OPEN]) });
+        return sendJson(res, 429, { error: tr('there are already {0} messages waiting for delivery to this agent: wait for the session to fetch them', [MAX_OPEN]) });
     }
   };
 
@@ -71,17 +71,17 @@ export function createMessageRoutes(registry: MessageRegistry): (req: IncomingMe
     if (path === '/api/codex/bridge/poll') return post(req, res, codexPoll);
     if (path === '/api/codex/bridge/ack') return post(req, res, codexAck);
     const m = ITEM.exec(path);
-    if (!m) return sendJson(res, 404, { error: tr('rota desconhecida') });
+    if (!m) return sendJson(res, 404, { error: tr('unknown route') });
     const method = req.method ?? 'GET';
     if (method !== 'GET' && method !== 'HEAD') return methodNotAllowed(res, 'GET');
     let id: string;
     try {
       id = decodeURIComponent(m[1]);
     } catch {
-      return sendJson(res, 400, { error: tr('id inválido') });
+      return sendJson(res, 400, { error: tr('invalid id') });
     }
     const msg = registry.get(id);
     if (msg) sendJson(res, 200, msg);
-    else sendJson(res, 404, { error: tr('mensagem desconhecida: ela já foi resolvida há mais de 10 min ou o Habblaud reiniciou') });
+    else sendJson(res, 404, { error: tr('unknown message: it was resolved more than 10 min ago or Habblaud restarted') });
   };
 }

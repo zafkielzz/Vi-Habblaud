@@ -1,4 +1,4 @@
-"""Testes das operações de pixel art. Uso: python3 -E scripts/assets/test_pixelops.py"""
+"""Tests for pixel art operations. Usage: python3 -E scripts/assets/test_pixelops.py"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pixelops as px
 
 
 def blocky(native: np.ndarray, scale: float) -> np.ndarray:
-    """Amplia com blocos de tamanho NÃO inteiro (como a IA faz), sem interpolação."""
+    """Upscales with NON-integer block sizes (as AI does), without interpolation."""
     h, w = native.shape[:2]
     out_w, out_h = round(w * scale), round(h * scale)
     xs = np.minimum((np.arange(out_w) / scale).astype(int), w - 1)
@@ -35,7 +35,7 @@ class UnscaleTest(unittest.TestCase):
 class ChromaTest(unittest.TestCase):
     def test_fundo_estimado_pela_moldura(self) -> None:
         img = np.zeros((40, 40, 3), dtype=np.uint8)
-        img[:] = (192, 74, 138)  # "magenta" errado, como o de algumas tomadas
+        img[:] = (192, 74, 138)  # wrong "magenta", like in some takes
         img[10:30, 12:28] = (66, 140, 161)
         mask = px.magenta_mask(img)
         self.assertTrue(mask[0, 0])
@@ -60,8 +60,8 @@ class MergeTest(unittest.TestCase):
     def test_funde_tons_quase_iguais_no_mais_frequente(self) -> None:
         img = np.zeros((4, 4, 3), dtype=np.uint8)
         img[:] = (17, 25, 49)
-        img[0, :2] = (15, 23, 46)  # tom quase igual (ruído do k-means)
-        img[3, 3] = (254, 224, 116)  # cor distinta: fica
+        img[0, :2] = (15, 23, 46)  # nearly identical shade (k-means noise)
+        img[3, 3] = (254, 224, 116)  # distinct color: kept
         alpha = np.ones((4, 4), dtype=bool)
         alpha[3, 2] = False
         out = px.merge_similar(img, alpha, 12)

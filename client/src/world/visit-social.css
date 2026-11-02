@@ -1,5 +1,5 @@
-/* ------------------------------------------------------------------ Habblaud World: social dentro do prédio (Fase 5)
-   O Like e o "Deixar um carimbo" do painel da cena Visita (visit-social.ts). Cores dos tokens do .ui-root. */
+/* ------------------------------------------------------------------ Habblaud World: social inside building (Phase 5)
+   Like and "Leave a stamp" in Visit scene panel (visit-social.ts). Colors from .ui-root tokens. */
 
 .ui-visit-social {
   display: flex;
@@ -113,7 +113,7 @@
   line-height: 1;
 }
 
-/* No topo do painel da cena Visita (some no meu próprio prédio, junto com o .ui-visit-social) */
+/* At top of Visit scene panel (hidden in my own building, along with .ui-visit-social) */
 .ui-visit-panel__social:has(> .ui-visit-social[hidden]) {
   display: none;
 }
@@ -123,7 +123,7 @@
   border-bottom: 1px solid var(--ui-line);
 }
 
-/* O quadro de carimbos da portaria, por cima do quadro da parede da recepção (posição e tamanho vêm da câmera) */
+/* Stamp board in lobby, layered over reception wall board (position and size come from camera) */
 .ui-visit-board {
   position: fixed;
   left: 0;

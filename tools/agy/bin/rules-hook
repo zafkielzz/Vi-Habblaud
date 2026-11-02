@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""rules-hook: office rules inside a Claude Code session (a PreToolUse command hook), and the boss's rules for the
+Habblaud mod.
+
+  rules-hook          PreToolUse: reads the hook event on stdin ({tool_name, tool_input, cwd}); for a tool call against
+                      the office's rules prints the documented deny ({"hookSpecificOutput": {"hookEventName":
+                      "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}) and appends one
+                      RuleViolation (by "hook") to rules-log.jsonl; otherwise prints nothing (the call goes on).
+  rules-hook boss     {"office", "name", "rev", "text"} when the calling Claude Code session is the boss of an office
+                      (text = the rules for the boss, plus a note when the folder has no HANDOFF*.md yet), else {}.
+                      Used by the Habblaud mod (mod/habblaud).
+
+Antigravity (agy) PreToolUse hooks use the same script (agy-plugin/office-rules): their event is {"toolCall": {"name",
+"args"}, "workspacePaths"} and a refusal is {"decision": "deny", "reason"}; a call it lets through gets {} (no
+decision: agy's own permissions still apply). agy tools: write_to_file / replace_file_content / ... (TargetFile) are
+edits, view_file / read_file / grep_search / list_dir / find_by_name are reads, run_command (CommandLine) a command.
+
+Checks: Edit/Write/MultiEdit/NotebookEdit -> the path may be edited; Read/Grep/Glob -> it may be read; Bash -> no
+forbidden command prefix. Whoever the agent is, team.json and rules-log.jsonl may not be edited (with the file tools,
+or, best effort, by a Bash command that names them and writes): rules are changed from the Habblaud page only.
+
+The office: $AGY_OFFICE / $HABBLAUD_OFFICE (claude-ask sets AGY_OFFICE and AGY_WORKER for its workers), else the office
+whose Claude boss is the nearest `claude` ancestor of this process. No office = no rules. Any error = allow (and a note
+on stderr): the hook never breaks the session. These are guardrails against mistakes, not a sandbox: the agent runs as
+the same Unix user and a determined one can get around them.
+"""
+import glob, json, os, re, sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import office_rules as R  # noqa: E402
+
+WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+READ_TOOLS = ("Read", "Grep", "Glob")
+# Antigravity tool -> (Claude Code tool it is checked as, its path or command argument). Names and arguments as agy
+# writes them in its transcripts (28/10); unknown tools pass.
+AGY_TOOLS = {
+    "write_to_file": ("Write", "TargetFile"), "replace_file_content": ("Edit", "TargetFile"),
+    "multi_replace_file_content": ("Edit", "TargetFile"), "edit_file": ("Edit", "TargetFile"),
+    "write_file": ("Write", "TargetFile"), "delete_file": ("Write", "TargetFile"),
+    "view_file": ("Read", "AbsolutePath"), "view_file_outline": ("Read", "AbsolutePath"), "read_file": ("Read", "Path"),
+    "grep_search": ("Grep", "SearchPath"), "list_dir": ("Glob", "DirectoryPath"), "find_by_name": ("Glob", "SearchDirectory"),
+    "run_command": ("Bash", "CommandLine"),
+}
+
+
+def from_agy(ev):
+    """An agy PreToolUse event as a Claude Code one ({tool_name, tool_input, cwd}), or None for a tool not checked."""
+    call = ev.get("toolCall") if isinstance(ev.get("toolCall"), dict) else {}
+    tool = AGY_TOOLS.get(call.get("name"))
+    args = call.get("args") if isinstance(call.get("args"), dict) else {}
+    if not tool:
+        return None
+    claude, key = tool
+    value = args.get(key)
+    if value is None:  # the other path names agy uses
+        value = next((args[k] for k in ("TargetFile", "AbsolutePath", "Path", "SearchPath", "DirectoryPath") if isinstance(args.get(k), str)), None)
+    ws = ev.get("workspacePaths") if isinstance(ev.get("workspacePaths"), list) else []
+    cwd = args.get("Cwd") if isinstance(args.get("Cwd"), str) else ws[0] if ws and isinstance(ws[0], str) else None
+    inp = {"command": value} if claude == "Bash" else {"file_path" if claude in WRITE_TOOLS + ("Read",) else "path": value}
+    return {"tool_name": claude, "tool_input": inp, "cwd": cwd}
+# A Bash command that names a protected file and does one of these probably writes it.
+WRITES = re.compile(r">|\b(tee|sed|mv|cp|rm|truncate|dd|ln|chmod|install|python3?|node|perl|ruby|jq|awk)\b")
+
+
+def claude_ancestor():
+    pid = os.getppid()
+    for _ in range(32):
+        if pid <= 1:
+            return None
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                if f.read().strip() == "claude":
+                    return pid
+            with open(f"/proc/{pid}/stat") as f:
+                pid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return None
+    return None
+
+
+def boss_office():
+    """The office whose Claude boss is this session, or None."""
+    pid = claude_ancestor()
+    if not pid:
+        return None
+    for o in R.offices():
+        b = o.get("boss") if isinstance(o.get("boss"), dict) else None
+        if b and b.get("kind") != "agy" and b.get("pid") == pid:
+            return o
+    return None
+
+
+def session():
+    """(office, who): who = the worker id, or "boss"."""
+    oid = os.environ.get("AGY_OFFICE") or os.environ.get("HABBLAUD_OFFICE")
+    if oid:
+        return R.office_by_id(oid), os.environ.get("AGY_WORKER") or "boss"
+    return boss_office(), "boss"
+
+
+def protected(home):
+    return {R.norm_path(f"{R.ROOT}/team.json", home), R.norm_path(R.VIOLATIONS, home)}
+
+
+def names_protected(cmd):
+    return bool(re.search(r"rules-log\.jsonl|agy_profiles[^\s'\"]*/team\.json", cmd)) or \
+        (R.ROOT != f"{R.HOME}/.agy_profiles" and f"{R.ROOT}/team.json" in cmd)
+
+
+def decide(o, ev):
+    """(kind, detail, reason) for a call against the rules, else None."""
+    tool, inp = ev.get("tool_name") or "", ev.get("tool_input") or {}
+    if not isinstance(inp, dict):
+        return None
+    cwd = ev.get("cwd") or os.getcwd()
+    home, rules, folder, name = R.HOME, R.office_rules(o), o.get("folder") or "", o.get("name") or o.get("id")
+    stop = " Stop and report it instead of working around it."
+    if tool == "Bash":
+        cmd = inp.get("command") or ""
+        if not isinstance(cmd, str):
+            return None
+        hit = R.check_command(rules, cmd)
+        if hit:
+            return "command", cmd, f'Office rule ({name}): the command "{hit}" may not run here.{stop}'
+        if names_protected(cmd) and WRITES.search(cmd):
+            return "command", cmd, f"Office rule ({name}): team.json and rules-log.jsonl are changed from the Habblaud page only, not by agents.{stop}"
+        return None
+    if tool in WRITE_TOOLS:
+        path, mode = inp.get("file_path") or inp.get("notebook_path"), "write"
+    elif tool in READ_TOOLS:
+        path, mode = inp.get("file_path") or inp.get("path") or cwd, "read"
+    else:
+        return None
+    if not isinstance(path, str) or not path:
+        return None
+    ab = R.norm_path(path if path.startswith(("/", "~")) else f"{cwd}/{path}", home)
+    if mode == "write" and ab in protected(home):
+        return "deny", ab, f"Office rule ({name}): {ab} is changed from the Habblaud page only, not by agents.{stop}"
+    c = R.check_path(rules, folder, home, path, mode, cwd=cwd)
+    if c["ok"] and tool == "Glob" and isinstance(inp.get("pattern"), str) and inp["pattern"].startswith(("/", "~")):
+        c = R.check_path(rules, folder, home, inp["pattern"], "read", cwd=cwd)  # an absolute pattern names its own folder
+    if c["ok"]:
+        return None
+    if c["kind"] == "deny":
+        return "deny", ab or path, f'Office rule ({name}): {ab or path} may not be read or edited ("{c["rule"]}").{stop}'
+    return "outside", ab or path, f"Office rule ({name}): files may be edited only inside {', '.join([folder, *rules['scope']['write']])}; {ab or path} is outside.{stop}"
+
+
+# An agy event (it always wants an answer on stdout; {} = no decision, agy's own permissions apply).
+AGY = [False]
+
+
+def note(folder):
+    """The note for a boss whose office folder exists and has no handoff file; '' otherwise."""
+    missing = folder and os.path.isdir(folder) and not glob.glob(os.path.join(glob.escape(folder), "[Hh][Aa][Nn][Dd][Oo][Ff][Ff]*.md"))
+    return NO_HANDOFF if missing else ""
+
+
+NO_HANDOFF = ("\n\nThis office's folder has no HANDOFF*.md yet. If the work starts from an idea file or a new idea, ask "
+              "the user first whether to go ahead with it. If yes, write HANDOFF.md from it (keep the idea file as it "
+              "is) with a \"Next steps\" list: that list is the office's to-do on the Board.")
+
+
+def main():
+    if sys.argv[1:] == ["boss"]:
+        o = boss_office()
+        if not o:
+            print("{}")
+            return
+        rules = R.office_rules(o)
+        print(json.dumps({"office": o.get("id"), "name": o.get("name") or o.get("id"), "rev": rules["rev"],
+                          "text": R.rules_text(o, rules, "boss") + note(o.get("folder"))}))
+        return
+    ev = json.loads(sys.stdin.read() or "{}")
+    ev = ev if isinstance(ev, dict) else {}
+    if "toolCall" in ev:
+        AGY[0] = True
+        ev = from_agy(ev) or {}
+    o, who = session()
+    d = decide(o, ev) if o else None
+    if not d:
+        return
+    kind, detail, reason = d
+    R.violation(o.get("id"), who, kind, detail, "hook")
+    if AGY[0]:
+        AGY[0] = False  # answered
+        print(json.dumps({"decision": "deny", "reason": reason}))
+        return
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:  # never break the session: allow, and say why on stderr
+        print(f"rules-hook: {type(e).__name__}: {e} (call allowed)", file=sys.stderr)
+    if AGY[0]:
+        print("{}")
+    sys.exit(0)

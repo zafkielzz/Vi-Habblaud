@@ -1,4 +1,4 @@
-// Feed de atividade (painel inferior recolhível): últimos eventos do escritório, do mais antigo ao mais recente.
+// Activity feed (collapsible bottom panel): latest office events, from oldest to newest.
 import { partsKey } from '../../../shared/appearance';
 import type { AgentInfo, FeedItem } from '../../../shared/types';
 import { createAvatar, createAvatarPlaceholder, updateAvatar } from './avatar';
@@ -29,17 +29,17 @@ export class FeedPanel implements UiComponent {
   private toggleBtn: HTMLButtonElement;
   private empty: HTMLElement;
   private filterNote: HTMLElement;
-  /** Aparência/conta dos agentes com eventos guardados (o feed sobrevive à saída do agente). */
+  /** Appearance/account of agents with stored events (feed outlives agent departure). */
   private meta = new Map<string, AgentMeta>();
 
   constructor(private ctx: UiContext) {
-    this.list = h('ol', { class: 'ui-feed__list', role: 'log', attrs: { 'aria-label': tr('Eventos recentes'), 'aria-live': 'off' } });
+    this.list = h('ol', { class: 'ui-feed__list', role: 'log', attrs: { 'aria-label': tr('Recent events'), 'aria-live': 'off' } });
     this.rows = new KeyedList<FeedItem>(this.list, {
       key: (f) => f.id,
       create: (f) => this.createRow(f),
       update: (li, f) => this.updateRow(li, f),
     });
-    this.empty = h('p', { class: 'ui-feed__empty', text: tr('Os eventos dos agentes aparecem aqui assim que acontecem.') });
+    this.empty = h('p', { class: 'ui-feed__empty', text: tr('Agent events show up here as soon as they happen.') });
     this.newPill = h('button', { class: 'ui-feed__new', type: 'button', hidden: true, on: { click: () => this.resume() } });
     this.ticker = h('span', { class: 'ui-feed__ticker', attrs: { 'aria-hidden': 'true' } });
     this.filterNote = h('span', { class: 'ui-feed__filter', hidden: true });
@@ -51,17 +51,17 @@ export class FeedPanel implements UiComponent {
     });
     this.el = h(
       'section',
-      { class: 'ui-panel ui-feed', attrs: { 'aria-label': tr('Feed de atividade'), id: 'ui-feed' } },
+      { class: 'ui-panel ui-feed', attrs: { 'aria-label': tr('Activity feed'), id: 'ui-feed', 'data-hint': tr('Activity: what every agent just did, newest at the bottom') } },
       h(
         'div',
         { class: 'ui-feed__head' },
-        h('button', { class: 'ui-feed__title', type: 'button', on: { click: () => ctx.togglePanel('feed') } }, h('h2', { text: tr('Atividade') }), this.filterNote, this.ticker),
+        h('button', { class: 'ui-feed__title', type: 'button', on: { click: () => ctx.togglePanel('feed') } }, h('h2', { text: tr('Activity') }), this.filterNote, this.ticker),
         this.newPill,
         this.toggleBtn,
       ),
       scroller,
     );
-    // Pausa a rolagem enquanto o mouse está sobre a lista.
+    // Pause scrolling while mouse is over the list.
     scroller.addEventListener('mouseenter', () => (this.hovering = true));
     scroller.addEventListener('mouseleave', () => {
       this.hovering = false;
@@ -73,7 +73,7 @@ export class FeedPanel implements UiComponent {
       ctx.invalidate();
     });
     this.appendPending(ctx.store.feed.slice(-VISIBLE));
-    // Partidas e apostas resolvidas no escritório (vida social) entram no feed como eventos locais.
+    // Matches and bets resolved in the office (social life) enter the feed as local events.
     ctx.world.onSocialEvent?.((e) => {
       const a = ctx.agent(e.agentId);
       if (!a) return;
@@ -102,7 +102,7 @@ export class FeedPanel implements UiComponent {
     if (this.pending.length && (!paused || !open)) this.flush();
     this.pruneMeta();
 
-    // Filtro por conta da barra lateral: também vale para o feed.
+    // Sidebar account filter: also applies to the feed.
     const hidden = this.ctx.prefs.hiddenAccounts;
     const filtering = hidden.length > 0;
     const visible = filtering ? this.items.filter((f) => this.visible(f)) : this.items;
@@ -110,33 +110,33 @@ export class FeedPanel implements UiComponent {
     let newCount = 0;
     for (const [account, count] of this.pendingCounts) if (!account || !hidden.includes(account)) newCount += count;
     setHidden(this.newPill, !(paused && newCount > 0 && open));
-    if (newCount) setText(this.newPill, newCount === 1 ? tr('1 nova') : tr('{0} novas', [Math.min(newCount, 99)]));
-    // Escritório vazio: o cartão central já explica; o feed só mostra o que houver de antes.
+    if (newCount) setText(this.newPill, newCount === 1 ? tr('1 new') : tr('{0} new', [Math.min(newCount, 99)]));
+    // Empty office: the central card already explains it; feed only shows prior events.
     setHidden(this.empty, visible.length > 0 || officeIsEmpty(this.ctx));
     setText(
       this.empty,
-      filtering && this.items.length > 0 ? tr('Nenhum evento das contas selecionadas.') : tr('Os eventos dos agentes aparecem aqui assim que acontecem.'),
+      filtering && this.items.length > 0 ? tr('No events from the selected accounts.') : tr('Agent events show up here as soon as they happen.'),
     );
     setHidden(this.filterNote, !filtering);
     if (filtering) {
       const names = hidden.map((id) => this.ctx.account(id)?.name ?? id);
-      setText(this.filterNote, 'filtrado');
-      setTitle(this.filterNote, tr('Sem {0} (filtro da barra lateral)', [names.join(', ')]));
+      setText(this.filterNote, tr('filtered'));
+      setTitle(this.filterNote, tr('Hiding {0} (sidebar filter)', [names.join(', ')]));
     }
 
     const latest = pending[pending.length - 1] ?? visible[visible.length - 1];
     setText(this.ticker, latest ? `${latest.agentName}: ${latest.activity.icon} ${latest.activity.text}` : '');
     this.toggleBtn.innerHTML = open ? ICONS.chevronDown : ICONS.chevronUp;
-    const label = open ? tr('Recolher feed ( ] )') : tr('Abrir feed ( ] )');
+    const label = open ? tr('Collapse feed ( ] )') : tr('Open feed ( ] )');
     setAttr(this.toggleBtn, 'aria-label', label);
     setTitle(this.toggleBtn, label);
     setAttr(this.toggleBtn, 'aria-expanded', String(open));
 
-    // Contas podem ter mudado de cor/nome (ou o filtro mudou): atualiza as linhas visíveis.
+    // Accounts may have changed color/name (or filter changed): updates visible rows.
     if (open) this.rows.sync(visible);
   }
 
-  /** Conta do evento: a do próprio item (servidor novo) ou a do agente, se já apareceu. */
+  /** Event account: from the item itself (new server) or the agent's, if previously seen. */
   private accountOf(f: FeedItem): string | undefined {
     return f.account ?? this.meta.get(f.agentId)?.account ?? this.ctx.agent(f.agentId)?.account;
   }
@@ -147,7 +147,7 @@ export class FeedPanel implements UiComponent {
   }
 
   private appendPending(fresh: FeedItem[]): void {
-    // A contagem por conta sobrevive ao descarte das pendências mais antigas.
+    // Account counts persist through discarding of older pending items.
     for (const f of fresh) {
       const account = this.accountOf(f);
       this.pendingCounts.set(account, (this.pendingCounts.get(account) ?? 0) + 1);
@@ -157,7 +157,7 @@ export class FeedPanel implements UiComponent {
     this.pruneMeta();
   }
 
-  /** Esquece quem saiu do escritório e não tem mais evento guardado. */
+  /** Forget agents who left the office and have no stored events. */
   private pruneMeta(): void {
     const needed = new Set([...this.items, ...this.pending].map((f) => f.agentId));
     for (const a of this.ctx.store.snapshot?.agents ?? []) needed.add(a.id);
@@ -227,13 +227,13 @@ export class FeedPanel implements UiComponent {
     setText(text, f.activity.text);
     li.classList.toggle('is-error', !!f.activity.error);
     li.classList.toggle('is-social', f.id.startsWith('social:'));
-    // Fim de um shell (✅ terminou / ❌ falhou ou foi interrompido): linha com destaque próprio.
+    // End of a shell (✅ finished / ❌ failed or interrupted): row has its own highlight.
     const done = shellDoneKind(f.activity);
     li.classList.toggle('is-shell-ok', done === 'ok');
     li.classList.toggle('is-shell-fail', done === 'fail');
     const present = !!this.ctx.agent(f.agentId);
     li.classList.toggle('is-gone', !present);
-    setTitle(btn, `${formatClock(f.activity.at)} · ${f.agentName} em ${f.roomName}\n${f.activity.text}${f.activity.detail ? `\n${f.activity.detail}` : ''}`);
+    setTitle(btn, `${formatClock(f.activity.at)} · ${tr('{0} in {1}', [f.agentName, f.roomName])}\n${f.activity.text}${f.activity.detail ? `\n${f.activity.detail}` : ''}`);
   }
 
   private metaFromStore(id: string): AgentMeta | undefined {

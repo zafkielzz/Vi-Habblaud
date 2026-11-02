@@ -1,7 +1,7 @@
-// Registro dos pedidos de permissão (responder pelo escritório): desvio só com páginas abertas e sessão
-// conhecida, snapshot (status 'waiting', sem os argumentos), decisões, esperas do hook, órfãos, expiração,
-// agente que saiu, resposta no terminal (tool_result no transcript), sugestões "sempre permitir" e as
-// perguntas do AskUserQuestion (respostas por posição). Tudo com dados sintéticos.
+// Permission request registry (respond via office): bypass only with open pages and known session,
+// snapshot (status 'waiting', without arguments), decisions, hook waits, orphans, expiration,
+// agent leaving, terminal response (tool_result in transcript), "always allow" suggestions, and
+// AskUserQuestion questions (positional answers). All with synthetic data.
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setQuiet } from '../log';
@@ -31,7 +31,7 @@ function setup(opts: { viewers?: number; transcript?: string; orphanMs?: number;
     permissions: () => permissions?.snapshot() ?? new Map(),
     now: clock.now,
   });
-  office.addMain({ id: MAIN, account: 'acc', sessionId: SESSION, cwd: '/p/loja', role: 'Agente principal', startedAt: 0, status: 'working' });
+  office.addMain({ id: MAIN, account: 'acc', sessionId: SESSION, cwd: '/p/loja', role: 'Main agent', startedAt: 0, status: 'working' });
   let viewers = opts.viewers ?? 1;
   const paths = new Map<string, string>();
   if (opts.transcript) paths.set(MAIN, opts.transcript);
@@ -52,7 +52,7 @@ function hookInput(over: Record<string, unknown> = {}) {
     cwd: '/p/loja',
     hook_event_name: 'PermissionRequest',
     tool_name: 'Bash',
-    tool_input: { command: 'npm test', description: 'Rodar os testes' },
+    tool_input: { command: 'npm test', description: 'Run tests' },
     permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }],
     timeout_ms: 60_000,
     ...over,
@@ -62,46 +62,46 @@ function hookInput(over: Record<string, unknown> = {}) {
 const snapAgent = (office: Office, id: string) => office.commit().snapshot.agents.find((a) => a.id === id);
 
 function registered(r: ReturnType<PermissionRegistry['register']>): string {
-  if ('skip' in r) throw new Error(`pulou: ${r.skip}`);
+  if ('skip' in r) throw new Error(`skipped: ${r.skip}`);
   return r.id;
 }
 
 /**
- * tool_input de um AskUserQuestion: a entrada 1 é inválida (pulada; as posições contam no original), um segredo
- * na primeira pergunta e uma opção sem rótulo na segunda.
+ * tool_input of an AskUserQuestion: entry 1 is invalid (skipped; positions count in original), a secret
+ * in first question, and an option without label in second.
  */
 const ASK_INPUT = {
   questions: [
-    { question: 'Qual banco usar? (Authorization: Bearer abcdef123456)', header: 'Banco', multiSelect: false, options: [{ label: 'Postgres', description: 'Já usado no projeto' }, { label: 'SQLite' }] },
-    'lixo',
-    { question: 'Quais testes rodar?', header: 'Testes', multiSelect: true, options: [{ label: 'Unidade' }, { label: '' }, { label: 'E2E' }] },
+    { question: 'Which database to use? (Authorization: Bearer abcdef123456)', header: 'Database', multiSelect: false, options: [{ label: 'Postgres', description: 'Already used in project' }, { label: 'SQLite' }] },
+    'garbage',
+    { question: 'Which tests to run?', header: 'Tests', multiSelect: true, options: [{ label: 'Unit' }, { label: '' }, { label: 'E2E' }] },
   ],
 };
 
 const askInput = (over: Record<string, unknown> = {}) => hookInput({ tool_name: 'AskUserQuestion', tool_input: ASK_INPUT, permission_suggestions: [], ...over });
 
-describe('PermissionRegistry: registro', () => {
-  it('sem página local aberta, com sessão desconhecida ou AskUserQuestion sem perguntas para mostrar: não desvia (skip)', () => {
+describe('PermissionRegistry: registration', () => {
+  it('no open local page, unknown session, or AskUserQuestion without displayable questions: does not divert (skip)', () => {
     const { registry, setViewers } = setup({ viewers: 0 });
     expect(registry.register(hookInput())).toEqual({ skip: 'no-viewers' });
     setViewers(2);
-    expect(registry.register(hookInput({ session_id: 'outra' }))).toEqual({ skip: 'unknown-session' });
+    expect(registry.register(hookInput({ session_id: 'other' }))).toEqual({ skip: 'unknown-session' });
     expect(registry.register(hookInput({ tool_name: 'AskUserQuestion' }))).toEqual({ skip: 'unsupported-tool' });
     expect(registry.register(askInput({ tool_input: { questions: [] } }))).toEqual({ skip: 'unsupported-tool' });
-    // Mais perguntas do que o escritório mostra: o hook não conseguiria responder todas.
-    const five = Array.from({ length: 5 }, (_, i) => ({ question: `Pergunta ${i}?`, options: [{ label: 'Sim' }, { label: 'Não' }] }));
+    // More questions than office displays: hook could not answer all.
+    const five = Array.from({ length: 5 }, (_, i) => ({ question: `Question ${i}?`, options: [{ label: 'Yes' }, { label: 'No' }] }));
     expect(registry.register(askInput({ tool_input: { questions: five } }))).toEqual({ skip: 'unsupported-tool' });
     expect(registry.size).toBe(0);
   });
 
-  it('corpo inválido lança (vira 400 na rota)', () => {
+  it('invalid body throws (becomes 400 on route)', () => {
     const { registry } = setup();
     expect(() => registry.register({})).toThrow(/session_id/);
     expect(() => registry.register(null)).toThrow();
     expect(() => registry.register({ session_id: SESSION })).toThrow();
   });
 
-  it('publica no snapshot: status waiting, título e resumo, sugestão, SEM os argumentos; feed e aviso', () => {
+  it('publishes in snapshot: waiting status, title and summary, suggestion, WITHOUT arguments; feed and notice', () => {
     const { office, registry, clock } = setup();
     office.commit();
     const r = registry.register(hookInput({ tool_input: { command: 'curl -H "Authorization: Bearer abcdef123456" https://api.x' } }));
@@ -110,24 +110,24 @@ describe('PermissionRegistry: registro', () => {
     const commit = office.commit();
     const a = commit.snapshot.agents.find((x) => x.id === MAIN)!;
     expect(a.status).toBe('waiting');
-    expect(a.waitingFor).toBe('aprovar uma permissão');
+    expect(a.waitingFor).toBe('approve a permission');
     expect(a.permission).toMatchObject({ id, tool: 'Bash', createdAt: clock.now(), expiresAt: clock.now() + 60_000 });
     expect(a.permission!.title).toMatch(/^Bash\(curl/);
     expect(a.permission!.title).not.toContain('abcdef123456');
     expect(a.permission!.input).toBeUndefined();
     expect(a.permission!.suggestions).toEqual([{ index: 0, rules: ['Bash(npm test:*)'], destination: 'localSettings' }]);
-    // Detalhe (com acesso local): os argumentos, mascarados.
+    // Detail (with local access): arguments, masked.
     const d = registry.detail(id)!;
     expect(d.inputKind).toBe('command');
     expect(d.input).toContain('Authorization: ***');
     expect(d.input).not.toContain('abcdef123456');
-    // Feed e aviso.
-    expect(commit.feed.map((f) => f.activity.text)).toEqual([expect.stringMatching(/^Pede permissão:/)]);
-    expect(commit.notices.map((n) => n.text)).toEqual([expect.stringMatching(/^🔐 .+ pede permissão em loja:/)]);
+    // Feed and notice.
+    expect(commit.feed.map((f) => f.activity.text)).toEqual([expect.stringMatching(/^Asks for permission:/)]);
+    expect(commit.notices.map((n) => n.text)).toEqual([expect.stringMatching(/^🔐 .+ asks for permission in loja:/)]);
     expect(commit.notices[0]).toMatchObject({ level: 'alert', agentId: MAIN });
   });
 
-  it('subagente acompanhado recebe o pedido; desconhecido vai para o principal com o tipo', () => {
+  it('tracked subagent receives request; unknown goes to main with type', () => {
     const { office, registry } = setup();
     office.addSub({ id: SUB, parentId: MAIN, sessionId: SESSION, role: 'Explore', background: true, startedAt: 0 });
     const a = registered(registry.register(hookInput({ agent_id: 'a1b2c3', agent_type: 'Explore' })));
@@ -141,7 +141,7 @@ describe('PermissionRegistry: registro', () => {
     expect(main.permission).toMatchObject({ id: b, subagent: 'Plan' });
   });
 
-  it('vários pedidos do mesmo agente: o mais antigo no snapshot, com quantos esperam depois', () => {
+  it('multiple requests from same agent: oldest in snapshot, with count of waiting afterwards', () => {
     const { office, registry, clock } = setup();
     const first = registered(registry.register(hookInput()));
     clock.advance(10);
@@ -154,15 +154,15 @@ describe('PermissionRegistry: registro', () => {
     expect(snapAgent(office, MAIN)!.permission!.queued).toBeUndefined();
   });
 
-  it('pedidos do mesmo agente no mesmo milissegundo: só o primeiro tem outros esperando', () => {
+  it('requests from same agent in same millisecond: only first has others waiting', () => {
     const { registry } = setup();
     const first = registered(registry.register(hookInput()));
-    const second = registered(registry.register(hookInput({ tool_input: { command: 'npm run build' } }))); // sem avançar o relógio
+    const second = registered(registry.register(hookInput({ tool_input: { command: 'npm run build' } }))); // without advancing clock
     expect(registry.detail(first)!.queued).toBe(1);
     expect(registry.detail(second)!.queued).toBeUndefined();
   });
 
-  it('limite de pedidos abertos', () => {
+  it('open requests limit', () => {
     const { office } = setup();
     const r = new PermissionRegistry({ office, viewers: () => 1, maxPending: 2 });
     registered(r.register(hookInput()));
@@ -171,8 +171,8 @@ describe('PermissionRegistry: registro', () => {
   });
 });
 
-describe('PermissionRegistry: decisões e esperas do hook', () => {
-  it('aprovar entrega a decisão a quem espera e tira o pedido do snapshot (o status volta)', async () => {
+describe('PermissionRegistry: decisions and hook waits', () => {
+  it('approving delivers decision to waiting caller and clears request from snapshot (status restores)', async () => {
     const { office, registry } = setup();
     const id = registered(registry.register(hookInput()));
     const w = registry.wait(id, 25_000)!;
@@ -183,20 +183,20 @@ describe('PermissionRegistry: decisões e esperas do hook', () => {
     expect(a.status).toBe('working');
     expect(registry.wait(id, 10)).toBeUndefined();
     expect(registry.decide(id, { behavior: 'deny' })).toBe('not-found');
-    expect(office.detail(MAIN)!.history.map((h) => h.text)).toContain('Aprovado no Habblaud (sempre permitir)');
+    expect(office.detail(MAIN)!.history.map((h) => h.text)).toContain('Approved in Habblaud (always allow)');
   });
 
-  it('recusa com motivo e interrupção; decisão sem ninguém esperando fica guardada para a próxima espera', async () => {
+  it('deny with reason and interrupt; decision with nobody waiting is kept for next wait', async () => {
     const { registry } = setup();
     const id = registered(registry.register(hookInput()));
     expect(registry.decide(id, { behavior: 'deny', message: 'use pnpm', interrupt: true })).toBe('ok');
     expect(registry.decide(id, { behavior: 'allow' })).toBe('conflict');
     await expect(registry.wait(id, 25_000)!.result).resolves.toEqual({ status: 'decided', behavior: 'deny', message: 'use pnpm', interrupt: true });
-    // Entregue: some.
+    // Delivered: gone.
     expect(registry.wait(id, 10)).toBeUndefined();
   });
 
-  it('"responder no terminal" libera o hook sem decisão', async () => {
+  it('"respond in terminal" releases hook without decision', async () => {
     const { office, registry } = setup();
     const id = registered(registry.register(hookInput()));
     const w = registry.wait(id, 25_000)!;
@@ -205,14 +205,14 @@ describe('PermissionRegistry: decisões e esperas do hook', () => {
     expect(snapAgent(office, MAIN)!.permission).toBeUndefined();
   });
 
-  it('sugestão que não existe no pedido: inválida', () => {
+  it('suggestion not present in request: invalid', () => {
     const { registry } = setup();
     const id = registered(registry.register(hookInput({ permission_suggestions: [] })));
     expect(registry.decide(id, { behavior: 'allow', suggestion: 0 })).toBe('invalid');
     expect(registry.decide(id, { behavior: 'allow' })).toBe('ok');
   });
 
-  it('espera sem decisão responde "pending" no tempo pedido', async () => {
+  it('undecided wait returns "pending" after requested duration', async () => {
     const { registry } = setup();
     const id = registered(registry.register(hookInput()));
     const t0 = Date.now();
@@ -221,27 +221,27 @@ describe('PermissionRegistry: decisões e esperas do hook', () => {
   });
 });
 
-describe('PermissionRegistry: perguntas (AskUserQuestion)', () => {
-  it('publica as perguntas com as posições do original (mascaradas): espera "responder uma pergunta"; feed e aviso de pergunta', () => {
+describe('PermissionRegistry: questions (AskUserQuestion)', () => {
+  it('publishes questions with original positions (masked): waits to "answer a question"; feed and question notice', () => {
     const { office, registry } = setup();
     office.commit();
     const id = registered(registry.register(askInput()));
     const commit = office.commit();
     const a = commit.snapshot.agents.find((x) => x.id === MAIN)!;
-    expect(a).toMatchObject({ status: 'waiting', waitingFor: 'responder uma pergunta' });
+    expect(a).toMatchObject({ status: 'waiting', waitingFor: 'answer a question' });
     expect(a.permission).toMatchObject({ id, tool: 'AskUserQuestion', icon: '❓' });
     expect(a.permission!.suggestions).toBeUndefined();
     const qs = a.permission!.questions!;
     expect(qs.map((q) => q.index)).toEqual([0, 2]);
     expect(qs[0]!.question).not.toContain('abcdef123456');
     expect(qs[0]!.multiSelect).toBeUndefined();
-    expect(qs[1]).toMatchObject({ header: 'Testes', multiSelect: true, options: [{ index: 0, label: 'Unidade' }, { index: 2, label: 'E2E' }] });
-    expect(commit.feed.map((f) => f.activity)).toEqual([expect.objectContaining({ icon: '❓', text: expect.stringMatching(/^Pergunta: Qual banco usar\?/) })]);
-    expect(commit.notices.map((n) => n.text)).toEqual([expect.stringMatching(/^❓ .+ tem uma pergunta em loja: Qual banco usar\?/)]);
+    expect(qs[1]).toMatchObject({ header: 'Tests', multiSelect: true, options: [{ index: 0, label: 'Unit' }, { index: 2, label: 'E2E' }] });
+    expect(commit.feed.map((f) => f.activity)).toEqual([expect.objectContaining({ icon: '❓', text: expect.stringMatching(/^Question: Which database to use\?/) })]);
+    expect(commit.notices.map((n) => n.text)).toEqual([expect.stringMatching(/^❓ .+ has a question in loja: Which database to use\?/)]);
     expect(commit.notices[0]!.text).not.toContain('abcdef123456');
   });
 
-  it('responder: a espera recebe as respostas por posição (normalizadas) e a linha do tempo ganha o resumo', async () => {
+  it('answer: wait receives positional answers (normalized) and timeline gets summary', async () => {
     const { office, registry } = setup();
     const id = registered(registry.register(askInput()));
     const w = registry.wait(id, 25_000)!;
@@ -258,37 +258,37 @@ describe('PermissionRegistry: perguntas (AskUserQuestion)', () => {
     const a = snapAgent(office, MAIN)!;
     expect(a.permission).toBeUndefined();
     expect(a.status).toBe('working');
-    const act = office.detail(MAIN)!.history.find((h) => h.text === 'Respondido no Habblaud')!;
+    const act = office.detail(MAIN)!.history.find((h) => h.text === 'Answered in Habblaud')!;
     expect(act).toMatchObject({ icon: '💬', kind: 'other' });
-    expect(act.detail).toBe('Banco: SQLite · Testes: Unidade, E2E, “lint”');
+    expect(act.detail).toBe('Database: SQLite · Tests: Unit, E2E, “lint”');
     expect(registry.decide(id, d)).toBe('not-found');
   });
 
-  it('respostas que não batem com as perguntas, aprovar uma pergunta ou responder uma permissão: inválidas (o pedido segue aberto)', () => {
+  it('answers not matching questions, approving question, or answering permission: invalid (request stays open)', () => {
     const { registry } = setup();
     const id = registered(registry.register(askInput()));
     const answer = (answers: unknown) => registry.decide(id, parseDecision({ behavior: 'answer', answers })!);
     const multi = { question: 2, options: [0] };
     expect(registry.decide(id, { behavior: 'allow' })).toBe('invalid-answer');
-    expect(answer([{ question: 0, options: [0] }])).toBe('invalid-answer'); // falta uma pergunta
-    expect(answer([{ question: 0, options: [0, 1] }, multi])).toBe('invalid-answer'); // escolha única com duas
-    expect(answer([{ question: 0, options: [0], other: 'e mais' }, multi])).toBe('invalid-answer');
-    expect(answer([{ question: 0, options: [0] }, { question: 2, options: [1] }])).toBe('invalid-answer'); // opção sem rótulo
+    expect(answer([{ question: 0, options: [0] }])).toBe('invalid-answer'); // missing one question
+    expect(answer([{ question: 0, options: [0, 1] }, multi])).toBe('invalid-answer'); // single-choice with two
+    expect(answer([{ question: 0, options: [0], other: 'and more' }, multi])).toBe('invalid-answer');
+    expect(answer([{ question: 0, options: [0] }, { question: 2, options: [1] }])).toBe('invalid-answer'); // option without label
     expect(answer([{ question: 0, options: [0] }, { question: 2, options: [7] }])).toBe('invalid-answer');
-    expect(answer([{ question: 0, options: [0] }, { question: 1, options: [0] }])).toBe('invalid-answer'); // entrada inválida
-    expect(answer([{ question: 0, options: [0] }, { question: 2 }])).toBe('invalid-answer'); // várias, mas nenhuma
+    expect(answer([{ question: 0, options: [0] }, { question: 1, options: [0] }])).toBe('invalid-answer'); // invalid entry
+    expect(answer([{ question: 0, options: [0] }, { question: 2 }])).toBe('invalid-answer'); // multiple, but none
     expect(registry.size).toBe(1);
     const bash = registered(registry.register(hookInput()));
     expect(registry.decide(bash, { behavior: 'answer', answers: [{ question: 0, options: [0] }] })).toBe('invalid-answer');
-    // Recusar (não responder) e devolver ao terminal valem para a pergunta.
-    expect(registry.decide(id, { behavior: 'deny', message: 'decida você' })).toBe('ok');
+    // Deny (not answer) and returning to terminal work for questions.
+    expect(registry.decide(id, { behavior: 'deny', message: 'you decide' })).toBe('ok');
   });
 
-  it('respondida no terminal: o principal deixa de esperar (plano B; a chamada só vai ao transcript com a resposta)', async () => {
+  it('answered in terminal: main agent stops waiting (plan B; call only reaches transcript with answer)', async () => {
     const { office, registry, clock } = setup();
     const id = registered(registry.register(askInput()));
     const w = registry.wait(id, 25_000)!;
-    office.setStatus(MAIN, 'waiting', 'responder uma pergunta');
+    office.setStatus(MAIN, 'waiting', 'answer a question');
     registry.tick();
     office.setStatus(MAIN, 'working');
     registry.tick();
@@ -299,8 +299,8 @@ describe('PermissionRegistry: perguntas (AskUserQuestion)', () => {
   });
 });
 
-describe('PermissionRegistry: pedidos órfãos', () => {
-  it('hook que some (ninguém esperando por ORPHAN_MS) e tempo limite do hook', async () => {
+describe('PermissionRegistry: orphan requests', () => {
+  it('hook disappearing (nobody waiting for ORPHAN_MS) and hook timeout', async () => {
     const { office, registry, clock } = setup({ orphanMs: 8_000 });
     const orphan = registered(registry.register(hookInput()));
     clock.advance(7_000);
@@ -318,7 +318,7 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     await expect(w.result).resolves.toEqual({ status: 'released', reason: 'expired' });
   });
 
-  it('espera cancelada (conexão fechada) conta para o órfão; agente que saiu libera o hook', async () => {
+  it('cancelled wait (closed connection) counts toward orphan; agent leaving releases hook', async () => {
     const { office, registry, clock } = setup();
     const id = registered(registry.register(hookInput()));
     const w = registry.wait(id, 25_000)!;
@@ -332,7 +332,7 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     await expect(w2.result).resolves.toEqual({ status: 'released', reason: 'gone' });
   });
 
-  it('espera longa sem nenhuma página que responda: volta ao terminal depois de UNWATCHED_MS (a espera padrão não muda)', async () => {
+  it('long wait with no responding page: returns to terminal after UNWATCHED_MS (standard wait does not change)', async () => {
     const { registry, clock, setViewers } = setup({ orphanMs: 60 * 60_000 });
     const long = registered(registry.register(hookInput({ timeout_ms: 86_400_000 })));
     const short = registered(registry.register(hookInput({ timeout_ms: 300_000, tool_input: { command: 'ls' } })));
@@ -345,11 +345,11 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     clock.advance(2_000);
     registry.tick();
     await expect(w.result).resolves.toEqual({ status: 'released', reason: 'unwatched' });
-    // O pedido com a espera padrão (5 min) segue até o tempo dele.
+    // Request with standard wait (5 min) continues until its timeout.
     await expect(registry.wait(short, 10)!.result).resolves.not.toEqual({ status: 'released', reason: 'unwatched' });
   });
 
-  it('espera longa com celular que pode entrar depois (porta remota com permissions): continua esperando', () => {
+  it('long wait with phone that might connect later (remote port with permissions): keeps waiting', () => {
     const { registry, clock, setViewers } = setup({ orphanMs: 60 * 60_000, answerLater: true });
     registered(registry.register(hookInput({ timeout_ms: 86_400_000 })));
     setViewers(0);
@@ -359,7 +359,7 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     expect(registry.size).toBe(1);
   });
 
-  it('decisões não buscadas são esquecidas depois de um tempo', () => {
+  it('unfetched decisions are forgotten after a while', () => {
     const { registry, clock } = setup();
     const id = registered(registry.register(hookInput()));
     registry.decide(id, { behavior: 'allow' });
@@ -368,12 +368,12 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     expect(registry.wait(id, 10)).toBeUndefined();
   });
 
-  it('respondido no terminal: o tool_result da chamada aparece no transcript', async () => {
+  it('answered in terminal: call tool_result appears in transcript', async () => {
     const tmp = tempDir();
     try {
       const file = join(tmp.dir, 'sess-1.jsonl');
       const at = 1_000_000;
-      // Uma chamada igual, antiga e já respondida, não conta.
+      // An identical, old, already-answered call does not count.
       writeLines(file, [
         L.assistant([L.tool('toolu_old', 'Bash', { command: 'npm test' })], { at: at - 60_000 }),
         L.result('toolu_old', 'ok', { at: at - 59_000 }),
@@ -398,15 +398,15 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     }
   });
 
-  it('plano B (chamada não achada no transcript): o principal esperou e deixou de esperar no registro', async () => {
+  it('plan B (call not found in transcript): main agent waited and stopped waiting in registry', async () => {
     const { office, registry, clock } = setup();
     const id = registered(registry.register(hookInput()));
     const w = registry.wait(id, 25_000)!;
-    // Ainda não esperou: "trabalhando" não conta.
+    // Not waited yet: "working" does not count.
     clock.advance(4_000);
     registry.tick();
     expect(registry.size).toBe(1);
-    office.setStatus(MAIN, 'waiting', 'aprovar uma permissão');
+    office.setStatus(MAIN, 'waiting', 'approve a permission');
     registry.tick();
     office.setStatus(MAIN, 'working');
     clock.advance(500);
@@ -419,14 +419,14 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     await expect(w.result).resolves.toEqual({ status: 'released', reason: 'answered' });
   });
 
-  it('com a chamada achada no transcript, só o tool_result vale (pedidos em sequência passam por "busy")', () => {
+  it('with call found in transcript, only tool_result counts (consecutive requests pass through "busy")', () => {
     const tmp = tempDir();
     try {
       const file = join(tmp.dir, 'sess-1.jsonl');
       writeLines(file, [L.assistant([L.tool('toolu_x', 'Bash', { command: 'npm test' })], { at: 1_000_000 })]);
       const { office, registry, clock } = setup({ transcript: file });
       registered(registry.register(hookInput()));
-      office.setStatus(MAIN, 'waiting', 'aprovar uma permissão');
+      office.setStatus(MAIN, 'waiting', 'approve a permission');
       registry.tick();
       office.setStatus(MAIN, 'working');
       clock.advance(5_000);
@@ -437,7 +437,7 @@ describe('PermissionRegistry: pedidos órfãos', () => {
     }
   });
 
-  it('stop libera quem espera', async () => {
+  it('stop releases waiting callers', async () => {
     const { registry } = setup();
     const id = registered(registry.register(hookInput()));
     const w = registry.wait(id, 25_000)!;
@@ -446,8 +446,8 @@ describe('PermissionRegistry: pedidos órfãos', () => {
   });
 });
 
-describe('peças puras', () => {
-  it('pickSuggestions: só addRules/allow em destino conhecido, com a posição original', () => {
+describe('pure functions', () => {
+  it('pickSuggestions: only addRules/allow in known destination, with original position', () => {
     expect(
       pickSuggestions([
         { type: 'setMode', mode: 'acceptEdits', destination: 'session' },
@@ -462,7 +462,7 @@ describe('peças puras', () => {
 
   it('parseDecision', () => {
     expect(parseDecision({ behavior: 'allow' })).toEqual({ behavior: 'allow' });
-    expect(parseDecision({ behavior: 'deny', message: '  não  ', interrupt: true })).toEqual({ behavior: 'deny', message: 'não', interrupt: true });
+    expect(parseDecision({ behavior: 'deny', message: '  no  ', interrupt: true })).toEqual({ behavior: 'deny', message: 'no', interrupt: true });
     expect(parseDecision({ behavior: 'terminal', message: 'x' })).toEqual({ behavior: 'terminal' });
     expect(parseDecision({ behavior: 'allow', suggestion: 2 })).toEqual({ behavior: 'allow', suggestion: 2 });
     expect(parseDecision({ behavior: 'allow', suggestion: -1 })).toBeUndefined();
@@ -471,8 +471,8 @@ describe('peças puras', () => {
     expect(parseDecision(null)).toBeUndefined();
   });
 
-  it('parseDecision: answer (posições inteiras, opções distintas em ordem, texto livre aparado até 2.000)', () => {
-    expect(parseDecision({ behavior: 'answer', answers: [{ question: 1, options: [3, 0], other: '  x  ', extra: 1 }, { question: 0, options: [], other: ' ' }], message: 'ignorado' })).toEqual({
+  it('parseDecision: answer (integer positions, distinct sorted options, free text trimmed up to 2,000)', () => {
+    expect(parseDecision({ behavior: 'answer', answers: [{ question: 1, options: [3, 0], other: '  x  ', extra: 1 }, { question: 0, options: [], other: ' ' }], message: 'ignored' })).toEqual({
       behavior: 'answer',
       answers: [{ question: 1, options: [0, 3], other: 'x' }, { question: 0 }],
     });
@@ -494,24 +494,24 @@ describe('peças puras', () => {
     expect(parseDecision({ behavior: 'answer', answers: [{ question: 0, other: ` ${'x'.repeat(2_000)} ` }] })).toBeDefined();
   });
 
-  it('callSignature: o argumento principal das ferramentas conhecidas, o resto inteiro', () => {
+  it('callSignature: main argument of known tools, rest intact', () => {
     expect(callSignature('Bash', { command: 'ls', description: 'a' })).toBe(callSignature('Bash', { command: 'ls', timeout: 5 }));
     expect(callSignature('Edit', { file_path: '/a.ts', old_string: 'x' })).toBe(callSignature('Edit', { file_path: '/a.ts', replace_all: false }));
     expect(callSignature('mcp__x__y', { b: 1, a: 'z' })).toBe(callSignature('mcp__x__y', { a: 'z', b: 1 }));
     expect(callSignature('mcp__x__y', { a: 'z' })).not.toBe(callSignature('mcp__x__y', { a: 'w' }));
   });
 
-  it('scanToolCall: chamada mais recente sem resultado; com o id, só confere o resultado', () => {
+  it('scanToolCall: latest call without result; with id, only verifies result', () => {
     const tmp = tempDir();
     try {
       const file = join(tmp.dir, 't.jsonl');
       const at = 5_000_000;
-      writeLines(file, [L.assistant([L.tool('t1', 'Bash', { command: 'ls' })], { at }), 'linha quebrada {', L.assistant([L.tool('t2', 'Bash', { command: 'ls' })], { at: at + 1 })]);
+      writeLines(file, [L.assistant([L.tool('t1', 'Bash', { command: 'ls' })], { at }), 'broken line {', L.assistant([L.tool('t2', 'Bash', { command: 'ls' })], { at: at + 1 })]);
       const sig = callSignature('Bash', { command: 'ls' });
       expect(scanToolCall(file, { tool: 'Bash', signature: sig, createdAt: at })).toEqual({ toolUseId: 't2', answered: false });
       appendLines(file, [L.result('t2', 'ok', { at: at + 2 })]);
       expect(scanToolCall(file, { tool: 'Bash', signature: sig, knownId: 't2', createdAt: at })).toEqual({ toolUseId: 't2', answered: true });
-      // Muito antes do pedido: não é candidata.
+      // Far before request: not a candidate.
       expect(scanToolCall(file, { tool: 'Bash', signature: sig, createdAt: at + 3_600_000 })).toEqual({ answered: false });
     } finally {
       tmp.cleanup();

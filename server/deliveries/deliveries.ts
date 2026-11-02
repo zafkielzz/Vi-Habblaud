@@ -1,10 +1,10 @@
-// Entregas: o fim de cada pedido em que um agente trabalhou, do jeito que um BA receberia. Lidas dos transcripts das
-// sessões recentes (o histórico do terminal): um pedido começa num prompt seu e termina no prompt seguinte (ou no fim
-// do arquivo, se o agente não está mais trabalhando). Vira entrega quando o agente usou ferramentas e respondeu.
-// - manchete: a primeira frase da resposta; resumo: o último parágrafo em texto corrido (o "em linguagem simples");
-// - anexos: os arquivos do SendUserFile (com a legenda) e os links para imagem/PDF/vídeo/página na resposta, mais as
-//   duas últimas telas capturadas no pedido (as imagens que já vêm dentro do transcript).
-// Cada transcript é relido só quando muda (mtime/tamanho). Os anexos ganham ids opacos: o navegador nunca vê caminhos.
+// Deliveries: completion of each request worked on by an agent, as a BA would receive it. Read from recent
+// session transcripts (terminal history): a request starts at your prompt and ends at the next prompt (or end
+// of file, if the agent is no longer working). Becomes a delivery when the agent used tools and responded.
+// - headline: first sentence of the response; summary: last prose paragraph ("in plain English");
+// - attachments: SendUserFile files (with caption) and links to image/PDF/video/page in response, plus
+//   last two screenshots in the request (images embedded in the transcript).
+// Each transcript is re-read only when it changes (mtime/size). Attachments get opaque ids: browser never sees paths.
 import { createHash } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { isAbsolute, join, normalize } from 'node:path';
@@ -14,19 +14,19 @@ import type { TerminalParser } from '../sources/terminal';
 import { FileTail } from '../sources/tail';
 import { fileType, pathProblem } from './files';
 
-/** Quanto do fim de cada transcript entra (os pedidos mais antigos de uma sessão longa ficam de fora). */
+/** How much of the end of each transcript is read (older requests in long session are omitted). */
 export const TAIL_BYTES = 6 * 1024 * 1024;
 export const MAX_SESSIONS = 30;
 export const MAX_DELIVERIES = 60;
 const CAPTURES_PER_DELIVERY = 2;
-/** Só os últimos pedidos de cada conversa guardam as telas capturadas (base64): o resto da memória fica de fora. */
+/** Only recent requests in each conversation keep captured screenshots (base64): rest of memory omitted. */
 const TURNS_WITH_CAPTURES = 4;
 const HEADLINE_MAX = 180;
 const SUMMARY_MAX = 600;
 const REQUEST_MAX = 240;
 const MIN_TEXT = 30;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch']);
-/** Caminhos de arquivo de ver citados na resposta: em links markdown ou soltos. */
+/** Previewable file paths cited in response: markdown links or bare paths. */
 const LINK_RE = /\]\(\s*<?([^)\s>]+?\.(?:png|jpe?g|gif|webp|svg|pdf|mp4|mov|webm|html?))(?::\d+)?>?\s*\)/gi;
 const BARE_RE = /(?:^|[\s(`"'])(\/[^\s`"'()<>]+?\.(?:png|jpe?g|gif|webp|svg|pdf|mp4|mov|webm|html?))(?=$|[\s`"'),.;:!?])/gim;
 
@@ -38,7 +38,7 @@ export interface SessionSource {
 export interface DeliveryIndexOptions {
   sessions: () => Promise<RecentSession[]>;
   resolve: (account: string, sessionId: string) => SessionSource | undefined;
-  /** O agente está no meio de um pedido (o último pedido ainda não é entrega). */
+  /** Agent is mid-request (the last request is not yet a delivery). */
   isBusy: (agentId: string) => boolean;
   agentName?: (agentId: string) => string | undefined;
 }
@@ -55,7 +55,7 @@ interface Turn {
   textAt: number;
   files: Array<{ path: string; caption?: string }>;
   captures: Array<{ type: string; data: string }>;
-  /** O transcript marca o motivo de parada (Claude Code): só vale entrega o texto que encerrou a vez (end_turn). */
+  /** Transcript records stop reason (Claude Code): only turn-ending text counts as delivery (end_turn). */
   marksStop: boolean;
   ended: boolean;
 }
@@ -63,9 +63,9 @@ interface Turn {
 interface Parsed {
   mtimeMs: number;
   size: number;
-  /** Pedidos terminados (o último também, se o arquivo acabou depois dele). */
+  /** Completed requests (including last, if file ended after it). */
   turns: Turn[];
-  /** O último pedido do arquivo (pode estar em andamento). */
+  /** Last request in the file (may be in progress). */
   last?: Turn;
 }
 
@@ -102,7 +102,7 @@ function paragraphs(text: string): string[] {
 
 const isProse = (p: string) => !/^(\||#|>|[-*+]\s|\d+[.)]\s|`{3})/.test(p) && !/^[A-Z_ ]+:\s/.test(p);
 
-/** Primeira frase da resposta (a manchete), sem markdown. */
+/** First sentence of response (headline), markdown stripped. */
 export function headlineOf(text: string): string {
   const first = paragraphs(text).find(isProse) ?? paragraphs(text)[0] ?? '';
   const plain = stripMarkdown(first);
@@ -110,7 +110,7 @@ export function headlineOf(text: string): string {
   return cut(m ? m[1] : plain, HEADLINE_MAX);
 }
 
-/** Último parágrafo em texto corrido (o resumo em linguagem simples), se for diferente da manchete. */
+/** Last prose paragraph (plain English summary), if different from headline. */
 export function summaryOf(text: string, headline: string): string | undefined {
   const paras = paragraphs(text).filter(isProse);
   const last = paras[paras.length - 1];
@@ -120,7 +120,7 @@ export function summaryOf(text: string, headline: string): string | undefined {
   return cut(plain, SUMMARY_MAX);
 }
 
-/** Caminhos de arquivos de ver citados na resposta (absolutos, ou relativos à pasta do projeto). */
+/** Previewable file paths cited in response (absolute, or relative to project root). */
 export function linkedFiles(text: string, project?: string): string[] {
   const out = new Set<string>();
   const add = (raw: string) => {
@@ -128,7 +128,7 @@ export function linkedFiles(text: string, project?: string): string[] {
     try {
       p = decodeURIComponent(p);
     } catch {
-      // fica como veio
+      // kept as is
     }
     if (p.startsWith('file://')) p = p.slice(7);
     if (/^[a-z]+:/i.test(p)) return;
@@ -148,7 +148,7 @@ function newTurn(start: TerminalEntry & { kind: 'user' }): Turn {
   return { start, tools: 0, edited: new Set(), text: '', textAt: start.at, files: [], captures: [], marksStop: false, ended: false };
 }
 
-/** Imagens dentro de resultados de ferramenta (capturas de tela), em ordem. */
+/** Images inside tool results (screenshots), in order. */
 function capturesIn(line: string): Array<{ type: string; data: string }> {
   if (!line.includes('"image"')) return [];
   let d: Rec | undefined;
@@ -172,7 +172,7 @@ function capturesIn(line: string): Array<{ type: string; data: string }> {
   return out;
 }
 
-/** Arquivos mandados com SendUserFile (caminho e legenda). */
+/** Files sent via SendUserFile (path and caption). */
 function sentFilesIn(line: string): Array<{ path: string; caption?: string }> {
   if (!line.includes('"SendUserFile"')) return [];
   let d: Rec | undefined;
@@ -194,14 +194,14 @@ function sentFilesIn(line: string): Array<{ path: string; caption?: string }> {
   return out;
 }
 
-/** Motivo de parada de uma linha de resposta do Claude Code ('end_turn', 'tool_use'...), se houver. */
+/** Stop reason for a Claude Code response line ('end_turn', 'tool_use'...), if any. */
 function stopReasonOf(line: string): string | null | undefined {
   if (!line.includes('"stop_reason"')) return undefined;
   const m = /"stop_reason"\s*:\s*(null|"([a-z_]+)")/.exec(line);
   return m ? (m[2] ?? null) : undefined;
 }
 
-/** Lê o fim de um transcript e separa os pedidos. */
+/** Reads end of a transcript and splits requests. */
 export function parseTurns(lines: Iterable<string>, parser: TerminalParser): { turns: Turn[]; last?: Turn } {
   const turns: Turn[] = [];
   let cur: Turn | undefined;
@@ -241,7 +241,7 @@ export class DeliveryIndex {
 
   constructor(private readonly opts: DeliveryIndexOptions) {}
 
-  /** Anexo pelo id opaco (só os das entregas da última listagem). */
+  /** Attachment by opaque id (only deliveries from the latest listing). */
   attachment(id: string): StoredAttachment | undefined {
     return this.files.get(id);
   }
@@ -317,7 +317,7 @@ export class DeliveryIndex {
       const ext = c.type.split('/')[1] === 'jpeg' ? 'jpg' : c.type.split('/')[1];
       const name = `tela-${i + 1}.${ext}`;
       files.set(aid, { kind: 'capture', type: c.type, data: Buffer.from(c.data, 'base64'), name });
-      attachments.push({ id: aid, name, kind: 'image', caption: tr('Tela capturada pelo agente'), capture: true });
+      attachments.push({ id: aid, name, kind: 'image', caption: tr('Screenshot taken by the agent'), capture: true });
     });
     const headline = headlineOf(text);
     const summary = summaryOf(text, headline);

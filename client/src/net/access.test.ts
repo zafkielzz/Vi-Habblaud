@@ -4,22 +4,22 @@ import { access, fallbackAccess, loadAccess, onAccessChange, remoteLogout, setAc
 afterEach(() => setAccess(null));
 
 describe('access', () => {
-  it('sem resposta do servidor: a regra antiga (só o próprio computador age)', async () => {
+  it('no server response: old rule (only the local machine acts)', async () => {
     expect(fallbackAccess('localhost')).toMatchObject({ local: true, permissions: true });
     expect(fallbackAccess('habblaud.localhost').permissions).toBe(true);
     expect(fallbackAccess('192.168.1.10')).toMatchObject({ local: false, permissions: false, messages: false });
-    // O Novo agente é opt-in no servidor: sem resposta, nunca aparece.
+    // Spawning a new agent is opt-in on the server: without response, never appears.
     expect(fallbackAccess('localhost').spawn).toBe(false);
-    const failing = (() => Promise.reject(new Error('rede'))) as unknown as typeof fetch;
+    const failing = (() => Promise.reject(new Error('network'))) as unknown as typeof fetch;
     expect((await loadAccess(failing)).remote).toBe(false);
   });
-  it('com resposta: vale o que o servidor disse (celular logado aprovando)', async () => {
+  it('with response: server response applies (logged-in phone approving)', async () => {
     const body = { remote: true, local: false, permissions: true, messages: false, terminal: false, spawn: false };
     const ok = (() => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))) as unknown as typeof fetch;
     expect(await loadAccess(ok)).toEqual(body);
     expect(access().permissions).toBe(true);
   });
-  it('reler o acesso avisa só quando muda (terminal liberado com a página do celular aberta)', async () => {
+  it('re-reading access notifies only on change (terminal allowed with mobile page open)', async () => {
     const base = { remote: true, local: false, permissions: true, messages: true, terminal: false, spawn: true };
     const reply = (b: object) => (() => Promise.resolve(new Response(JSON.stringify(b), { status: 200 }))) as unknown as typeof fetch;
     let calls = 0;
@@ -34,17 +34,17 @@ describe('access', () => {
     await loadAccess(reply(base));
     expect(calls).toBe(2);
   });
-  it('login vencido na porta remota (401): volta à tela de entrada', async () => {
+  it('expired login on remote port (401): redirects to login page', async () => {
     const went: string[] = [];
-    const expired = (() => Promise.resolve(new Response('{"error":"faça login"}', { status: 401 }))) as unknown as typeof fetch;
+    const expired = (() => Promise.resolve(new Response('{"error":"please log in"}', { status: 401 }))) as unknown as typeof fetch;
     await loadAccess(expired, (u) => went.push(u));
     expect(went).toEqual(['/login']);
   });
-  it('resposta torta é ignorada', async () => {
-    const bad = (() => Promise.resolve(new Response('{"remote":"sim"}', { status: 200 }))) as unknown as typeof fetch;
+  it('malformed response is ignored', async () => {
+    const bad = (() => Promise.resolve(new Response('{"remote":"yes"}', { status: 200 }))) as unknown as typeof fetch;
     expect((await loadAccess(bad)).remote).toBe(false);
   });
-  it('Sair: POST JSON no logout e só então vai para /login', async () => {
+  it('logout: POST JSON on logout and only then navigates to /login', async () => {
     const calls: [string, RequestInit | undefined][] = [];
     const went: string[] = [];
     const ok = ((u: string, i?: RequestInit) => (calls.push([u, i]), Promise.resolve(new Response('{"ok":true}', { status: 200 })))) as unknown as typeof fetch;
@@ -52,7 +52,7 @@ describe('access', () => {
     expect(calls[0][0]).toBe('/api/remote/logout');
     expect(calls[0][1]).toMatchObject({ method: 'POST', headers: { 'Content-Type': 'application/json' } });
     expect(went).toEqual(['/login']);
-    const down = (() => Promise.reject(new Error('rede'))) as unknown as typeof fetch;
+    const down = (() => Promise.reject(new Error('network'))) as unknown as typeof fetch;
     expect(await remoteLogout(down, (u) => went.push(u))).toBe(false);
     expect(went).toEqual(['/login']);
   });

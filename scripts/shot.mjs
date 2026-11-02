@@ -1,14 +1,14 @@
-// Screenshot isolado (Chromium headless do Playwright, sem tocar no navegador do usuário).
-// Uso:
-//   node scripts/shot.mjs <url> <saida.png> [--size 1400x900] [--wait 3000] [--scale 1]
-//        [--eval "js executado na página antes da foto"] [--frames 3 --interval 800] [--full]
+// Isolated screenshot (Playwright's headless Chromium, without touching the user's browser).
+// Usage:
+//   node scripts/shot.mjs <url> <output.png> [--size 1400x900] [--wait 3000] [--scale 1]
+//        [--eval "js executed on the page before the photo"] [--frames 3 --interval 800] [--full]
 //        [--clip x,y,w,h]
-// Imprime erros de console/página encontrados (útil para depurar sem DevTools).
+// Prints console/page errors found (useful for debugging without DevTools).
 import { chromium } from 'playwright-core';
 
 const [url, out, ...rest] = process.argv.slice(2);
 if (!url || !out) {
-  console.error('uso: node scripts/shot.mjs <url> <saida.png> [opções]');
+  console.error('usage: node scripts/shot.mjs <url> <output.png> [options]');
   process.exit(2);
 }
 const opt = (name, def) => {
@@ -42,7 +42,7 @@ if (evalJs) {
 for (let i = 0; i < frames; i++) {
   const path = frames > 1 ? out.replace(/\.png$/, `-${i + 1}.png`) : out;
   await page.screenshot({ path, fullPage: flag('full'), clip });
-  console.log('salvo:', path);
+  console.log('saved:', path);
   if (i < frames - 1) await page.waitForTimeout(interval);
 }
 await browser.close();

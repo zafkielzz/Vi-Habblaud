@@ -1,8 +1,8 @@
-// Partículas em pixel art (px de mundo): pipoca pulando do balde, confete da comemoração, chuva
-// da nuvenzinha de quando um shell falha, moedinhas voando (aposta paga) e brilhos (espelho).
-// Pool fixo em arrays tipados: nada é alocado por frame.
+// Pixel art particles (world px): popcorn jumping from bucket, celebratory confetti, rain
+// from cloud when shell fails, flying coins (bet payout), and sparkles (mirror).
+// Fixed pool in typed arrays: nothing allocated per frame.
 
-/** Tipos de partícula. */
+/** Particle types. */
 const enum PK {
   Popcorn,
   Confetti,
@@ -11,7 +11,7 @@ const enum PK {
   Sparkle,
 }
 
-/** Cores do confete (saturadas, legíveis sobre o piso claro e o carpete). */
+/** Confetti colors (saturated, readable on light floor and carpet). */
 export const CONFETTI_COLORS: readonly string[] = ['#ff4d6d', '#ffb11f', '#ffe14d', '#3ddc84', '#3fa7ff', '#b06bff', '#ff7ad9'];
 const POPCORN_BODY = '#fff6dc';
 const POPCORN_SHADE = '#f2c75c';
@@ -21,9 +21,9 @@ const COIN_EDGE = '#c98a12';
 const COIN_SHINE = '#fff6c2';
 const SPARKLE_COLORS: readonly string[] = ['#ffffff', '#fff3a6', '#ffd1f0', '#bfe9ff'];
 
-/** Gravidade por tipo (px/s²). */
+/** Gravity per type (px/s²). */
 const GRAVITY: Readonly<Record<PK, number>> = { [PK.Popcorn]: 260, [PK.Confetti]: 150, [PK.Rain]: 0, [PK.Coin]: 240, [PK.Sparkle]: -14 };
-/** Arrasto horizontal por tipo (fração perdida por segundo): confete plana, pipoca não. */
+/** Horizontal drag per type (fraction lost per second): confetti glides, popcorn does not. */
 const DRAG: Readonly<Record<PK, number>> = { [PK.Popcorn]: 0, [PK.Confetti]: 2.2, [PK.Rain]: 0, [PK.Coin]: 0, [PK.Sparkle]: 3 };
 
 export class Particles {
@@ -35,7 +35,7 @@ export class Particles {
   private readonly vy: Float32Array;
   private readonly age: Float32Array;
   private readonly life: Float32Array;
-  /** Fase própria (oscilação do confete). */
+  /** Particle-specific phase (confetti flutter). */
   private readonly ph: Float32Array;
   private readonly kind: Uint8Array;
   private readonly color: Uint8Array;
@@ -57,7 +57,7 @@ export class Particles {
     return this.n;
   }
 
-  /** Adiciona uma partícula (ignorada se o pool estiver cheio). `life` em segundos. */
+  /** Adds a particle (ignored if pool is full). `life` in seconds. */
   private spawn(kind: PK, x: number, y: number, vx: number, vy: number, life: number, color = 0): void {
     if (this.n >= this.cap) return;
     const i = this.n++;
@@ -72,13 +72,13 @@ export class Particles {
     this.color[i] = color;
   }
 
-  /** Uma pipoca pula do balde: arco curto para cima e cai de volta. */
+  /** A popcorn jumps from bucket: short upward arc and falls back. */
   popcorn(x: number, y: number): void {
     const vy = -(62 + Math.random() * 26);
     this.spawn(PK.Popcorn, x + (Math.random() * 4 - 2), y, Math.random() * 28 - 14, vy, (-2 * vy) / GRAVITY[PK.Popcorn] + 0.05);
   }
 
-  /** Explosão de confete colorido a partir de (x, y). */
+  /** Explosion of colored confetti from (x, y). */
   confetti(x: number, y: number, count = 42): void {
     for (let i = 0; i < count; i++) {
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
@@ -87,20 +87,20 @@ export class Particles {
     }
   }
 
-  /** Um confete caindo do alto (festa da sala): balança no ar e some depois de cair ~`fall` px. */
+  /** Confetti falling from above (room party): drifts in air and disappears after falling ~`fall` px. */
   confettiFall(x: number, y: number, fall: number): void {
     this.spawn(PK.Confetti, x, y, Math.random() * 24 - 12, 8 + Math.random() * 16, Math.max(0.3, fall / 34) * (0.85 + Math.random() * 0.3), Math.floor(Math.random() * CONFETTI_COLORS.length));
   }
 
-  /** Um pingo de chuva caindo `fall` px a partir de (x, y). */
+  /** Raindrop falling `fall` px from (x, y). */
   rain(x: number, y: number, fall: number): void {
     const v = 32;
     this.spawn(PK.Rain, x, y, 0, v, Math.max(0.05, fall / v));
   }
 
   /**
-   * Moedinhas em arco de (x0, y0) até (x1, y1): cada uma é um lançamento balístico que chega ao
-   * destino no fim da vida (umas antes, outras depois, como um punhado jogado).
+   * Coins in an arc from (x0, y0) to (x1, y1): each is a ballistic toss that reaches its
+   * destination at the end of its life (some sooner, some later, like a tossed handful).
    */
   coins(x0: number, y0: number, x1: number, y1: number, count = 7): void {
     const g = GRAVITY[PK.Coin];
@@ -113,7 +113,7 @@ export class Particles {
     }
   }
 
-  /** Brilhos subindo em volta de (x, y). */
+  /** Sparkles rising around (x, y). */
   sparkle(x: number, y: number, count = 9): void {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
@@ -134,7 +134,7 @@ export class Particles {
       const k = this.kind[i] as PK;
       this.vy[i] += GRAVITY[k] * d;
       if (DRAG[k]) this.vx[i] *= Math.max(0, 1 - DRAG[k] * d);
-      // confete: queda limitada (plana balançando)
+      // confetti: capped fall speed (glides fluttering)
       if (k === PK.Confetti && this.vy[i] > 38) this.vy[i] = 38;
       this.x[i] += this.vx[i] * d;
       this.y[i] += this.vy[i] * d;
@@ -142,7 +142,7 @@ export class Particles {
     }
   }
 
-  /** Desenha as partículas visíveis no retângulo (px de mundo). */
+  /** Draws visible particles in rectangle (world px). */
   draw(ctx: CanvasRenderingContext2D, vx0: number, vy0: number, vx1: number, vy1: number, now: number): void {
     if (!this.n) return;
     for (let i = 0; i < this.n; i++) {
@@ -160,11 +160,11 @@ export class Particles {
       } else if (k === PK.Confetti) {
         ctx.globalAlpha = Math.min(1, left * 3.5);
         ctx.fillStyle = CONFETTI_COLORS[this.color[i] % CONFETTI_COLORS.length];
-        // gira no ar: alterna entre 2x1 e 1x2
+        // rotates in air: alternates between 2x1 and 1x2
         const flip = Math.sin(now / 90 + this.ph[i]) > 0;
         ctx.fillRect(x, y, flip ? 2 : 1, flip ? 1 : 2);
       } else if (k === PK.Coin) {
-        // moeda girando: alterna entre a face (3x3 com brilho) e o perfil (1x3)
+        // spinning coin: alternates between face (3x3 with shine) and edge (1x3)
         ctx.globalAlpha = 1;
         const face = Math.sin(now / 70 + this.ph[i]) > -0.3;
         if (face) {
@@ -179,7 +179,7 @@ export class Particles {
           ctx.fillRect(x, y - 1, 1, 3);
         }
       } else if (k === PK.Sparkle) {
-        // estrelinha de 4 pontas piscando (cruz 3x3 ou ponto)
+        // 4-pointed twinkling star (3x3 cross or single dot)
         ctx.globalAlpha = Math.min(1, left * 2.5);
         ctx.fillStyle = SPARKLE_COLORS[this.color[i] % SPARKLE_COLORS.length];
         if (Math.sin(now / 90 + this.ph[i]) > 0) {
@@ -199,7 +199,7 @@ export class Particles {
     this.n = 0;
   }
 
-  /** Remove trocando pelo último (ordem não importa). */
+  /** Removes by swapping with last element (order does not matter). */
   private remove(i: number): void {
     const j = --this.n;
     if (i === j) return;

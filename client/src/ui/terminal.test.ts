@@ -40,7 +40,7 @@ function agent(p: Partial<AgentInfo> = {}): AgentInfo {
     roomId: 'r1',
     name: 'Marina',
     look: 'f',
-    role: 'Agente principal',
+    role: 'Main agent',
     sessionId: 's1',
     account: '.claude',
     status: 'working',
@@ -56,7 +56,7 @@ function agent(p: Partial<AgentInfo> = {}): AgentInfo {
 }
 
 describe('TerminalLog', () => {
-  it('junta o resultado à ferramenta do mesmo lote', () => {
+  it('attaches result to tool from the same batch', () => {
     const log = new TerminalLog();
     const b = log.push([user('u1'), tool('t1'), result('r1', 't1')]);
     expect(b.attached).toEqual([]);
@@ -65,7 +65,7 @@ describe('TerminalLog', () => {
     expect(t.type === 'tool' && t.result?.id).toBe('r1');
   });
 
-  it('resultado que chega depois vira uma atualização da ferramenta já na tela', () => {
+  it('result arriving later updates the tool already on screen', () => {
     const log = new TerminalLog();
     log.push([tool('t1')]);
     const b = log.push([result('r1', 't1', { error: true })]);
@@ -73,27 +73,27 @@ describe('TerminalLog', () => {
     expect(b.attached).toEqual([{ toolKey: 'tool:t1', result: expect.objectContaining({ id: 'r1', error: true }) }]);
   });
 
-  it('resultado sem a ferramenta (ou repetido para a mesma ferramenta) aparece sozinho', () => {
+  it('result without tool (or duplicate for the same tool) appears standalone', () => {
     const log = new TerminalLog();
     const b = log.push([result('r0', 'sumiu'), tool('t1'), result('r1', 't1'), result('r2', 't1')]);
     expect(b.added.map((i) => `${i.type}:${i.key}`)).toEqual(['orphan:result:r0', 'tool:tool:t1', 'orphan:result:r2']);
   });
 
-  it('deduplica por id (dentro do lote e entre lotes)', () => {
+  it('deduplicates by id (within batch and across batches)', () => {
     const log = new TerminalLog();
     expect(log.push([user('u1'), user('u1')]).added).toHaveLength(1);
     expect(log.push([user('u1'), user('u2')]).added.map((i) => i.key)).toEqual(['user:u2']);
     expect(log.size).toBe(2);
   });
 
-  it('o id do resultado pode repetir o da ferramenta sem ser descartado', () => {
+  it('result id can duplicate tool id without being discarded', () => {
     const log = new TerminalLog();
     const b = log.push([tool('x'), result('x', 'x')]);
     const t = b.added[0];
     expect(t.type === 'tool' && t.result?.id).toBe('x');
   });
 
-  it('reset esquece tudo (init substitui a conversa)', () => {
+  it('reset clears everything (init replaces conversation)', () => {
     const log = new TerminalLog();
     log.push([user('u1')]);
     log.reset();
@@ -101,19 +101,19 @@ describe('TerminalLog', () => {
     expect(log.push([user('u1')]).added).toHaveLength(1);
   });
 
-  it('trim descarta os itens mais antigos e libera os ids deles', () => {
+  it('trim discards oldest items and frees their ids', () => {
     const log = new TerminalLog();
     log.push([user('u1'), tool('t1'), result('r1', 't1'), user('u2'), user('u3')]);
     expect(log.trim(2)).toEqual(['user:u1', 'tool:t1']);
     expect(log.size).toBe(2);
     expect(log.trim(2)).toEqual([]);
-    // Um resultado atrasado da ferramenta descartada aparece sozinho.
+    // A late result for a discarded tool appears standalone.
     expect(log.push([result('r9', 't1')]).added.map((i) => i.type)).toEqual(['orphan']);
   });
 });
 
 describe('parseInit / parseAppend', () => {
-  it('aceita o init e ignora entradas malformadas', () => {
+  it('accepts init and ignores malformed entries', () => {
     const data = JSON.stringify({
       agentId: 'a1',
       truncated: true,
@@ -125,31 +125,31 @@ describe('parseInit / parseAppend', () => {
     expect(init?.entries.map(entryKey)).toEqual(['user:u1', 'result:r1']);
   });
 
-  it('JSON inválido: init nulo e append vazio', () => {
+  it('invalid JSON: null init and empty append', () => {
     expect(parseInit('{')).toBeNull();
     expect(parseInit('[1]')).toBeNull();
     expect(parseAppend('{')).toEqual([]);
     expect(parseAppend(JSON.stringify({ not: 'array' }))).toEqual([]);
   });
 
-  it('append com pensamento sem texto (só assinatura) é válido', () => {
+  it('append with thinking without text (signature only) is valid', () => {
     expect(parseAppend(JSON.stringify([{ kind: 'thinking', id: 'th', at: 1 }]))).toHaveLength(1);
   });
 });
 
 describe('previewText', () => {
-  it('texto curto não recolhe', () => {
+  it('short text does not collapse', () => {
     const p = previewText('a\nb\nc', 6);
     expect(p.collapsed).toBe(false);
     expect(p.head).toBe('a\nb\nc');
   });
 
-  it('não recolhe por só 1 ou 2 linhas a mais', () => {
+  it('does not collapse for only 1 or 2 extra lines', () => {
     expect(previewText(Array.from({ length: 8 }, (_, i) => `l${i}`).join('\n'), 6).collapsed).toBe(false);
   });
 
-  it('texto longo mostra as primeiras linhas e conta as escondidas', () => {
-    const text = Array.from({ length: 20 }, (_, i) => `linha ${i + 1}`).join('\n');
+  it('long text shows first lines and counts hidden lines', () => {
+    const text = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
     const p = previewText(`${text}\n\n`, 6);
     expect(p.collapsed).toBe(true);
     expect(p.head.split('\n')).toHaveLength(6);
@@ -158,7 +158,7 @@ describe('previewText', () => {
     expect(p.text).toBe(text);
   });
 
-  it('linha única comprida demais é cortada por caracteres', () => {
+  it('single line that is too long is truncated by characters', () => {
     const p = previewText('x'.repeat(5_000), 6, 100);
     expect(p.collapsed).toBe(true);
     expect(p.head).toHaveLength(101);
@@ -166,33 +166,33 @@ describe('previewText', () => {
     expect(p.hiddenLines).toBe(0);
   });
 
-  it('splitPreview: a prévia é um prefixo do texto (o resto fica no DOM, escondido, para a busca)', () => {
-    const lines = Array.from({ length: 20 }, (_, i) => `linha ${i + 1}`).join('\n');
+  it('splitPreview: preview is a prefix of text (remainder stays hidden in DOM for search)', () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
     const p = splitPreview(lines, 6);
     expect(p.text.slice(0, p.headEnd)).toBe(previewText(lines, 6).head);
-    expect(p.text.slice(p.headEnd).startsWith('\nlinha 7')).toBe(true);
+    expect(p.text.slice(p.headEnd).startsWith('\nline 7')).toBe(true);
     expect(p.ellipsis).toBe(false);
     const long = splitPreview(`${'x'.repeat(98)}   ${'y'.repeat(50)}`, 6, 100);
     expect(long).toMatchObject({ headEnd: 98, ellipsis: true, collapsed: true, hiddenLines: 0 });
     expect(splitPreview('curto', 6)).toMatchObject({ headEnd: 5, collapsed: false });
   });
 
-  it('rótulo do botão', () => {
-    expect(moreLabel(1)).toBe('… +1 linha');
-    expect(moreLabel(14)).toBe('… +14 linhas');
-    expect(moreLabel(0)).toBe('… mostrar tudo');
+  it('button label', () => {
+    expect(moreLabel(1)).toBe('… +1 line');
+    expect(moreLabel(14)).toBe('… +14 lines');
+    expect(moreLabel(0)).toBe('… show all');
   });
 });
 
-describe('ferramentas', () => {
-  it('splitToolTitle separa o nome dos argumentos', () => {
+describe('tools', () => {
+  it('splitToolTitle separates name from arguments', () => {
     expect(splitToolTitle('Bash(npm test)')).toEqual({ name: 'Bash', args: '(npm test)' });
     expect(splitToolTitle('Read(server/index.ts)')).toEqual({ name: 'Read', args: '(server/index.ts)' });
     expect(splitToolTitle('Pesquisa na web')).toEqual({ name: 'Pesquisa na web', args: '' });
     expect(splitToolTitle('Tarefa (x)')).toEqual({ name: 'Tarefa (x)', args: '' });
   });
 
-  it('showToolInput não repete o comando que já está no título', () => {
+  it('showToolInput does not repeat command already in title', () => {
     expect(showToolInput({ title: 'Bash(npm test)', input: 'npm test', inputKind: 'command' })).toBe(false);
     expect(showToolInput({ title: 'Bash(npm run build && …)', input: 'npm run build && npm test', inputKind: 'command' })).toBe(true);
     expect(showToolInput({ title: 'Bash(x)', input: 'x\ny', inputKind: 'command' })).toBe(true);
@@ -212,43 +212,43 @@ describe('ferramentas', () => {
 describe('terminalFooter', () => {
   const now = 100_000;
 
-  it('trabalhando: texto da atividade com reticências (sem duplicar)', () => {
+  it('working: activity text with ellipsis (without duplicating)', () => {
     const a = agent({ activity: { id: 'x', kind: 'edit', icon: '✏️', text: 'Editando App.tsx', at: 0 } });
     expect(terminalFooter(a, [a], now)).toEqual({ kind: 'working', text: 'Editando App.tsx…', since: 1_000 });
-    const b = agent({ activity: { id: 'x', kind: 'think', icon: '💭', text: 'Pensando…', at: 0 } });
-    expect(terminalFooter(b, [b], now).text).toBe('Pensando…');
-    expect(terminalFooter(agent(), [], now).text).toBe('Trabalhando…');
+    const b = agent({ activity: { id: 'x', kind: 'think', icon: '💭', text: 'Thinking…', at: 0 } });
+    expect(terminalFooter(b, [b], now).text).toBe('Thinking…');
+    expect(terminalFooter(agent(), [], now).text).toBe('Working…');
   });
 
-  it('esperando você, ocioso e encerrado', () => {
+  it('waiting on you, idle, and ended', () => {
     const perm = { id: 'p1', tool: 'Bash', title: 'Bash(ls)' } as unknown as NonNullable<AgentInfo['permission']>;
-    expect(terminalFooter(agent({ status: 'waiting', waitingFor: 'aprovar uma permissão', permission: perm }), [], now).text).toBe('Esperando você: aprovar uma permissão');
-    expect(terminalFooter(agent({ status: 'waiting', waitingFor: 'aprovar uma permissão' }), [], now).text).toBe(
-      'Esperando você: aprovar uma permissão · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera',
+    expect(terminalFooter(agent({ status: 'waiting', waitingFor: 'approve a permission', permission: perm }), [], now).text).toBe('Waiting on you: approve a permission');
+    expect(terminalFooter(agent({ status: 'waiting', waitingFor: 'approve a permission' }), [], now).text).toBe(
+      "Waiting on you: approve a permission · answer in Claude Code: this request didn't reach Habblaud or timed out",
     );
-    expect(terminalFooter(agent({ status: 'waiting', provider: 'codex' }), [], now).text).toMatch(/^Esperando você · responda no Codex:/);
-    expect(terminalFooter(agent({ status: 'idle' }), [], now)).toEqual({ kind: 'idle', text: 'Aguardando o próximo prompt' });
+    expect(terminalFooter(agent({ status: 'waiting', provider: 'codex' }), [], now).text).toMatch(/^Waiting on you · answer in Codex:/);
+    expect(terminalFooter(agent({ status: 'idle' }), [], now)).toEqual({ kind: 'idle', text: 'Waiting for the next prompt' });
     expect(terminalFooter(agent({ status: 'offline' }), [], now).kind).toBe('ended');
     expect(terminalFooter(agent({ kind: 'sub', status: 'done' }), [], now).kind).toBe('ended');
-    expect(terminalFooter(undefined, [], now)).toEqual({ kind: 'ended', text: 'Sessão encerrada' });
+    expect(terminalFooter(undefined, [], now)).toEqual({ kind: 'ended', text: 'Session ended' });
   });
 
-  it('esperando o shell (segundo plano ou comando longo em primeiro plano)', () => {
+  it('waiting on shell (background or long foreground command)', () => {
     const job: ShellJob = { id: 'j', label: 'Rodar a suíte', startedAt: 40_000, background: true, kind: 'shell' };
     const a = agent({ status: 'shell', shells: [job, { ...job, id: 'k', startedAt: 50_000 }] });
-    expect(terminalFooter(a, [a], now)).toEqual({ kind: 'shell', text: 'Esperando o shell: Rodar a suíte (+1)', since: 40_000 });
+    expect(terminalFooter(a, [a], now)).toEqual({ kind: 'shell', text: 'Waiting on shell: Rodar a suíte (+1)', since: 40_000 });
     const fg = agent({ status: 'working', shells: [{ ...job, background: false, startedAt: now - 60_000 }] });
     expect(terminalFooter(fg, [fg], now).kind).toBe('shell');
   });
 });
 
-describe('utilitários', () => {
-  it('terminalUrl codifica o id', () => {
+describe('utilities', () => {
+  it('terminalUrl encodes the id', () => {
     expect(terminalUrl('.claude:123')).toBe('/api/agents/.claude%3A123/terminal');
     expect(terminalUrl('s/1:a b')).toBe('/api/agents/s%2F1%3Aa%20b/terminal');
   });
 
-  it('sessões do histórico: URL do stream, chave e nome do projeto', () => {
+  it('history sessions: stream URL, key, and project name', () => {
     const sid = '00000000-0000-4000-8000-000000000001';
     expect(sessionTerminalUrl('.claude-conta2', sid)).toBe(`/api/sessions/.claude-conta2/${sid}/terminal`);
     expect(sessionTerminalUrl('a/b', 'x y')).toBe('/api/sessions/a%2Fb/x%20y/terminal');
@@ -258,15 +258,15 @@ describe('utilitários', () => {
     expect(sessionProjectName({ projectDir: '-Users-ana-projetos-site' })).toBe('-Users-ana-projetos-site');
   });
 
-  it('rodapé da sessão encerrada: hoje, ontem ou a data', () => {
+  it('ended session footer: today, yesterday, or date', () => {
     const now = new Date(2026, 9, 8, 15, 0, 0).getTime();
-    expect(sessionEndedText(new Date(2026, 9, 8, 14, 30).getTime(), now)).toBe('Sessão encerrada às 14:30');
-    expect(sessionEndedText(new Date(2026, 9, 7, 23, 5).getTime(), now)).toBe('Sessão encerrada ontem às 23:05');
-    expect(sessionEndedText(new Date(2026, 9, 3, 9, 0).getTime(), now)).toMatch(/^Sessão encerrada em 03 de out\.? às 09:00$/);
-    expect(sessionEndedText(NaN, now)).toBe('Sessão encerrada');
+    expect(sessionEndedText(new Date(2026, 9, 8, 14, 30).getTime(), now)).toBe('Session ended at 14:30');
+    expect(sessionEndedText(new Date(2026, 9, 7, 23, 5).getTime(), now)).toBe('Session ended yesterday at 23:05');
+    expect(sessionEndedText(new Date(2026, 9, 3, 9, 0).getTime(), now)).toMatch(/^Session ended on .*Oct.* at 09:00$/);
+    expect(sessionEndedText(NaN, now)).toBe('Session ended');
   });
 
-  it('entryTimeTitle: horário hoje, data em outro dia, vazio sem horário', () => {
+  it('entryTimeTitle: time today, date on other days, empty without timestamp', () => {
     const now = new Date(2026, 9, 8, 15, 0, 0).getTime();
     expect(entryTimeTitle(new Date(2026, 9, 8, 14, 30, 5).getTime(), now)).toMatch(/14:30:05/);
     expect(entryTimeTitle(new Date(2026, 9, 6, 9, 5).getTime(), now)).toMatch(/06.*09:05/);
@@ -274,8 +274,8 @@ describe('utilitários', () => {
   });
 });
 
-describe('rodapé do Codex', () => {
-  it('spinner e símbolo neutros (o ✻ é do Claude Code); o resto é igual', () => {
+describe('Codex footer', () => {
+  it('neutral spinner and glyph (✻ is from Claude Code); remainder is identical', () => {
     expect(spinnerFrames('claude')).toContain('✻');
     expect(spinnerFrames('codex')).not.toContain('✻');
     expect(spinnerFrames('codex')).toHaveLength(spinnerFrames('claude').length);

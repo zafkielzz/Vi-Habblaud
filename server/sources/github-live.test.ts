@@ -1,5 +1,5 @@
-// Integração: eventos do GitHub vindos dos transcripts viram aviso + efeito na sala só ao vivo
-// (nunca na carga inicial). Transcripts SINTÉTICOS num config dir temporário.
+// Integration: GitHub events from transcripts become notice + room effect only live
+// (never during initial load). SYNTHETIC transcripts in temporary config dir.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -52,7 +52,7 @@ function setup() {
     subFile(sid: string, agentId: string, lines: string[]) {
       const base = join(dir, 'projects', encodeCwd(CWD), sid, 'subagents');
       mkdirSync(base, { recursive: true });
-      writeFileSync(join(base, `agent-${agentId}.meta.json`), JSON.stringify({ agentType: 'general-purpose', description: 'Abrir o PR' }));
+      writeFileSync(join(base, `agent-${agentId}.meta.json`), JSON.stringify({ agentType: 'general-purpose', description: 'Open PR' }));
       writeLines(join(base, `agent-${agentId}.jsonl`), lines);
     },
     poll() {
@@ -69,11 +69,11 @@ function setup() {
 type Ctx = ReturnType<typeof setup>;
 
 const prCreate = (id: string, n: number, at: number) => [
-  L.assistant([L.tool(id, 'Bash', { command: 'gh pr create --fill', description: 'Abrir o PR' })], { at }),
+  L.assistant([L.tool(id, 'Bash', { command: 'gh pr create --fill', description: 'Open PR' })], { at }),
   L.result(id, `https://github.com/acme/loja/pull/${n}`, { at }),
 ];
 
-describe('GitHub no escritório (watcher + office)', () => {
+describe('GitHub in office (watcher + office)', () => {
   let c: Ctx;
   beforeEach(() => {
     c = setup();
@@ -84,37 +84,37 @@ describe('GitHub no escritório (watcher + office)', () => {
   });
 
   function boot(lines: string[]): string {
-    writeLines(c.transcript('sess-a'), [L.prompt('Abre o PR', { at: c.now() - 5_000 }), ...lines]);
+    writeLines(c.transcript('sess-a'), [L.prompt('Open the PR', { at: c.now() - 5_000 }), ...lines]);
     c.openSession(100, 'sess-a');
     c.watcher.boot();
     c.notices.push(...c.office.commit().notices);
     return '.claude:100';
   }
 
-  it('carga inicial: evento já no transcript vai só para o histórico (sem aviso nem efeito)', () => {
+  it('initial load: event already in transcript goes only to history (no notice or effect)', () => {
     const id = boot(prCreate('t1', 7, c.now() - 3_000));
     c.poll();
     expect(c.notices.filter((n) => n.text.includes('PR'))).toEqual([]);
     expect(c.room()?.effect).toBeUndefined();
-    expect(c.office.detail(id)?.history.some((a) => a.tool === 'GitHub' && a.text === 'Abriu o PR #7')).toBe(true);
+    expect(c.office.detail(id)?.history.some((a) => a.tool === 'GitHub' && a.text === 'Opened PR #7')).toBe(true);
   });
 
-  it('ao vivo: PR mergeado vira aviso, atividade e festa por ~12 s', () => {
+  it('live: merged PR becomes notice, activity, and party for ~12 s', () => {
     const id = boot([]);
     appendLines(c.transcript('sess-a'), [
       L.assistant([L.tool('m1', 'Bash', { command: 'gh pr merge 12 --squash --delete-branch' })], { at: c.now() }),
       L.result('m1', 'Updating 1a2b3c4..5d6e7f8\nFast-forward', { at: c.now() }),
     ]);
     c.poll();
-    expect(c.notices.map((n) => n.text)).toContainEqual(expect.stringMatching(/^🎉 .+ mergeou o PR #12 em loja$/));
-    expect(c.office.commit().snapshot.agents.find((a) => a.id === id)?.activity).toMatchObject({ tool: 'GitHub', text: 'Mergeou o PR #12', icon: '🎉' });
-    expect(c.room()?.effect).toMatchObject({ kind: 'party', text: 'PR #12 mergeado!', agentId: id });
+    expect(c.notices.map((n) => n.text)).toContainEqual(expect.stringMatching(/^🎉 .+ merged PR #12 in loja$/));
+    expect(c.office.commit().snapshot.agents.find((a) => a.id === id)?.activity).toMatchObject({ tool: 'GitHub', text: 'Merged PR #12', icon: '🎉' });
+    expect(c.room()?.effect).toMatchObject({ kind: 'party', text: 'PR #12 merged!', agentId: id });
     c.advance(PARTY_MS + 100);
     c.poll();
     expect(c.room()?.effect).toBeUndefined();
   });
 
-  it('ao vivo: CI vermelho liga o alarme; CI verde apaga (com festa); aviso de CI não se repete', () => {
+  it('live: red CI triggers alarm; green CI clears it (with party); CI notice does not repeat', () => {
     const id = boot([]);
     const fail = 'Exit code 1\nX feat/x CI · 55\nTriggered via push about 1 minute ago';
     appendLines(c.transcript('sess-a'), [
@@ -122,9 +122,9 @@ describe('GitHub no escritório (watcher + office)', () => {
       L.result('w1', fail, { at: c.now(), error: true }),
     ]);
     c.poll();
-    expect(c.room()?.effect).toMatchObject({ kind: 'alarm', text: 'CI falhou (feat/x)', agentId: id });
-    expect(c.notices.filter((n) => n.text === '🚨 CI falhou em loja (feat/x)')).toHaveLength(1);
-    // o mesmo vermelho visto de novo logo depois (gh run view): sem aviso repetido, alarme segue
+    expect(c.room()?.effect).toMatchObject({ kind: 'alarm', text: 'CI failed (feat/x)', agentId: id });
+    expect(c.notices.filter((n) => n.text === '🚨 CI failed in loja (feat/x)')).toHaveLength(1);
+    // same failure seen again shortly after (gh run view): no duplicate notice, alarm continues
     c.advance(20_000);
     appendLines(c.transcript('sess-a'), [
       L.assistant([L.tool('v1', 'Bash', { command: 'gh run view 55' })], { at: c.now() }),
@@ -140,11 +140,11 @@ describe('GitHub no escritório (watcher + office)', () => {
       L.result('w2', '✓ feat/x CI · 56\nTriggered via push about 2 minutes ago', { at: c.now() }),
     ]);
     c.poll();
-    expect(c.room()?.effect).toMatchObject({ kind: 'party', text: 'CI verde de novo!' });
-    expect(c.notices.map((n) => n.text)).toContain('✅ CI passou em loja (feat/x)');
+    expect(c.room()?.effect).toMatchObject({ kind: 'party', text: 'CI green again!' });
+    expect(c.notices.map((n) => n.text)).toContain('✅ CI passed in loja (feat/x)');
   });
 
-  it('linha antiga relida (mais de 2 min) não anima nem avisa', () => {
+  it('re-read old line (older than 2 min) does not animate or notify', () => {
     boot([]);
     appendLines(c.transcript('sess-a'), prCreate('t9', 9, c.now() - 10 * 60_000));
     c.poll();
@@ -152,21 +152,21 @@ describe('GitHub no escritório (watcher + office)', () => {
     expect(c.room()?.effect).toBeUndefined();
   });
 
-  it('push só avisa (sem efeito na sala)', () => {
+  it('push only notifies (no room effect)', () => {
     boot([]);
     appendLines(c.transcript('sess-a'), [
       L.assistant([L.tool('p1', 'Bash', { command: 'git push origin main' })], { at: c.now() }),
       L.result('p1', 'To github.com:acme/loja.git\n   1a2b3c4..5d6e7f8  main -> main', { at: c.now() }),
     ]);
     c.poll();
-    expect(c.notices.map((n) => n.text)).toContainEqual(expect.stringMatching(/^🚀 .+ enviou commits para main em loja$/));
+    expect(c.notices.map((n) => n.text)).toContainEqual(expect.stringMatching(/^🚀 .+ pushed commits to main in loja$/));
     expect(c.room()?.effect).toBeUndefined();
   });
 
-  it('subagente novo que abre um PR: festa, com ele como responsável', () => {
+  it('new subagent opening a PR: party, with subagent as author', () => {
     boot([]);
-    c.subFile('sess-a', 'abc123', [L.prompt('Abrir o PR', { at: c.now(), agentId: 'abc123' }), ...prCreate('s1', 31, c.now())]);
+    c.subFile('sess-a', 'abc123', [L.prompt('Open the PR', { at: c.now(), agentId: 'abc123' }), ...prCreate('s1', 31, c.now())]);
     c.poll();
-    expect(c.room()?.effect).toMatchObject({ kind: 'party', text: 'PR #31 aberto!', agentId: 'sess-a:abc123' });
+    expect(c.room()?.effect).toMatchObject({ kind: 'party', text: 'PR #31 opened!', agentId: 'sess-a:abc123' });
   });
 });

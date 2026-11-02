@@ -6,11 +6,11 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 function challenge(n: number, maxnumber = 50_000) {
   const salt = 'abc123?expires=1800000000';
-  return { algorithm: 'SHA-256' as const, challenge: sha(salt + n), salt, maxnumber, signature: 'assinatura-do-servidor' };
+  return { algorithm: 'SHA-256' as const, challenge: sha(salt + n), salt, maxnumber, signature: 'server-signature' };
 }
 
 describe('ALTCHA', () => {
-  it('acha o número por força bruta (SHA-256 de salt + n) e devolve a solução no formato do widget', async () => {
+  it('finds the number by brute force (SHA-256 of salt + n) and returns solution in widget format', async () => {
     const ch = challenge(12_345);
     let t = 100;
     const sol = await solveAltcha(ch, { now: () => (t += 7) });
@@ -20,24 +20,24 @@ describe('ALTCHA', () => {
     expect(payload).toEqual({ algorithm: 'SHA-256', challenge: ch.challenge, number: 12_345, salt: ch.salt, signature: ch.signature, took: 7 });
   });
 
-  it('acha o 0 e o próprio maxnumber; sem solução até maxnumber, undefined', async () => {
+  it('finds 0 and maxnumber itself; without solution up to maxnumber, undefined', async () => {
     expect((await solveAltcha(challenge(0, 10)))?.number).toBe(0);
     expect((await solveAltcha(challenge(10, 10)))?.number).toBe(10);
     expect(await solveAltcha(challenge(11, 10))).toBeUndefined();
   });
 
-  it('devolve a vez ao event loop entre os lotes e pode ser interrompido', async () => {
+  it('yields to event loop between batches and can be aborted', async () => {
     let ticks = 0;
     const timer = setInterval(() => ticks++, 0);
     const ac = new AbortController();
     const run = solveAltcha(challenge(40_000), { signal: ac.signal });
-    setTimeout(() => ac.abort(new Error('parou')), 1);
-    await expect(run).rejects.toThrow('parou');
+    setTimeout(() => ac.abort(new Error('stopped')), 1);
+    await expect(run).rejects.toThrow('stopped');
     clearInterval(timer);
     expect(ticks).toBeGreaterThan(0);
   });
 
-  it('valida o desafio que vem do servidor', () => {
+  it('validates challenge from server', () => {
     const ok = challenge(1);
     expect(parseAltchaChallenge(ok)).toEqual(ok);
     expect(parseAltchaChallenge({ ...ok, challenge: ok.challenge.toUpperCase() })?.challenge).toBe(ok.challenge);

@@ -1,9 +1,9 @@
-"""Operações de pixel art usadas no pós-processamento (Pillow + numpy, sem estado).
+"""Pixel art operations used in post-processing (Pillow + numpy, stateless).
 
-- chroma key com cor de fundo estimada pela moldura da imagem;
-- detecção da grade de "pixels grandes" que a IA desenhou e desampliação para a resolução nativa;
-- redução por moda (sem misturar cores) ou por área, quantização sem dithering, alfa binário;
-- contorno de 1px, remoção de pixels isolados e ampliação NEAREST.
+- chroma key with background color estimated from image frame;
+- detection of "large pixel" grid drawn by AI and downscaling to native resolution;
+- mode reduction (without mixing colors) or area reduction, quantization without dithering, binary alpha;
+- 1px outline, despeckling and NEAREST upscaling.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from PIL import Image, ImageEnhance
 
 
 # ---------------------------------------------------------------------------
-# utilidades de cor
+# color utilities
 
 
 def hex_rgb(value: str) -> tuple[int, int, int]:
@@ -24,10 +24,10 @@ def hex_rgb(value: str) -> tuple[int, int, int]:
 
 
 def magenta_mask(rgb: np.ndarray) -> np.ndarray:
-    """True onde o pixel é fundo de chroma key.
+    """True where pixel is chroma key background.
 
-    A cor de referência é a mediana da moldura da imagem (a IA nem sempre acerta o #FF00FF exato);
-    soma-se a isso qualquer tom claramente magenta (franja rosada do anti-aliasing).
+    Reference color is the median of the image frame (AI doesn't always hit exact #FF00FF);
+    any clearly magenta tone (pinkish anti-aliasing fringe) is also included.
     """
     frame = np.concatenate([rgb[:4].reshape(-1, 3), rgb[-4:].reshape(-1, 3),
                             rgb[:, :4].reshape(-1, 3), rgb[:, -4:].reshape(-1, 3)])
@@ -39,7 +39,7 @@ def magenta_mask(rgb: np.ndarray) -> np.ndarray:
 
 
 def remove_specks(fg: np.ndarray, min_area: int) -> np.ndarray:
-    """Remove ilhas pequenas de primeiro plano (sujeira que sobra do chroma key)."""
+    """Removes small foreground islands (leftover noise from chroma key)."""
     h, w = fg.shape
     seen = np.zeros_like(fg, dtype=bool)
     keep = np.zeros_like(fg, dtype=bool)
@@ -70,7 +70,7 @@ def bbox(mask: np.ndarray) -> tuple[int, int, int, int]:
 
 
 def crop_to_aspect(img: Image.Image, w: int, h: int) -> Image.Image:
-    """Corta ao centro para a proporção w:h."""
+    """Crops at center to w:h aspect ratio."""
     target = w / h
     iw, ih = img.size
     if iw / ih > target:
@@ -83,14 +83,14 @@ def crop_to_aspect(img: Image.Image, w: int, h: int) -> Image.Image:
 
 
 # ---------------------------------------------------------------------------
-# redução e paleta
+# downscaling and palette
 
 
 def build_palette(rgb: np.ndarray, mask: np.ndarray | None, colors: int, balance: float = 0.0) -> np.ndarray:
-    """Paleta (até `colors` x 3) por median cut + k-means sobre os pixels de primeiro plano.
+    """Palette (up to `colors` x 3) via median cut + k-means over foreground pixels.
 
-    `balance` > 0 reamostra os pixels com peso 1 / frequência^balance (por faixas de cor), para
-    que cores de área pequena porém importantes (verde das plantas, telas) não sumam da paleta.
+    `balance` > 0 resamples pixels with weight 1 / frequency^balance (by color bins), so
+    small but important color areas (plant green, screens) don't vanish from palette.
     """
     pixels = rgb[mask] if mask is not None else rgb.reshape(-1, 3)
     rng = np.random.default_rng(7)
@@ -114,7 +114,7 @@ def build_palette(rgb: np.ndarray, mask: np.ndarray | None, colors: int, balance
 
 
 def nearest_index(rgb: np.ndarray, palette: np.ndarray) -> np.ndarray:
-    """Índice da cor mais próxima da paleta (distância com pesos perceptuais simples)."""
+    """Index of nearest palette color (distance with simple perceptual weights)."""
     weights = np.array([0.30, 0.59, 0.11]) * 3
     flat = rgb.reshape(-1, 3).astype(np.int32)
     out = np.empty(len(flat), dtype=np.int32)
@@ -130,7 +130,7 @@ def cell_edges(size: int, cells: int) -> np.ndarray:
 
 
 def _comb_scores(rgb: np.ndarray, axis: int, periods: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Para cada período candidato: quanto um pente periódico coincide com as bordas de cor (e a fase)."""
+    """For each candidate period: how much a periodic comb matches color edges (and phase)."""
     diff = np.abs(np.diff(rgb.astype(np.int32), axis=axis)).sum(axis=2)
     signal = diff.sum(axis=0) if axis == 1 else diff.sum(axis=1)
     signal = signal / (signal.mean() + 1e-9)
@@ -148,11 +148,11 @@ def _comb_scores(rgb: np.ndarray, axis: int, periods: np.ndarray) -> tuple[np.nd
 
 
 def grid_period(rgb: np.ndarray, lo: float = 4.0, hi: float = 48.0) -> tuple[float, float, float]:
-    """Período (px) da grade de "pixels grandes" desenhada pela IA e as fases em x e y.
+    """Period (px) of "large pixel" grid drawn by AI and x/y phases.
 
-    Pixels são quadrados, então o período é um só (soma das pontuações dos dois eixos).
-    Múltiplos do período verdadeiro também pontuam alto; por isso, a partir do melhor período,
-    escolhe-se o menor divisor inteiro dele que ainda tenha >= 70% da pontuação.
+    Pixels are square, so period is unified (sum of scores from both axes).
+    Multiples of the true period also score high; thus, from the best period,
+    we pick its smallest integer divisor that still has >= 70% of the score.
     """
     periods = np.arange(lo, hi, 0.02)
     sx, phx = _comb_scores(rgb, 1, periods)
@@ -172,14 +172,14 @@ def grid_period(rgb: np.ndarray, lo: float = 4.0, hi: float = 48.0) -> tuple[flo
 
 
 def unscale(rgb: np.ndarray, mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray | None, float]:
-    """Desfaz a ampliação da pixel art gerada: amostra cada bloco da grade detectada pela moda do miolo.
+    """Undoes upscaling of generated pixel art: samples each detected grid block by core mode.
 
-    Retorna (rgb nativo, máscara nativa ou None, período horizontal).
+    Returns (native rgb, native mask or None, horizontal period).
     """
     px, phx, phy = grid_period(rgb)
     py = px
     h, w = rgb.shape[:2]
-    # bordas dos blocos: fase + k * período (+1 porque a diferença k está entre k e k+1)
+    # block edges: phase + k * period (+1 because difference k is between k and k+1)
     xs = np.unique(np.clip(np.round(np.arange(phx + 1 - px * np.ceil(phx / px), w + px, px)).astype(int), 0, w))
     ys = np.unique(np.clip(np.round(np.arange(phy + 1 - py * np.ceil(phy / py), h + py, py)).astype(int), 0, h))
     out = np.zeros((len(ys) - 1, len(xs) - 1, 3), dtype=np.uint8)
@@ -187,7 +187,7 @@ def unscale(rgb: np.ndarray, mask: np.ndarray | None = None) -> tuple[np.ndarray
     for j in range(len(ys) - 1):
         for i in range(len(xs) - 1):
             y0, y1, x0, x1 = ys[j], ys[j + 1], xs[i], xs[i + 1]
-            # miolo do bloco (evita a franja de interpolação nas bordas)
+            # block core (avoids interpolation fringe along edges)
             my, mx = max(0, (y1 - y0) // 4), max(0, (x1 - x0) // 4)
             block = rgb[y0 + my:y1 - my or None, x0 + mx:x1 - mx or None].reshape(-1, 3)
             if block.size == 0:
@@ -208,10 +208,10 @@ def unscale(rgb: np.ndarray, mask: np.ndarray | None = None) -> tuple[np.ndarray
 
 def downscale_mode(rgb: np.ndarray, mask: np.ndarray, w: int, h: int, palette: np.ndarray,
                    dark_bias: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
-    """Redução por moda: cada célula recebe a cor de paleta mais frequente (sem misturar cores).
+    """Downscaling by mode: each cell gets the most frequent palette color (without mixing colors).
 
-    `dark_bias` > 0 favorece tons escuros (preserva contornos finos que ocupam pouco da célula).
-    Retorna (rgb w x h, alfa binário).
+    `dark_bias` > 0 favors dark tones (preserves thin outlines occupying little of the cell).
+    Returns (rgb w x h, binary alpha).
     """
     idx = nearest_index(rgb, palette)
     lum = palette @ np.array([0.30, 0.59, 0.11])
@@ -233,7 +233,7 @@ def downscale_mode(rgb: np.ndarray, mask: np.ndarray, w: int, h: int, palette: n
 
 
 def downscale_box(rgb: np.ndarray, mask: np.ndarray, w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
-    """Redução por área (média), ponderada pela máscara para não puxar a cor do fundo."""
+    """Area downscaling (average), weighted by mask to avoid pulling background color."""
     m = mask.astype(np.float64)
     weighted = rgb.astype(np.float64) * m[..., None]
     xs, ys = cell_edges(rgb.shape[1], w), cell_edges(rgb.shape[0], h)
@@ -252,7 +252,7 @@ def downscale_box(rgb: np.ndarray, mask: np.ndarray, w: int, h: int) -> tuple[np
 
 
 def quantize(rgb: np.ndarray, alpha: np.ndarray, colors: int, balance: float = 0.0) -> np.ndarray:
-    """Quantiza para no máximo `colors` cores (sem dithering), considerando só pixels opacos."""
+    """Quantizes to at most `colors` colors (without dithering), considering only opaque pixels."""
     if alpha.sum() == 0:
         return rgb
     palette = build_palette(rgb, alpha, colors, balance)
@@ -260,10 +260,10 @@ def quantize(rgb: np.ndarray, alpha: np.ndarray, colors: int, balance: float = 0
 
 
 def merge_similar(rgb: np.ndarray, alpha: np.ndarray, min_dist: float) -> np.ndarray:
-    """Funde cores quase iguais (distância RGB < `min_dist`) na mais frequente delas.
+    """Merges nearly identical colors (RGB distance < `min_dist`) into the most frequent one.
 
-    O k-means às vezes divide uma área chapada (o contorno, a sombra da fachada) em dois tons
-    indistinguíveis, que só viram ruído na pixel art; esta etapa devolve um tom por material.
+    k-means sometimes splits a flat area (outline, facade shadow) into two indistinguishable
+    shades, which turn into noise in pixel art; this step restores one shade per material.
     """
     if alpha.sum() == 0:
         return rgb
@@ -291,7 +291,7 @@ def enhance(rgb: np.ndarray, saturation: float, contrast: float) -> np.ndarray:
 
 
 def add_outline(rgba: np.ndarray, color: str) -> np.ndarray:
-    """Contorno externo de 1px (vizinhança 4) em volta dos pixels opacos."""
+    """1px external outline (4-neighborhood) around opaque pixels."""
     a = rgba[..., 3] > 0
     grown = a.copy()
     grown[1:, :] |= a[:-1, :]
@@ -317,7 +317,7 @@ def upscale(img: Image.Image, factor: int) -> Image.Image:
 
 
 def despeckle(rgb: np.ndarray, passes: int = 1) -> np.ndarray:
-    """Troca pixels isolados (os 4 vizinhos têm todos a mesma outra cor) pela cor da vizinhança."""
+    """Replaces isolated pixels (all 4 neighbors share another color) with neighbor color."""
     out = rgb.copy()
     for _ in range(passes):
         c = out[1:-1, 1:-1]
@@ -329,6 +329,6 @@ def despeckle(rgb: np.ndarray, passes: int = 1) -> np.ndarray:
 
 
 def crop_rgba(img: Image.Image) -> Image.Image:
-    """Recorta a imagem RGBA ao retângulo dos pixels opacos."""
+    """Crops RGBA image to bounding box of opaque pixels."""
     box = img.getbbox()
     return img.crop(box) if box else img

@@ -1,7 +1,7 @@
-// A projeção (shared/world/projection.ts) é o único lugar que monta o pacote do prédio. Estes testes são a garantia
-// da lista fechada de docs/world/privacidade.md: chaves só as do schema.json, nenhum texto do escritório no pacote
-// (canários), nada de número que pareça horário, demonstração de fora, nomes do pool, aparência sem a semente,
-// parentId traduzido, limites e as opções do jogador.
+// The projection (shared/world/projection.ts) is the only place building the payload for the building. These tests ensure
+// the allowlist in docs/world/privacidade.md: keys only from schema.json, no office text in payload
+// (canaries), no numbers resembling timestamps, demo excluded, pool names, appearance without seed,
+// translated parentId, limits, and player options.
 import { describe, expect, it } from 'vitest';
 import { PART_KEYS } from '../appearance';
 import { hash32, mulberry32 } from '../hash';
@@ -18,7 +18,7 @@ const validate = compileValidator(schema);
 const ALLOWED = schemaKeyPaths(schema);
 const NOW = 1_760_000_000_000;
 
-/** Ids do mundo de mentira: aleatórios de um PRNG com semente (reprodutíveis), guardados por chave. */
+/** Fake world ids: random from a seeded PRNG (reproducible), stored by key. */
 class FakeIds implements WorldIdSource {
   readonly floors = new Map<string, string>();
   readonly agents = new Map<string, string>();
@@ -56,7 +56,7 @@ function agent(id: string, roomId: string, extra: Partial<AgentInfo> = {}): Agen
     roomId,
     name: 'Marina',
     look: 'f',
-    role: 'Agente principal',
+    role: 'Main agent',
     sessionId: `sess-${id}`,
     account: '.claude',
     status: 'working',
@@ -77,7 +77,7 @@ function input(rooms: RoomInfo[], agents: AgentInfo[], extra: Partial<Projection
 
 const agentsOf = (u: WorldUplink) => u.floors.flatMap((f) => f.agents);
 
-/** Todos os números do JSON (para conferir que nada parece horário nem vaza contadores). */
+/** All numbers in JSON (to ensure nothing looks like a timestamp or leaks counters). */
 function numbersIn(v: unknown, out: number[] = []): number[] {
   if (typeof v === 'number') out.push(v);
   else if (Array.isArray(v)) for (const x of v) numbersIn(x, out);
@@ -86,7 +86,7 @@ function numbersIn(v: unknown, out: number[] = []): number[] {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// O escritório cheio de canários
+// Office full of canaries
 // ---------------------------------------------------------------------------------------------------------------
 
 const CANARY_ROOM = '/Users/canario-usuario/projetos/CANARIO-PROJETO-SECRETO';
@@ -147,7 +147,7 @@ function canaryOffice(): { rooms: RoomInfo[]; agents: AgentInfo[] } {
   return { rooms, agents };
 }
 
-describe('projeção: lista fechada', () => {
+describe('projection: allowlist', () => {
   const { rooms, agents } = canaryOffice();
   const ids = new FakeIds();
   const u = project(
@@ -157,29 +157,29 @@ describe('projeção: lista fechada', () => {
   );
   const json = JSON.stringify(u);
 
-  it('o pacote passa no schema.json e tem o que o escritório tem', () => {
+  it('payload passes schema.json and matches office contents', () => {
     expect(validate(u)).toEqual([]);
     expect(u.floors).toHaveLength(2);
     expect(agentsOf(u)).toHaveLength(3);
-    // Todas as chaves opcionais aparecem aqui (tokens, parentId, compacted), para o teste de chaves valer por inteiro.
+    // All optional keys appear here (tokens, parentId, compacted), so the key test is fully comprehensive.
     expect(json).toContain('"tokens"');
     expect(json).toContain('"parentId"');
     expect(json).toContain('"compacted"');
   });
 
-  it('teste de chaves: toda chave, em qualquer nível, está na lista fechada tirada do schema.json', () => {
+  it('key test: every key, at any level, is in the schema.json allowlist', () => {
     for (const path of jsonKeyPaths(u)) expect(ALLOWED, path).toContain(path);
     expect(ALLOWED.size).toBe(32);
   });
 
-  it('teste de canários: nenhum texto do escritório aparece no JSON', () => {
+  it('canary test: no office text appears in JSON', () => {
     expect(json.toLowerCase()).not.toContain('canario');
-    for (const s of [CANARY_ROOM, CANARY_ROOM_2, MAIN_ID, SUB_ID, CODEX_ID, '@exemplo.com', 'Silva', 'Bash', 'opus', 'feat/', '/Users', '/home', '.claude', '.codex', 'sess-', 'Agente principal']) {
+    for (const s of [CANARY_ROOM, CANARY_ROOM_2, MAIN_ID, SUB_ID, CODEX_ID, '@exemplo.com', 'Silva', 'Bash', 'opus', 'feat/', '/Users', '/home', '.claude', '.codex', 'sess-', 'Main agent']) {
       expect(json, s).not.toContain(s);
     }
   });
 
-  it('nenhum número além de v, tasksDone e tokens; nada que pareça horário (1e12 a 2e12)', () => {
+  it('no numbers other than v, tasksDone, and tokens; nothing resembling a timestamp (1e12 to 2e12)', () => {
     const nums = numbersIn(u);
     for (const n of nums) expect(n < 1e12 || n > 2e12, String(n)).toBe(true);
     const allowed = new Set([1, 0, 2, 3, u.tokens!.day, u.tokens!.week]);
@@ -188,15 +188,15 @@ describe('projeção: lista fechada', () => {
     expect(json).not.toContain(String(SECRET_NUMBERS.seed));
   });
 
-  it('ids só do mundo, nunca do escritório', () => {
+  it('world ids only, never office ids', () => {
     for (const f of u.floors) expect(f.id).toMatch(/^f_[0-9a-f]{10}$/);
     for (const a of agentsOf(u)) expect(a.id).toMatch(/^a_[0-9a-f]{8}$/);
     expect(u.floors.map((f) => f.id).sort()).toEqual([ids.floors.get(CANARY_ROOM), ids.floors.get(CANARY_ROOM_2)].sort());
   });
 });
 
-describe('projeção: regras', () => {
-  it('demonstração nunca entra (nem pede id do mundo)', () => {
+describe('projection: rules', () => {
+  it('demo never enters (nor requests world id)', () => {
     const ids = new FakeIds();
     const rooms = [room('/p/real'), room('demo:/sala-demo')];
     const agents = [
@@ -209,11 +209,11 @@ describe('projeção: regras', () => {
     expect(u.floors).toHaveLength(1);
     expect(agentsOf(u)).toHaveLength(1);
     expect(ids.calls.some((c) => c.startsWith('demo:') || c === 'acc:2')).toBe(false);
-    // Só demonstração: prédio sem andares.
+    // Demo only: building without floors.
     expect(project(input([room('demo:/x')], [agent('demo:a', 'demo:/x')]), new FakeIds(), NOW).floors).toEqual([]);
   });
 
-  it('só agentes presentes: done e offline somem, e a sala sem ninguém presente não vira andar', () => {
+  it('present agents only: done and offline disappear, and rooms with no present agents do not become floors', () => {
     const rooms = [room('/p/a'), room('/p/b'), room('/p/vazia')];
     const agents = [
       agent('m1', '/p/a', { status: 'working' }),
@@ -228,7 +228,7 @@ describe('projeção: regras', () => {
     expect(agentsOf(u).map((a) => a.status).sort()).toEqual(['idle', 'shell', 'waiting', 'working']);
   });
 
-  it('ordem pelo id do mundo, não pela chegada; principais antes dos subagentes', () => {
+  it('ordered by world id, not arrival order; main agents before subagents', () => {
     const rooms = Array.from({ length: 6 }, (_, i) => room(`/p/${i}`));
     const agents = rooms.flatMap((r, i) => [agent(`m${i}`, r.id), agent(`s${i}`, r.id, { kind: 'sub', parentId: `m${i}` }), agent(`n${i}`, r.id)]);
     const u = project(input(rooms, agents), new FakeIds(), NOW);
@@ -241,7 +241,7 @@ describe('projeção: regras', () => {
     }
   });
 
-  it('nome sempre do pool, do mesmo look, sem repetir, e independente do nome do escritório', () => {
+  it('name always from pool, same look, unique, and independent of office name', () => {
     const rooms = [room('/p/a')];
     const agents = Array.from({ length: 40 }, (_, i) => agent(`m${i}`, '/p/a', { name: i % 2 ? 'Fulano de Tal' : 'Ana', look: i % 3 ? 'f' : 'm' }));
     const ids = new FakeIds();
@@ -252,12 +252,12 @@ describe('projeção: regras', () => {
       expect(isPoolName(a.name), a.name).toBe(true);
       expect(LOOK_OF.get(a.name), a.name).toBe(a.look);
     }
-    // Trocar o nome (editado) no escritório não muda nada no mundo.
+    // Changing (edited) name in office does not affect world.
     const renamed = agents.map((a) => ({ ...a, name: 'Nome Real Da Pessoa', custom: true as const }));
     expect(project(input(rooms, renamed), ids, NOW)).toEqual(u);
   });
 
-  it('pool esgotado: sufixo numérico, ainda do pool', () => {
+  it('exhausted pool: numeric suffix, still from pool', () => {
     const agents = Array.from({ length: 64 }, (_, i) => agent(`m${i}`, '/p/a', { look: 'm' }));
     const u = project(input([room('/p/a')], agents), new FakeIds(), NOW);
     const names = agentsOf(u).map((a) => a.name);
@@ -267,7 +267,7 @@ describe('projeção: regras', () => {
     expect(validate(u)).toEqual([]);
   });
 
-  it('o nome fica enquanto o id do mundo não troca, mesmo com outro agente saindo', () => {
+  it('name is retained while world id does not change, even if another agent leaves', () => {
     const rooms = [room('/p/a')];
     const agents = Array.from({ length: 30 }, (_, i) => agent(`m${i}`, '/p/a', { look: 'f' }));
     const ids = new FakeIds();
@@ -275,12 +275,12 @@ describe('projeção: regras', () => {
     const previous = new Map(agentsOf(first).map((a) => [a.id, a.name]));
     const second = project(input(rooms, agents.slice(5), { previousNames: previous }), ids, NOW);
     for (const a of agentsOf(second)) expect(a.name).toBe(previous.get(a.id));
-    // Nome anterior fora do pool (ou de outro look) não é aceito.
+    // Previous name outside pool (or of different look) is not accepted.
     const bad = new Map([[agentsOf(first)[0].id, 'Nome Inventado']]);
     expect(agentsOf(project(input(rooms, agents, { previousNames: bad }), ids, NOW))[0].name).not.toBe('Nome Inventado');
   });
 
-  it('aparência: sorteada do id do mundo (nunca da semente) com as peças do editor por cima', () => {
+  it('appearance: drawn from world id (never seed) with editor parts on top', () => {
     const ids = new FakeIds();
     const a = agent('m1', '/p/a', { seed: 111, look: 'm' });
     const u1 = project(input([room('/p/a')], [a]), ids, NOW);
@@ -293,7 +293,7 @@ describe('projeção: regras', () => {
     expect(agentsOf(edited)[0].parts).toEqual({ ...flattenAppearance(hash32(wid), undefined, 'm'), skin: '#5a3623', topStyle: 'polo' });
   });
 
-  it('parentId vira o id do mundo do pai; subagente sem o pai no pacote vai sem parentId', () => {
+  it('parentId becomes parent world id; subagent without parent in payload drops parentId', () => {
     const ids = new FakeIds();
     const rooms = [room('/p/a')];
     const agents = [
@@ -317,12 +317,12 @@ describe('projeção: regras', () => {
     expect(validate(u)).toEqual([]);
   });
 
-  it('provider ausente é claude; codex continua codex', () => {
+  it('absent provider is claude; codex remains codex', () => {
     const u = project(input([room('/p/a')], [agent('m1', '/p/a'), agent('m2', '/p/a', { provider: 'codex' })]), new FakeIds(), NOW);
     expect(agentsOf(u).map((a) => a.provider).sort()).toEqual(['claude', 'codex']);
   });
 
-  it('tokens só com tokensVisible, arredondados a 2 algarismos', () => {
+  it('tokens only with tokensVisible, rounded to 2 significant digits', () => {
     const base = input([room('/p/a')], [agent('m1', '/p/a')], { tokens: { day: 1_234_567, week: 98_765_432.7 } });
     expect(project(base, new FakeIds(), NOW).tokens).toEqual({ day: 1_200_000, week: 99_000_000 });
     expect(project({ ...base, options: { ...base.options, tokensVisible: false } }, new FakeIds(), NOW).tokens).toBeUndefined();
@@ -330,7 +330,7 @@ describe('projeção: regras', () => {
     expect([0, -5, NaN, 7, 99, 100, 149, 150, 12_345, 850_123, 1e16].map(roundTokens)).toEqual([0, 0, 0, 7, 99, 100, 150, 150, 12_000, 850_000, 1e15]);
   });
 
-  it('compacted só com o opt-in e só para quem compactou', () => {
+  it('compacted only with opt-in and only for compacted agents', () => {
     const agents = [agent('m1', '/p/a'), agent('m2', '/p/a')];
     const ids = new FakeIds();
     const on = project(input([room('/p/a')], agents, { options: { compactions: true, tokensVisible: true }, compacted: new Set(['m1']) }), ids, NOW);
@@ -340,7 +340,7 @@ describe('projeção: regras', () => {
     expect(JSON.stringify(off)).not.toContain('compacted');
   });
 
-  it('tasksDone: faixa das concluídas no dia (a contagem do chamador vale sobre a lista)', () => {
+  it('tasksDone: band of tasks completed today (caller count takes precedence over list)', () => {
     expect([0, 1, 2, 3, 5, 6, 40, -1, NaN].map(tasksBand)).toEqual([0, 1, 1, 2, 2, 3, 3, 0, 0]);
     const done = (n: number) => Array.from({ length: n }, (_, i) => ({ id: String(i), title: 'x', status: 'completed' as const }));
     const agents = [agent('m1', '/p/a', { tasks: done(4) }), agent('m2', '/p/a', { tasks: done(1) })];
@@ -351,14 +351,14 @@ describe('projeção: regras', () => {
     expect(by.get(ids.agents.get('m2')!)).toBe(3);
   });
 
-  it('tema e versão como vieram', () => {
+  it('theme and version passed through as-is', () => {
     const u = project(input([], [], { theme: 'halloween', version: '1.2.3' }), new FakeIds(), NOW);
     expect(u).toEqual({ v: 1, version: '1.2.3', theme: 'halloween', floors: [] });
   });
 });
 
-describe('projeção: limites', () => {
-  it('64 andares no máximo; o resto fica de fora e é avisado', () => {
+describe('projection: limits', () => {
+  it('at most 64 floors; the rest is excluded and reported', () => {
     const rooms = Array.from({ length: 70 }, (_, i) => room(`/p/${i}`));
     const r = projectWithReport(input(rooms, rooms.map((x, i) => agent(`m${i}`, x.id))), new FakeIds(), NOW);
     expect(r.uplink.floors).toHaveLength(UPLINK_LIMITS.floors);
@@ -366,7 +366,7 @@ describe('projeção: limites', () => {
     expect(validate(r.uplink)).toEqual([]);
   });
 
-  it('64 agentes por andar; principais ficam, subagentes saem primeiro', () => {
+  it('64 agents per floor; main agents remain, subagents pruned first', () => {
     const agents = [
       ...Array.from({ length: 50 }, (_, i) => agent(`m${i}`, '/p/a')),
       ...Array.from({ length: 30 }, (_, i) => agent(`s${i}`, '/p/a', { kind: 'sub', parentId: `m${i}` })),
@@ -378,7 +378,7 @@ describe('projeção: limites', () => {
     expect(r.truncated).toEqual({ floors: 0, agents: 16 });
   });
 
-  it('256 agentes no total e 64 KB: corta, continua válido e nenhum subagente aponta para fora do pacote', () => {
+  it('256 agents total and 64 KB: truncated, remains valid, and no subagent points outside payload', () => {
     const rooms = Array.from({ length: 10 }, (_, i) => room(`/p/${i}`));
     const agents = rooms.flatMap((r, i) => [
       ...Array.from({ length: 15 }, (_, j) => agent(`m${i}-${j}`, r.id, { look: j % 2 ? 'f' : 'm' })),
@@ -396,7 +396,7 @@ describe('projeção: limites', () => {
     for (const f of r.uplink.floors) expect(f.agents.length).toBeGreaterThan(0);
   });
 
-  it('um escritório comum (3 projetos, 5 agentes) cabe em uns 2 KB e não é cortado', () => {
+  it('a typical office (3 projects, 5 agents) fits in ~2 KB and is not truncated', () => {
     const rooms = [room('/p/a'), room('/p/b'), room('/p/c')];
     const agents = [agent('m1', '/p/a'), agent('s1', '/p/a', { kind: 'sub', parentId: 'm1' }), agent('m2', '/p/b'), agent('m3', '/p/c'), agent('m4', '/p/c')];
     const r = projectWithReport(input(rooms, agents, { tokens: { day: 850_000, week: 12_000_000 } }), new FakeIds(), NOW);

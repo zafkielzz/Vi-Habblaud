@@ -1,15 +1,15 @@
-// Migração do nome antigo do projeto (CodeTown, até a 0.3.2) para Habblaud. O que ainda precisa conhecer o
-// nome antigo fica aqui, para sair de uma vez quando ninguém mais vier de uma instalação da 0.3.
+// Migration from the project's old name (CodeTown, up to 0.3.2) to Habblaud. What still needs to know the
+// old name stays here, to be removed at once when nobody comes from a 0.3 installation anymore.
 import { existsSync, readdirSync, renameSync, rmdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tr } from '../shared/i18n';
 
-/** Nome antigo em minúsculas: pasta de estado, plugins, marketplace, projeto e volume do Docker. */
+/** Old name in lowercase: state folder, plugins, marketplace, project, and Docker volume. */
 export const LEGACY_NAME = 'codetown';
 const LEGACY_ENV_PREFIX = 'CODETOWN_';
 const ENV_PREFIX = 'HABBLAUD_';
 
-/** Variáveis do nome antigo (CODETOWN_*) presentes em `keys`, com o nome novo de cada uma. */
+/** Old name variables (CODETOWN_*) present in `keys`, with the new name for each. */
 export function legacyEnvVars(keys: Iterable<string>): Array<{ from: string; to: string }> {
   const out: Array<{ from: string; to: string }> = [];
   for (const k of keys) {
@@ -18,11 +18,11 @@ export function legacyEnvVars(keys: Iterable<string>): Array<{ from: string; to:
   return out.sort((a, b) => a.from.localeCompare(b.from));
 }
 
-/** Aviso para as variáveis antigas (que não valem mais), ou undefined se não houver nenhuma. */
-export function legacyEnvWarning(keys: Iterable<string>, where = tr('no ambiente')): string | undefined {
+/** Warning for old variables (no longer valid), or undefined if none found. */
+export function legacyEnvWarning(keys: Iterable<string>, where = tr('in the environment')): string | undefined {
   const vars = legacyEnvVars(keys);
   if (!vars.length) return undefined;
-  return tr('{0} {1}: {2}. Renomeie para valer de novo.', [vars.length === 1 ? tr('variável do nome antigo ignorada') : tr('variáveis do nome antigo ignoradas'), where, vars.map((v) => `${v.from} → ${v.to}`).join(', ')]);
+  return tr('{0} {1}: {2}. Rename to re-enable.', [vars.length === 1 ? tr('old-name variable ignored') : tr('old-name variables ignored'), where, vars.map((v) => `${v.from} → ${v.to}`).join(', ')]);
 }
 
 const isDir = (p: string) => {
@@ -40,7 +40,7 @@ const isFile = (p: string) => {
   }
 };
 
-/** Move de `from` para `to` o que falta lá (pastas em comum são mescladas); em arquivos dos dois lados, vence o mais recente. */
+/** Moves from `from` to `to` what is missing there (shared folders are merged); for files on both sides, the newer wins. */
 function mergeInto(from: string, to: string, moved: string[], rel: string): void {
   for (const name of readdirSync(from)) {
     const src = join(from, name);
@@ -51,7 +51,7 @@ function mergeInto(from: string, to: string, moved: string[], rel: string): void
       moved.push(relName);
     } else if (isDir(src) && isDir(dst)) mergeInto(src, dst, moved, relName);
     else if (isFile(src) && isFile(dst) && statSync(src).mtimeMs > statSync(dst).mtimeMs) {
-      // Ex.: o mod antigo seguiu gravando o uso em ~/.codetown depois de a pasta nova existir.
+      // E.g.: old mod kept writing usage to ~/.codetown after the new folder existed.
       renameSync(src, dst);
       moved.push(relName);
     }
@@ -59,14 +59,14 @@ function mergeInto(from: string, to: string, moved: string[], rel: string): void
   try {
     rmdirSync(from);
   } catch {
-    // sobrou algo que já existia no destino: a pasta antiga fica, com só esses itens
+    // something remained that already existed in destination: old folder stays, with only those items
   }
 }
 
 /**
- * Leva o estado de ~/.codetown para ~/.habblaud (uso capturado pelo mod/tap e, fora do Docker, nomes, linha do
- * tempo e estatísticas). Sem a pasta nova, é um rename; se ela já existe (o mod gravou o uso antes), move o que
- * falta lá e o que for mais recente. Devolve o que foi movido (vazio = nada a fazer) e nunca lança.
+ * Moves state from ~/.codetown to ~/.habblaud (usage captured by mod/tap and, outside Docker, names, timeline,
+ * and statistics). Without the new folder, it's a rename; if it already exists (mod wrote usage beforehand), moves
+ * what is missing there and what is newer. Returns what was moved (empty = nothing to do) and never throws.
  */
 export function migrateLegacyStateDir(home: string): { moved: string[]; error?: string } {
   const from = join(home, `.${LEGACY_NAME}`);
@@ -78,16 +78,16 @@ export function migrateLegacyStateDir(home: string): { moved: string[]; error?: 
       renameSync(from, to);
       moved.push('.');
     } else if (isDir(to)) mergeInto(from, to, moved, '');
-    else return { moved, error: tr('{0} existe e não é uma pasta', [to]) };
+    else return { moved, error: tr("{0} exists and isn't a folder", [to]) };
     return { moved };
   } catch (err) {
     return { moved, error: (err as Error).message };
   }
 }
 
-/** Frase curta para o log de quem migrou (undefined se nada mudou). */
+/** Short sentence for the migration log (undefined if nothing changed). */
 export function describeStateMigration(r: { moved: string[]; error?: string }): string | undefined {
-  if (r.error) return tr('não consegui levar ~/.{0} para ~/.habblaud ({1}); mova a pasta à mão.', [LEGACY_NAME, r.error]);
+  if (r.error) return tr("couldn't move ~/.{0} to ~/.habblaud ({1}); move the folder by hand.", [LEGACY_NAME, r.error]);
   if (!r.moved.length) return undefined;
-  return r.moved[0] === '.' ? tr('~/.{0} (nome antigo) agora é ~/.habblaud.', [LEGACY_NAME]) : tr('de ~/.{0} (nome antigo) para ~/.habblaud: {1}.', [LEGACY_NAME, r.moved.join(', ')]);
+  return r.moved[0] === '.' ? tr('~/.{0} (old name) is now ~/.habblaud.', [LEGACY_NAME]) : tr('from ~/.{0} (old name) to ~/.habblaud: {1}.', [LEGACY_NAME, r.moved.join(', ')]);
 }

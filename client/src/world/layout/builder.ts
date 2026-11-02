@@ -1,16 +1,16 @@
-// Construtor de áreas em coordenadas LOCAIS (tiles relativos ao canto da área).
-// Converte tudo para coordenadas absolutas e registra spots de forma consistente.
+// Area builder in LOCAL coordinates (tiles relative to area corner).
+// Converts everything to absolute coordinates and registers spots consistently.
 import { FURNITURE, type Dir, type FloorKind, type FurnitureKind, type WallStyle } from '../../art/api';
 import { FOOT_DX, FOOT_DY, TILE } from '../constants';
 import type { AreaKind, AreaLayout, Doorway, FurniturePlacement, SpotDef, SpotKind, TileRect } from './types';
 
-/** Pés de quem está sentado: px acima da base do assento. */
+/** Seated character feet: px above seat base. */
 export const SEAT_FOOT_DY = 3;
-/** Profundidade extra de quem está sentado (logo depois do assento, antes do encosto). */
+/** Extra depth for seated characters (right after the seat, before the backrest). */
 export const SEATED_SORT_BIAS = 0.25;
 
 export interface SpotOpts {
-  /** Deslocamento da posição final (px). */
+  /** Final position offset (px). */
   dx?: number;
   dy?: number;
   seated?: boolean;
@@ -20,7 +20,7 @@ export interface SpotOpts {
   deskId?: string;
   rank?: number;
   side?: 'S' | 'N';
-  /** Posição final absoluta em px (substitui o cálculo pelo tile). */
+  /** Absolute final position in px (overrides calculation from tile). */
   x?: number;
   y?: number;
 }
@@ -41,7 +41,7 @@ export class AreaBuilder {
     return this.area.rect.y;
   }
 
-  /** px absoluto de uma coordenada local em tiles (aceita frações). */
+  /** Absolute px of a local tile coordinate (accepts fractions). */
   px(lx: number): number {
     return (this.x0 + lx) * TILE;
   }
@@ -60,7 +60,7 @@ export class AreaBuilder {
     return this;
   }
 
-  /** Face da parede norte (2 tiles) entre lx e lx+w (tiles locais, aceita frações). */
+  /** North wall face (2 tiles) between lx and lx+w (local tiles, accepts fractions). */
   face(lx: number, w: number, style: WallStyle, doorways: { lx: number; w: number }[] = [], ly = 0): this {
     this.area.walls.push({ kind: 'face', x: this.px(lx), y: this.py(ly), w: w * TILE, style, doorways: this.doors(doorways) });
     return this;
@@ -80,7 +80,7 @@ export class AreaBuilder {
     return list.length ? list.map((d) => ({ x: this.px(d.lx), w: d.w * TILE })) : undefined;
   }
 
-  /** Item de parede centrado em `lcx` (tiles locais). `ly` = linha local do rodapé (default 2 = base da face norte). */
+  /** Wall item centered on `lcx` (local tiles). `ly` = local baseboard row (default 2 = base of north face). */
   wall(kind: FurnitureKind, lcx: number, variant?: string, opts: { ly?: number; on?: 'face' | 'south'; order?: number } = {}): string {
     const id = `${this.area.id}#w${this.seq++}:${kind}`;
     this.area.wallItems.push({
@@ -95,7 +95,7 @@ export class AreaBuilder {
     return id;
   }
 
-  /** Móvel de chão com o canto superior esquerdo do footprint em (lx, ly). */
+  /** Floor furniture with footprint top-left corner at (lx, ly). */
   furn(kind: FurnitureKind, lx: number, ly: number, variant?: string, opts: { dx?: number; dy?: number; order?: number; seat?: string } = {}): string {
     const id = `${this.area.id}#f${this.seq++}:${kind}`;
     const f: FurniturePlacement = {
@@ -113,7 +113,7 @@ export class AreaBuilder {
     return id;
   }
 
-  /** Spot com aproximação no tile local (lx, ly). Posição final padrão = pés no tile. */
+  /** Spot with approach at local tile (lx, ly). Default final position = feet on tile. */
   spot(kind: SpotKind, lx: number, ly: number, dir: Dir, opts: SpotOpts = {}): SpotDef {
     const tx = this.x0 + lx;
     const ty = this.y0 + ly;
@@ -139,8 +139,8 @@ export class AreaBuilder {
   }
 
   /**
-   * Assento (cadeira, banqueta, poltrona...) no tile local (lx, ly). O personagem se aproxima
-   * pelo próprio tile do assento e encaixa na posição do assento (com `dx` opcional em px).
+   * Seat (chair, stool, armchair...) at local tile (lx, ly). Character approaches
+   * via the seat tile itself and snaps into seating position (with optional `dx` in px).
    */
   seat(kind: SpotKind, furnitureKind: FurnitureKind, lx: number, ly: number, dir: Dir, variant?: string, opts: SpotOpts & { order?: number; noFurniture?: boolean } = {}): SpotDef {
     const furnitureId = opts.noFurniture ? opts.furnitureId : this.furn(furnitureKind, lx, ly, variant, { dx: opts.dx, order: opts.order });
@@ -170,13 +170,13 @@ export class AreaBuilder {
   }
 }
 
-/** Tiles bloqueados por um móvel de chão. */
+/** Tiles blocked by floor furniture. */
 export function furnitureBlocks(kind: FurnitureKind): boolean {
   const def = FURNITURE[kind];
   return def.mount === 'floor' && def.blocks;
 }
 
-/** Tiles de assento (caminháveis, mas evitados pelo A*). */
+/** Seat tiles (walkable, but avoided by A*). */
 export function furnitureIsSeat(kind: FurnitureKind): boolean {
   const def = FURNITURE[kind];
   return def.mount === 'floor' && !!def.seat;

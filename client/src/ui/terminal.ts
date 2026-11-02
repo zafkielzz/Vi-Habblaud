@@ -1,13 +1,13 @@
-// Terminal: janela flutuante sobre o escritório com a conversa de uma sessão (prompts, respostas, ferramentas e
-// resultados) no formato em que o Claude Code a mostra, ao vivo pelo stream SSE GET /api/agents/:id/terminal (`init`
-// substitui tudo; `append` acrescenta). O rodapé tem a caixa de mensagem (ui/composer.ts): com o plugin
-// habblaud-mensagens, o que você digita ali entra na sessão do agente principal como se fosse digitado no terminal.
-// Também mostra as sessões do histórico (ui/history.ts), pelo mesmo protocolo em
-// GET /api/sessions/:conta/:sessionId/terminal: o cabeçalho traz projeto, título e data, e o rodapé, "Sessão encerrada às …".
-// Busca (Ctrl/⌘+F ou a lupa), filtro e o botão de copiar de cada entrada vêm de ui/termtools.ts.
-// O modelo (deduplicação, junção ferramenta -> resultado, limite de entradas, prévias recolhidas e rodapé) é puro e
-// testado em ui/terminal.test.ts; a montagem usa só textContent (o markdown das respostas vem de ui/markdown.ts).
-// Sessão do Codex: selo "Codex" no cabeçalho e um spinner neutro no rodapé (o ✻ é do Claude Code).
+// Terminal: floating window over the office with a session's conversation (prompts, replies, tools, and
+// results) formatted as Claude Code displays it, live via SSE stream GET /api/agents/:id/terminal (`init`
+// replaces all; `append` appends). The footer contains the composer (ui/composer.ts): with the
+// habblaud-mensagens plugin, what you type there enters the main agent's session as if typed in the terminal.
+// Also shows history sessions (ui/history.ts), using the same protocol at
+// GET /api/sessions/:conta/:sessionId/terminal: header displays project, title, and date; footer, "Session ended at …".
+// Search (Ctrl/⌘+F or magnifying glass), filter, and copy button for each entry come from ui/termtools.ts.
+// The model (deduplication, tool -> result join, entry limit, collapsed previews, and footer) is pure and
+// tested in ui/terminal.test.ts; DOM building uses textContent only (reply markdown comes from ui/markdown.ts).
+// Codex session: "Codex" badge in header and a neutral spinner in footer (✻ is Claude Code's).
 import type { AgentInfo, Provider, RecentSession, TerminalEntry, TerminalInit } from '../../../shared/types';
 import { MessageComposer } from './composer';
 import type { UiComponent, UiContext } from './context';
@@ -38,56 +38,56 @@ import {
 import { createAccountChip, createProviderTag, updateAccountChip, updateProviderTag } from './widgets';
 import { intlLocale, tr } from '../../../shared/i18n';
 
-/** Máximo de itens no DOM: os mais antigos saem primeiro. */
+/** Maximum items in DOM: oldest are dropped first. */
 export const TERMINAL_DOM_LIMIT = 1500;
-/** Linhas do resultado visíveis antes do "… +N linhas". */
+/** Visible result lines before "… +N lines". */
 export const RESULT_PREVIEW_LINES = 6;
-/** Entrada de ferramenta (comando, diff, JSON) longa: recolhida nas primeiras linhas. */
+/** Long tool input (command, diff, JSON): collapsed to first few lines. */
 export const INPUT_PREVIEW_LINES = 10;
-/** Prompt do usuário muito longo (texto colado): recolhido. */
+/** Very long user prompt (pasted text): collapsed. */
 export const PROMPT_PREVIEW_LINES = 24;
 
-export const TERMINAL_UNAVAILABLE_HINT = tr('O terminal só fica disponível quando o Habblaud roda com acesso local (bind 127.0.0.1)');
-const OPEN_ERROR = tr('Não foi possível abrir o terminal. O recurso só funciona no acesso local, com o agente ainda aberto.');
-const SESSION_OPEN_ERROR = tr('Não foi possível abrir a sessão. O histórico só funciona no acesso local, com o transcript ainda no disco.');
-/** Espera depois da última tecla antes de buscar (a busca percorre toda a conversa na tela). */
+export const TERMINAL_UNAVAILABLE_HINT = tr('The terminal is only available when Habblaud runs with local access (bind 127.0.0.1)');
+const OPEN_ERROR = tr("Couldn't open the terminal. This only works with local access, while the agent is still open.");
+const SESSION_OPEN_ERROR = tr("Couldn't open the session. History only works with local access, while the transcript is still on disk.");
+/** Debounce after last keystroke before searching (search walks the full onscreen conversation). */
 const SEARCH_DEBOUNCE_MS = 120;
-/** "Copiado" fica à mostra por este tempo. */
+/** "Copied" remains visible for this duration. */
 const COPIED_MS = 1_500;
 const dayFmt = new Intl.DateTimeFormat(intlLocale(), { day: '2-digit', month: 'short' });
 
-/** Distância do fim (px) que ainda conta como "no fim" para seguir as mensagens novas. */
+/** Distance from bottom (px) that still counts as "at bottom" to follow new messages. */
 const STICK_PX = 32;
-/** EventSource.CLOSED (constante literal, como no store). */
+/** EventSource.CLOSED (literal constant, as in store). */
 const ES_CLOSED = 2;
-/** Quadros do spinner do Claude Code (vai e volta). */
+/** Claude Code spinner frames (back and forth). */
 const SPINNER = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
-/** Codex: um spinner neutro (pontos girando), com o mesmo número de quadros. */
+/** Codex: neutral spinner (rotating dots), with the same number of frames. */
 const CODEX_SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_MS = 120;
-/** "⏺" com seletor de variação de texto: nunca vira emoji colorido (a cor vem do CSS). */
+/** "⏺" with text presentation selector: never turns into a colored emoji (color comes from CSS). */
 const DOT = '⏺︎';
 
-// ---------------------------------------------------------------- modelo (puro)
+// ---------------------------------------------------------------- model (pure)
 
 export type ToolEntry = Extract<TerminalEntry, { kind: 'tool' }>;
 export type ResultEntry = Extract<TerminalEntry, { kind: 'result' }>;
 export type PlainEntry = Exclude<TerminalEntry, ToolEntry | ResultEntry>;
 
-/** O que vira uma linha no terminal: uma entrada simples, uma ferramenta (com o resultado, quando chega) ou um resultado órfão. */
+/** What becomes a row in terminal: a simple entry, a tool (with result, when it arrives), or an orphan result. */
 export type TerminalItem =
   | { type: 'entry'; key: string; entry: PlainEntry }
   | { type: 'tool'; key: string; tool: ToolEntry; result?: ResultEntry }
   | { type: 'orphan'; key: string; result: ResultEntry };
 
 export interface TerminalBatch {
-  /** Itens novos, na ordem (ferramentas já trazem o resultado que chegou no mesmo lote). */
+  /** New items, in order (tools already include result arriving in same batch). */
   added: TerminalItem[];
-  /** Resultados de ferramentas que já estavam na tela. */
+  /** Results of tools already on screen. */
   attached: { toolKey: string; result: ResultEntry }[];
 }
 
-/** Chave estável de uma entrada (o tipo entra na chave: o id de um resultado pode repetir o da ferramenta). */
+/** Stable key for an entry (kind is in the key: a result id may duplicate tool id). */
 export function entryKey(e: Pick<TerminalEntry, 'kind' | 'id'>): string {
   return `${e.kind}:${e.id}`;
 }
@@ -100,48 +100,48 @@ export function terminalUrl(agentId: string): string {
   return `/api/agents/${encodeURIComponent(agentId)}/terminal`;
 }
 
-/** Stream da conversa de uma sessão do histórico (mesmo protocolo do terminal do agente). */
+/** Conversation stream of a history session (same protocol as agent terminal). */
 export function sessionTerminalUrl(account: string, sessionId: string): string {
   return `/api/sessions/${encodeURIComponent(account)}/${encodeURIComponent(sessionId)}/terminal`;
 }
 
-/** Chave de uma sessão do histórico aberta no painel (nunca coincide com o id de um agente). */
+/** Key of a history session open in panel (never matches an agent id). */
 export function sessionKey(account: string, sessionId: string): string {
   return `session:${account}:${sessionId}`;
 }
 
-/** Nome curto do projeto de uma sessão: a última pasta do cwd (ou o nome codificado da pasta em projects/). */
+/** Short project name of a session: last directory of cwd (or encoded directory name in projects/). */
 export function sessionProjectName(s: Pick<RecentSession, 'project' | 'projectDir'>): string {
   const path = s.project?.replace(/[\\/]+$/, '');
   if (path) return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1) || path;
   return s.projectDir;
 }
 
-/** Rodapé de uma sessão encerrada: "Sessão encerrada às 14:30" (hoje), "… ontem às 14:30" ou "… em 06 de out. às 14:30". */
+/** Footer of an ended session: "Session ended at 14:30" (today), "… yesterday at 14:30" or "… on Oct 06 at 14:30". */
 export function sessionEndedText(at: number, now: number): string {
-  if (!Number.isFinite(at) || at <= 0) return tr('Sessão encerrada');
+  if (!Number.isFinite(at) || at <= 0) return tr('Session ended');
   const clock = formatClock(at, false);
   const diff = calendarDayDiff(at, now);
-  if (diff === 0) return tr('Sessão encerrada às {0}', [clock]);
-  if (diff === -1) return tr('Sessão encerrada ontem às {0}', [clock]);
-  return tr('Sessão encerrada em {0} às {1}', [dayFmt.format(at), clock]);
+  if (diff === 0) return tr('Session ended at {0}', [clock]);
+  if (diff === -1) return tr('Session ended yesterday at {0}', [clock]);
+  return tr('Session ended on {0} at {1}', [dayFmt.format(at), clock]);
 }
 
 /**
- * A conversa em memória: deduplica por id, junta cada resultado à sua ferramenta pelo `toolUseId` e limita o total
- * de itens (os mais antigos saem). Não conhece o DOM: devolve o que mudou para a tela aplicar.
+ * In-memory conversation: deduplicates by id, joins each result to its tool via `toolUseId`, and limits total
+ * items (oldest are evicted). Has no DOM knowledge: returns changes for the view to apply.
  */
 export class TerminalLog {
-  /** Itens na ordem de chegada (o Map preserva a ordem de inserção: o primeiro é o mais antigo). */
+  /** Items in arrival order (Map preserves insertion order: first is oldest). */
   private items = new Map<string, TerminalItem>();
-  /** Chaves de entradas já vistas (inclui os resultados juntados às ferramentas). */
+  /** Keys of already seen entries (includes results joined to tools). */
   private seen = new Set<string>();
 
   get size(): number {
     return this.items.size;
   }
 
-  /** Itens na ordem da tela (do mais antigo para o mais recente). */
+  /** Items in screen order (from oldest to newest). */
   values(): IterableIterator<TerminalItem> {
     return this.items.values();
   }
@@ -173,10 +173,10 @@ export class TerminalLog {
         const tool = this.items.get(tk);
         if (tool?.type === 'tool' && !tool.result) {
           tool.result = e;
-          // Ferramenta deste mesmo lote: o resultado já sai junto; senão, vira uma atualização da linha existente.
+          // Tool in this same batch: result already bundled; otherwise, updates existing row.
           if (!fresh.has(tk)) attached.push({ toolKey: tk, result: e });
         } else {
-          // Ferramenta fora da janela (ou resultado repetido): aparece sozinho.
+          // Tool outside window (or duplicate result): appears standalone.
           const item: TerminalItem = { type: 'orphan', key, result: e };
           this.items.set(key, item);
           added.push(item);
@@ -190,7 +190,7 @@ export class TerminalLog {
     return { added, attached };
   }
 
-  /** Descarta os itens mais antigos até sobrar `limit`; devolve as chaves removidas. */
+  /** Discards oldest items until `limit` remain; returns removed keys. */
   trim(limit: number): string[] {
     const removed: string[] = [];
     for (const [key, item] of this.items) {
@@ -222,7 +222,7 @@ function validEntry(raw: unknown): raw is TerminalEntry {
   }
 }
 
-/** Entradas válidas de um `append` (ou da lista do `init`); o resto é ignorado. */
+/** Valid entries in an `append` (or `init` list); the rest is ignored. */
 export function sanitizeEntries(raw: unknown): TerminalEntry[] {
   return Array.isArray(raw) ? raw.filter(validEntry) : [];
 }
@@ -236,7 +236,7 @@ function parseJson(data: unknown): unknown {
   }
 }
 
-/** Dados do evento `init`; null se não forem reconhecíveis. */
+/** Data from `init` event; null if unrecognized. */
 export function parseInit(data: unknown): TerminalInit | null {
   const obj = parseJson(data);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
@@ -244,28 +244,28 @@ export function parseInit(data: unknown): TerminalInit | null {
   return { agentId: typeof o.agentId === 'string' ? o.agentId : '', entries: sanitizeEntries(o.entries), truncated: o.truncated === true };
 }
 
-/** Dados do evento `append`. */
+/** Data from `append` event. */
 export function parseAppend(data: unknown): TerminalEntry[] {
   return sanitizeEntries(parseJson(data));
 }
 
 export interface TextPreview {
-  /** Texto completo (sem espaços/linhas em branco no fim). */
+  /** Full text (trailing whitespace/empty lines stripped). */
   text: string;
-  /** O que aparece recolhido. */
+  /** What appears collapsed. */
   head: string;
-  /** Há mais do que a prévia mostra. */
+  /** There is more than preview displays. */
   collapsed: boolean;
-  /** Linhas escondidas na prévia (0 quando o corte foi no meio de uma linha comprida). */
+  /** Lines hidden in preview (0 when cut was in the middle of a long line). */
   hiddenLines: number;
   total: number;
 }
 
-/** Onde cortar a prévia: o texto recolhido é `text.slice(0, headEnd)` (mais "…" quando `ellipsis`). */
+/** Where to cut preview: collapsed text is `text.slice(0, headEnd)` (plus "…" when `ellipsis`). */
 export interface PreviewSplit {
   text: string;
   headEnd: number;
-  /** O corte foi no meio de uma linha comprida (e não numa quebra de linha). */
+  /** Cut was in the middle of a long line (rather than at a line break). */
   ellipsis: boolean;
   collapsed: boolean;
   hiddenLines: number;
@@ -273,8 +273,8 @@ export interface PreviewSplit {
 }
 
 /**
- * Prévia recolhida de um texto longo: as primeiras `maxLines` linhas (e no máximo `maxChars` caracteres).
- * Só recolhe se sobrarem ao menos 3 linhas (esconder 1 ou 2 linhas atrás de um clique não compensa).
+ * Collapsed preview of long text: first `maxLines` lines (and at most `maxChars` characters).
+ * Only collapses if at least 3 lines remain (hiding 1 or 2 lines behind a click is not worth it).
  */
 export function splitPreview(raw: string, maxLines: number, maxChars = maxLines * 200): PreviewSplit {
   const text = raw.replace(/\s+$/, '');
@@ -292,27 +292,27 @@ export function splitPreview(raw: string, maxLines: number, maxChars = maxLines 
   return { text, headEnd, ellipsis, collapsed: true, hiddenLines: Math.max(0, total - shown), total };
 }
 
-/** A mesma prévia como texto (o que aparece recolhido em `head`). */
+/** Same preview as text (what appears collapsed in `head`). */
 export function previewText(raw: string, maxLines: number, maxChars = maxLines * 200): TextPreview {
   const p = splitPreview(raw, maxLines, maxChars);
   const head = p.collapsed ? `${p.text.slice(0, p.headEnd)}${p.ellipsis ? '…' : ''}` : p.text;
   return { text: p.text, head, collapsed: p.collapsed, hiddenLines: p.hiddenLines, total: p.total };
 }
 
-/** Rótulo do botão que expande: "… +12 linhas" (ou "… mostrar tudo" quando o corte foi numa linha comprida). */
+/** Expand button label: "… +12 lines" (or "… show all" when cut was in a long line). */
 export function moreLabel(hiddenLines: number): string {
-  if (hiddenLines <= 0) return tr('… mostrar tudo');
-  return `… +${hiddenLines} ${hiddenLines === 1 ? tr('linha') : tr('linhas')}`;
+  if (hiddenLines <= 0) return tr('… show all');
+  return `… +${hiddenLines} ${hiddenLines === 1 ? tr('line') : tr('lines')}`;
 }
 
-/** "Bash(npm test)" -> nome em destaque + argumentos, como o Claude Code mostra. */
+/** "Bash(npm test)" -> highlighted name + arguments, as Claude Code displays it. */
 export function splitToolTitle(title: string): { name: string; args: string } {
   const i = title.indexOf('(');
   if (i > 0 && title.endsWith(')') && !/\s/.test(title.slice(0, i))) return { name: title.slice(0, i), args: title.slice(i) };
   return { name: title, args: '' };
 }
 
-/** Mostra o `input` da ferramenta? Um comando que já cabe inteiro no título não se repete embaixo. */
+/** Show tool `input`? A command that already fits entirely in title is not repeated below. */
 export function showToolInput(tool: Pick<ToolEntry, 'title' | 'input' | 'inputKind'>): boolean {
   const input = tool.input?.trim();
   if (!input) return false;
@@ -329,18 +329,18 @@ export function diffLineKind(line: string): DiffLineKind {
   return 'ctx';
 }
 
-/** Horário da entrada para a dica: "14:30:05" hoje, "06 de out., 14:30" em outro dia. */
+/** Entry timestamp for tooltip: "14:30:05" today, "Oct 06, 14:30" on another day. */
 export function entryTimeTitle(at: number, now: number): string {
   if (!Number.isFinite(at) || at <= 0) return '';
   return calendarDayDiff(at, now) === 0 ? formatClock(at) : formatDateTime(at);
 }
 
-/** Quadros do spinner do rodapé de cada ferramenta. */
+/** Tool footer spinner frames. */
 export function spinnerFrames(provider: Provider): readonly string[] {
   return provider === 'codex' ? CODEX_SPINNER : SPINNER;
 }
 
-/** Símbolo parado do rodapé (sem animação, ou fora do "trabalhando"). */
+/** Idle footer symbol (without animation, or outside "working"). */
 export function footerGlyph(kind: TerminalFooterKind, provider: Provider): string {
   if (kind === 'working') return provider === 'codex' ? '•' : '✻';
   return { waiting: '✋', shell: '⏳', idle: '○', ended: '■' }[kind];
@@ -351,69 +351,69 @@ export type TerminalFooterKind = 'working' | 'waiting' | 'shell' | 'idle' | 'end
 export interface TerminalFooter {
   kind: TerminalFooterKind;
   text: string;
-  /** Desde quando está nesse estado (para o tempo ao lado do texto). */
+  /** Since when in this state (for time next to text). */
   since?: number;
 }
 
-/** Linha de estado do rodapé, imitando o Claude Code, a partir do agente vivo no snapshot. */
+/** Footer status line, mimicking Claude Code, based on live agent in snapshot. */
 export function terminalFooter(agent: AgentInfo | undefined, agents: readonly AgentInfo[], now: number): TerminalFooter {
-  if (!agent || agent.status === 'offline') return { kind: 'ended', text: tr('Sessão encerrada') };
-  if (agent.status === 'done') return { kind: 'ended', text: tr('Subagente concluído · sessão encerrada') };
+  if (!agent || agent.status === 'offline') return { kind: 'ended', text: tr('Session ended') };
+  if (agent.status === 'done') return { kind: 'ended', text: tr('Subagent done · session ended') };
   const wait = shellWaitIn(agent, agents, now);
   if (wait) {
     const label = wait.main?.label?.trim();
     const more = wait.jobs.length > 1 ? ` (+${wait.jobs.length - 1})` : '';
-    return { kind: 'shell', text: label ? tr('Esperando o shell: {0}{1}', [label, more]) : tr('Esperando o shell terminar'), since: wait.since };
+    return { kind: 'shell', text: label ? tr('Waiting on shell: {0}{1}', [label, more]) : tr('Waiting for the shell to finish'), since: wait.since };
   }
   switch (agent.status) {
     case 'working': {
       const act = agent.activity?.text?.trim().replace(/(?:…|\.{1,3})$/, '');
-      return { kind: 'working', text: `${act || tr('Trabalhando')}…`, since: agent.statusSince };
+      return { kind: 'working', text: `${act || tr('Working')}…`, since: agent.statusSince };
     }
     case 'waiting': {
-      const text = agent.waitingFor ? tr('Esperando você: {0}', [agent.waitingFor]) : tr('Esperando você');
+      const text = agent.waitingFor ? tr('Waiting on you: {0}', [agent.waitingFor]) : tr('Waiting on you');
       if (agent.permission) return { kind: 'waiting', text, since: agent.statusSince };
-      // Sem o pedido no Habblaud (o hook já devolveu à sessão, a sessão abriu sem o plugin ou não havia página aberta
-      // quando ele chegou): os botões não vêm, então diz onde responder.
+      // Without request in Habblaud (hook already replied to session, session opened without plugin, or no page open
+      // when it arrived): buttons aren't shown, so state where to reply.
       const hint =
         agent.provider === 'codex'
-          ? tr('{0} · responda no Codex: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text])
-          : tr('{0} · responda no Claude Code: este pedido não chegou ao Habblaud ou passou do tempo de espera', [text]);
+          ? tr("{0} · answer in Codex: this request didn't reach Habblaud or timed out", [text])
+          : tr("{0} · answer in Claude Code: this request didn't reach Habblaud or timed out", [text]);
       return { kind: 'waiting', text: hint, since: agent.statusSince };
     }
     default:
-      return { kind: 'idle', text: tr('Aguardando o próximo prompt') };
+      return { kind: 'idle', text: tr('Waiting for the next prompt') };
   }
 }
 
-// ---------------------------------------------------------------- linhas (DOM)
+// ---------------------------------------------------------------- rows (DOM)
 
 type Fill = (target: HTMLElement, text: string) => void;
 
-/** Cria o botão de copiar de uma entrada (`what` = "prompt", "resposta", "comando", "resultado"...). */
+/** Creates copy button for an entry (`what` = "prompt", "reply", "command", "result"...). */
 type Copier = (text: string, what: string) => HTMLElement;
 
 const fillPlain: Fill = (target, text) => {
   target.textContent = text;
 };
 
-/** Diff: uma linha por elemento, com fundo verde (+) ou vermelho (-), como no Claude Code. */
+/** Diff: one line per element, with green (+) or red (-) background, as in Claude Code. */
 const fillDiff: Fill = (target, text) => {
   const frag = document.createDocumentFragment();
   for (const line of text.split('\n')) frag.append(h('span', { class: `ui-term__dl is-${diffLineKind(line)}`, text: line || ' ' }));
   target.append(frag);
 };
 
-/** Blocos que a busca abre ao chegar num resultado escondido neles (prévias recolhidas, raciocínio, detalhes). */
+/** Blocks that search opens upon reaching a hidden result (collapsed previews, reasoning, details). */
 const expandables = new WeakMap<Element, () => void>();
 
-/** Abre os blocos recolhidos que escondem `el` dentro de `stop` (ex.: um resultado da busca no "… +N linhas"). */
+/** Opens collapsed blocks hiding `el` inside `stop` (e.g.: search hit inside "… +N lines"). */
 function revealWithin(el: Element, stop: Element): void {
   let hidden = false;
   for (let n: Element | null = el; n && n !== stop; n = n.parentElement) {
     if ((n as HTMLElement).hidden) hidden = true;
     const open = expandables.get(n);
-    // Só abre quem esconde o trecho (um resultado já visível na prévia não expande o bloco).
+    // Only opens blocks hiding the snippet (result already visible in preview does not expand block).
     if (open && hidden) {
       open();
       hidden = false;
@@ -422,8 +422,8 @@ function revealWithin(el: Element, stop: Element): void {
 }
 
 /**
- * Bloco de texto que recolhe quando é longo, com "… +N linhas" para expandir (e "recolher" depois). O texto inteiro
- * fica no DOM (o resto escondido), para a busca achar e destacar o que está recolhido.
+ * Text block collapsing when long, with "… +N lines" to expand (and "collapse" afterwards). Entire text
+ * stays in DOM (rest hidden), so search finds and highlights collapsed content.
  */
 function collapsible(raw: string, maxLines: number, cls: string, fill: Fill = fillPlain): HTMLElement {
   const p = splitPreview(raw, maxLines);
@@ -433,7 +433,7 @@ function collapsible(raw: string, maxLines: number, cls: string, fill: Fill = fi
     fill(body, p.text);
     return box;
   }
-  // Diff: uma linha por elemento (blocos); o resto começa na linha seguinte.
+  // Diff: one line per element (blocks); the rest starts on next line.
   const block = fill === fillDiff;
   const head = h(block ? 'div' : 'span', {});
   fill(head, p.text.slice(0, p.headEnd));
@@ -447,9 +447,9 @@ function collapsible(raw: string, maxLines: number, cls: string, fill: Fill = fi
     open = v;
     rest.hidden = !open;
     if (dots) dots.hidden = open;
-    setText(more, open ? tr('recolher') : moreLabel(p.hiddenLines));
+    setText(more, open ? tr('collapse') : moreLabel(p.hiddenLines));
     setAttr(more, 'aria-expanded', String(open));
-    setTitle(more, open ? tr('Recolher') : tr('Mostrar tudo ({0} {1})', [p.total, p.total === 1 ? tr('linha') : tr('linhas')]));
+    setTitle(more, open ? tr('Collapse') : tr('Show all ({0} {1})', [p.total, p.total === 1 ? tr('line') : tr('lines')]));
   };
   set(false);
   more.addEventListener('click', () => set(!open));
@@ -460,7 +460,7 @@ function collapsible(raw: string, maxLines: number, cls: string, fill: Fill = fi
   return box;
 }
 
-/** Texto que expande num clique (raciocínio, detalhe de evento). */
+/** Text that expands on click (reasoning, event detail). */
 function expander(label: string, cls: string, detail: string, detailCls: string): HTMLElement {
   const body = h('div', { class: detailCls, text: detail, hidden: true });
   const btn = h('button', { class: cls, type: 'button', text: label, attrs: { 'aria-expanded': 'false' } });
@@ -484,15 +484,15 @@ function row(kind: string, at: number, now: number, ...children: (Node | null)[]
   return h('div', { class: `ui-term__row ui-term__row--${kind}`, title: entryTimeTitle(at, now) }, ...children);
 }
 
-/** "  ⎿  resultado" (primeiras linhas, "… +N linhas", o aviso de corte e o botão de copiar). */
+/** "  ⎿  result" (first lines, "… +N lines", cut warning, and copy button). */
 function resultBlock(r: ResultEntry, copy: Copier): HTMLElement {
   const out = h('div', { class: 'ui-term__out' });
   const text = r.text.replace(/\s+$/, '');
   if (text) out.append(collapsible(text, RESULT_PREVIEW_LINES, 'ui-term__res-text'));
-  else out.append(h('span', { class: 'ui-term__empty', text: r.error ? tr('(erro sem mensagem)') : tr('(sem saída)'), attrs: { 'data-chrome': '' } }));
-  if (r.truncated) out.append(h('span', { class: 'ui-term__cut', text: tr('(resultado cortado)'), attrs: { 'data-chrome': '' } }));
+  else out.append(h('span', { class: 'ui-term__empty', text: r.error ? tr('(error with no message)') : tr('(no output)'), attrs: { 'data-chrome': '' } }));
+  if (r.truncated) out.append(h('span', { class: 'ui-term__cut', text: tr('(result truncated)'), attrs: { 'data-chrome': '' } }));
   const el = h('div', { class: `ui-term__result${r.error ? ' is-error' : ''}` }, h('span', { class: 'ui-term__elbow', text: '⎿', attrs: { 'aria-hidden': 'true' } }), out);
-  if (text) el.append(copy(copyTextOf(r), tr('resultado')));
+  if (text) el.append(copy(copyTextOf(r), tr('result')));
   return el;
 }
 
@@ -518,8 +518,8 @@ function toolRow(t: ToolEntry, now: number, copy: Copier): ToolRefs {
   const { name, args } = splitToolTitle(t.title);
   const title = h('div', { class: 'ui-term__title' }, h('strong', { text: name }), args ? document.createTextNode(args) : null);
   const input = toolInput(t);
-  // Título + argumentos com o próprio botão de copiar (o comando; sem argumentos, o título).
-  const what = t.inputKind === 'command' || t.tool === 'Bash' ? tr('comando') : input ? tr('entrada da ferramenta') : tr('ferramenta');
+  // Title + arguments with its own copy button (the command; without arguments, the title).
+  const what = t.inputKind === 'command' || t.tool === 'Bash' ? tr('command') : input ? tr('tool input') : tr('tool');
   const call = h('div', { class: 'ui-term__call' }, title, input, copy(copyTextOf(t), what));
   const slot = h('div', { class: 'ui-term__slot' });
   const el = row('tool', t.at, now, mark(DOT, 'ui-term__dot'), h('div', { class: 'ui-term__col' }, call, slot));
@@ -545,18 +545,18 @@ function entryRow(e: PlainEntry, now: number, copy: Copier): HTMLElement {
       const body = h('div', { class: 'ui-term__col ui-md' });
       body.append(renderMarkdown(e.text));
       const el = row('assistant', e.at, now, mark(DOT, 'ui-term__dot'), body);
-      el.append(copy(copyTextOf(e), tr('resposta')));
+      el.append(copy(copyTextOf(e), tr('response')));
       return el;
     }
     case 'thinking': {
       const text = e.text?.trim();
-      const content = text ? expander(tr('Pensando…'), 'ui-term__think', text, 'ui-term__think-text') : h('span', { class: 'ui-term__think', text: tr('Pensando…'), attrs: { 'data-chrome': '' } });
+      const content = text ? expander(tr('Thinking…'), 'ui-term__think', text, 'ui-term__think-text') : h('span', { class: 'ui-term__think', text: tr('Thinking…'), attrs: { 'data-chrome': '' } });
       return row('thinking', e.at, now, mark('✻'), h('div', { class: 'ui-term__col' }, content));
     }
     case 'system': {
       const text = h('span', { class: 'ui-term__sys-text', text: e.text });
       const col = h('div', { class: 'ui-term__col' }, text);
-      if (e.detail?.trim()) col.append(expander(tr('detalhes'), 'ui-term__sys-more', e.detail.trim(), 'ui-term__sys-detail'));
+      if (e.detail?.trim()) col.append(expander(tr('details'), 'ui-term__sys-more', e.detail.trim(), 'ui-term__sys-detail'));
       const el = row('system', e.at, now, mark('※'), col);
       if (e.level === 'warn' || e.level === 'error') el.classList.add(`is-${e.level}`);
       return el;
@@ -564,14 +564,14 @@ function entryRow(e: PlainEntry, now: number, copy: Copier): HTMLElement {
   }
 }
 
-// ---------------------------------------------------------------- janela
+// ---------------------------------------------------------------- window
 
-/** O que o resto da interface (gaveta, atalhos, histórico) usa do terminal. */
+/** What the rest of UI (drawer, shortcuts, history) uses from terminal. */
 export interface TerminalControl {
-  /** Agente com o terminal aberto (null = fechado ou mostrando uma sessão do histórico). */
+  /** Agent with open terminal (null = closed or displaying a history session). */
   readonly agentId: string | null;
   open(agentId: string, opener?: HTMLElement | null): void;
-  /** Abre uma sessão do histórico: a conversa do transcript ou, se ela ainda estiver aberta, o terminal ao vivo do agente. */
+  /** Opens history session: transcript conversation or, if still open, live agent terminal. */
   openSession(session: RecentSession, opener?: HTMLElement | null): void;
   close(): void;
   toggle(agentId: string, opener?: HTMLElement | null): void;
@@ -579,7 +579,7 @@ export interface TerminalControl {
 
 type ConnState = 'connecting' | 'open' | 'reconnecting' | 'failed';
 
-/** Resultado atual da busca: o `index`-ésimo destaque da linha `key`. */
+/** Current search match: `index`-th highlight in row `key`. */
 interface SearchRef {
   key: string;
   index: number;
@@ -590,36 +590,36 @@ const NO_FINALS: ReadonlySet<string> = new Set();
 export class TerminalPanel implements UiComponent, TerminalControl {
   readonly el: HTMLElement;
   private id: string | null = null;
-  /** Sessão do histórico aberta no painel (null = terminal de um agente). */
+  /** History session open in panel (null = agent terminal). */
   private session: RecentSession | null = null;
   private last: AgentInfo | null = null;
   private source: EventSource | null = null;
   private opener: HTMLElement | null = null;
   private conn: ConnState = 'connecting';
-  /** Já recebeu um `init` desta conexão (ou de uma anterior, no mesmo agente). */
+  /** Already received an `init` from this connection (or a previous one, on the same agent). */
   private loaded = false;
   private truncated = false;
   private log = new TerminalLog();
   private rows = new Map<string, HTMLElement>();
   private tools = new Map<string, ToolRefs>();
-  /** Grudado no fim: mensagens novas rolam a tela. */
+  /** Pinned to bottom: new messages scroll the view. */
   private follow = true;
-  /** Itens que chegaram enquanto o usuário lia lá em cima. */
+  /** Items that arrived while user was reading further up. */
   private unread = 0;
   private spinTimer: ReturnType<typeof setInterval> | null = null;
   private spinFrame = 0;
-  /** Horário da entrada mais recente (o rodapé de uma sessão retomada acompanha). */
+  /** Timestamp of most recent entry (resumed session footer keeps up). */
   private lastEntryAt = 0;
 
   private filter: TerminalFilter = 'all';
   private filterBtns: HTMLButtonElement[] = [];
-  /** Linhas que aparecem com o filtro atual. */
+  /** Rows visible under current filter. */
   private visibleRows = 0;
 
   private searchOpen = false;
-  /** Termo da busca já dobrado (minúsculas, sem acentos); '' = sem busca. */
+  /** Search query already folded (lowercase, without accents); '' = no search. */
   private folded = '';
-  /** Destaques de cada linha (inclusive as escondidas pelo filtro, que não entram na contagem). */
+  /** Highlights per row (including those hidden by filter, not counted in total). */
   private hits = new Map<string, HTMLElement[]>();
   private current: SearchRef | null = null;
   private currentEl: HTMLElement | null = null;
@@ -628,9 +628,9 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   private kindEl: HTMLElement;
   private accEl: HTMLElement;
   private nameEl: HTMLElement;
-  /** Selo "Codex" (sessão do Codex). */
+  /** "Codex" badge (Codex session). */
   private provEl: HTMLElement;
-  /** Quadros do spinner da sessão aberta (Claude Code ou Codex). */
+  /** Spinner frames of open session (Claude Code or Codex). */
   private frames: readonly string[] = SPINNER;
   private roleEl: HTMLElement;
   private roomEl: HTMLElement;
@@ -650,11 +650,11 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   private glyph: HTMLElement;
   private statusText: HTMLElement;
   private statusTime: HTMLElement;
-  /** "Assumir daqui" e "Encerrar" (terminal interativo ligado) e as abas dos agentes do projeto. */
+  /** "Take over here" and "End session" (interactive terminal enabled) and tabs of project agents. */
   private actions: TermActions | null;
   private tabs: TermTabs;
   private movable: Movable;
-  /** Caixa de mensagem do rodapé (só a sessão ao vivo de um agente principal). */
+  /** Footer composer (live session of a main agent only). */
   private composer: MessageComposer;
 
   constructor(
@@ -674,10 +674,10 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.provEl = createProviderTag('ui-prov--xs');
     this.roleEl = h('span', { class: 'ui-role' });
     this.roomEl = h('span', { class: 'ui-term__room' });
-    this.reconnEl = h('span', { class: 'ui-term__reconn', text: tr('reconectando…'), hidden: true, role: 'status' });
-    this.findBtn = iconButton(ICONS.search, tr('Buscar na conversa ({0})', [findKey]), () => this.toggleSearch(), 'ui-icon-btn--sm ui-term__find');
+    this.reconnEl = h('span', { class: 'ui-term__reconn', text: tr('reconnecting…'), hidden: true, role: 'status' });
+    this.findBtn = iconButton(ICONS.search, tr('Search the conversation ({0})', [findKey]), () => this.toggleSearch(), 'ui-icon-btn--sm ui-term__find');
     setAttr(this.findBtn, 'aria-expanded', 'false');
-    const close = iconButton(ICONS.close, tr('Fechar terminal (Esc)'), () => this.close(), 'ui-icon-btn--sm ui-term__close');
+    const close = iconButton(ICONS.close, tr('Close terminal (Esc)'), () => this.close(), 'ui-icon-btn--sm ui-term__close');
     const bar = h(
       'div',
       { class: 'ui-term__bar' },
@@ -691,8 +691,8 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       close,
     );
 
-    // Barra de ferramentas: filtro (segmentado) e a busca, que aparece com Ctrl/⌘+F ou a lupa.
-    const filters = h('div', { class: 'ui-seg ui-term__filter', role: 'radiogroup', attrs: { 'aria-label': tr('Filtrar a conversa') } });
+    // Toolbar: filter (segmented) and search, which appears with Ctrl/⌘+F or magnifying glass.
+    const filters = h('div', { class: 'ui-seg ui-term__filter', role: 'radiogroup', attrs: { 'aria-label': tr('Filter the conversation') } });
     for (const [value, text, hint] of TERMINAL_FILTERS) {
       const b = h('button', { class: 'ui-seg__opt', type: 'button', role: 'radio', text, title: hint, attrs: { 'aria-checked': 'false' } });
       b.addEventListener('click', () => this.setFilter(value));
@@ -705,7 +705,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.searchInput = h('input', {
       class: 'ui-term__search-input',
       type: 'text',
-      attrs: { placeholder: tr('Buscar na conversa'), 'aria-label': tr('Buscar na conversa'), autocomplete: 'off', spellcheck: 'false', enterkeyhint: 'search' },
+      attrs: { placeholder: tr('Search the conversation'), 'aria-label': tr('Search the conversation'), autocomplete: 'off', spellcheck: 'false', enterkeyhint: 'search' },
     });
     this.searchInput.addEventListener('input', () => this.scheduleSearch());
     this.searchInput.addEventListener('keydown', (e) => {
@@ -725,19 +725,19 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       searchIcon,
       this.searchInput,
       this.countEl,
-      iconButton(ICONS.chevronUp, tr('Resultado anterior (Shift+Enter)'), () => this.go(-1), 'ui-icon-btn--sm ui-term__step'),
-      iconButton(ICONS.chevronDown, tr('Próximo resultado (Enter)'), () => this.go(1), 'ui-icon-btn--sm ui-term__step'),
-      iconButton(ICONS.close, tr('Fechar a busca (Esc)'), () => this.closeSearch(true), 'ui-icon-btn--sm ui-term__step'),
+      iconButton(ICONS.chevronUp, tr('Previous result (Shift+Enter)'), () => this.go(-1), 'ui-icon-btn--sm ui-term__step'),
+      iconButton(ICONS.chevronDown, tr('Next result (Enter)'), () => this.go(1), 'ui-icon-btn--sm ui-term__step'),
+      iconButton(ICONS.close, tr('Close search (Esc)'), () => this.closeSearch(true), 'ui-icon-btn--sm ui-term__step'),
     );
     const tools = h('div', { class: 'ui-term__tools' }, filters, this.searchBox);
 
-    const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Tentar de novo'), on: { click: () => this.connect() } });
+    const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Try again'), on: { click: () => this.connect() } });
     this.alertText = h('span', { class: 'ui-term__alert-text', text: OPEN_ERROR });
     this.alertEl = h('div', { class: 'ui-term__alert', role: 'alert', hidden: true }, this.alertText, retry);
-    this.note = h('p', { class: 'ui-term__note', text: tr('Conversa anterior não carregada'), hidden: true });
+    this.note = h('p', { class: 'ui-term__note', text: tr('Earlier conversation not loaded'), hidden: true });
     this.list = h('div', { class: 'ui-term__list' });
     this.placeholder = h('p', { class: 'ui-term__placeholder' });
-    this.scroll = h('div', { class: 'ui-term__scroll', tabIndex: 0, attrs: { 'aria-label': tr('Conversa da sessão') } }, this.note, this.list, this.placeholder);
+    this.scroll = h('div', { class: 'ui-term__scroll', tabIndex: 0, attrs: { 'aria-label': tr('Session conversation') } }, this.note, this.list, this.placeholder);
     this.scroll.addEventListener('scroll', () => this.onScroll(), { passive: true });
     this.newBtn = h('button', { class: 'ui-term__new', type: 'button', hidden: true, on: { click: () => this.jumpToEnd() } });
 
@@ -745,7 +745,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.statusText = h('span', { class: 'ui-term__status-text' });
     this.statusTime = h('span', { class: 'ui-term__status-time' });
     this.status = h('p', { class: 'ui-term__status' }, this.glyph, this.statusText, this.statusTime);
-    // Esc na caixa devolve o foco à conversa (o próximo fecha o terminal).
+    // Esc in search input returns focus to conversation (next Esc closes terminal).
     this.composer = new MessageComposer(ctx, 'terminal', { onEscape: () => this.focusLog() });
 
     this.el = h(
@@ -758,10 +758,10 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       h('div', { class: 'ui-term__foot' }, this.status, this.composer.el),
     );
     this.el.addEventListener('keydown', (e) => this.onKey(e));
-    // Arrastar pela barra solta a janela (ui/movable.ts).
+    // Dragging by titlebar detaches window (ui/movable.ts).
     this.movable = new Movable(this.el, bar, { key: 'habblaud.move.term', enabled: () => !ctx.isNarrow() });
     this.renderFilter();
-    // Janela redimensionada: quem está no fim continua vendo o fim.
+    // Resized window: remaining at bottom keeps viewing the bottom.
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.follow && this.scrollToEnd()).observe(this.scroll);
   }
 
@@ -778,7 +778,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   }
 
   openSession(session: RecentSession, opener: HTMLElement | null = activeElement()): void {
-    // Ainda aberta e no escritório: o terminal ao vivo do agente (com status no rodapé).
+    // Still open and in office: live agent terminal (with status in footer).
     if (session.open && session.agentId && this.ctx.agent(session.agentId)) return this.open(session.agentId, opener);
     this.start(sessionKey(session.account, session.sessionId), session, opener);
   }
@@ -805,7 +805,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     else this.open(agentId, opener);
   }
 
-  /** Esc: o primeiro fecha a busca; o seguinte, o terminal. Devolve false se não havia nada aberto. */
+  /** Esc: first closes search; next closes terminal. Returns false if nothing was open. */
   escape(): boolean {
     if (this.id === null) return false;
     if (this.searchOpen) this.closeSearch(this.el.contains(document.activeElement));
@@ -822,18 +822,18 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.tabs.render(live ? live.id : null);
     this.renderFooter();
     this.renderState();
-    // Mensagens só para a sessão ao vivo (no histórico, a caixa diz que a sessão foi encerrada).
+    // Messages only for live session (in history, composer says session ended).
     this.composer.render(this.session ? undefined : this.ctx.agent(this.id), this.id);
   }
 
-  /** Abre o painel numa conversa nova (agente ou sessão do histórico); a mesma conversa só recebe o foco. */
+  /** Opens panel on a new conversation (agent or history session); same conversation just gets focus. */
   private start(id: string, session: RecentSession | null, opener: HTMLElement | null): void {
     if (opener && !this.el.contains(opener)) this.opener = opener;
     if (this.id === id) {
       this.focusLog();
       return;
     }
-    // Um terminal por vez: abrir outro substitui o atual (a busca e o filtro continuam valendo).
+    // One terminal at a time: opening another replaces current (search and filter remain active).
     this.disconnect();
     this.clear();
     this.id = id;
@@ -857,7 +857,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     const live = this.ctx.agent(this.id!);
     if (live) this.last = live;
     const a = this.last;
-    const name = a?.name ?? tr('Agente');
+    const name = a?.name ?? tr('Agent');
     setText(this.kindEl, 'terminal');
     setHidden(this.accEl, true);
     setText(this.nameEl, name);
@@ -867,17 +867,17 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     setHidden(this.roleEl, !a);
     if (a) setVariant(this.roleEl, 'ui-role--', a.kind);
     const room = a ? this.ctx.store.room(a.roomId) : undefined;
-    setText(this.roomEl, room ? tr('sala {0}', [room.name]) : '');
+    setText(this.roomEl, room ? tr('room {0}', [room.name]) : '');
     setTitle(this.roomEl, room?.path ?? '');
     setHidden(this.roomEl, !room);
-    setAttr(this.el, 'aria-label', tr('Terminal de {0}', [name]));
+    setAttr(this.el, 'aria-label', tr("{0}'s terminal", [name]));
     this.el.classList.toggle('is-gone', !live);
   }
 
-  /** Sessão do histórico: conta, título, projeto e a data de início. */
+  /** History session: account, title, project, and start date. */
   private renderSessionHead(s: RecentSession): void {
-    const title = s.title?.trim() || tr('Sessão sem título');
-    setText(this.kindEl, tr('histórico'));
+    const title = s.title?.trim() || tr('Untitled session');
+    setText(this.kindEl, tr('history'));
     updateAccountChip(this.accEl, this.ctx.account(s.account), s.account, s.provider);
     setHidden(this.accEl, false);
     setText(this.nameEl, title);
@@ -887,7 +887,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     setText(this.roomEl, `${sessionProjectName(s)} · ${formatDateTime(s.firstAt ?? s.lastAt)}`);
     setTitle(this.roomEl, s.project ?? s.projectDir);
     setHidden(this.roomEl, false);
-    setAttr(this.el, 'aria-label', tr('Terminal da sessão {0}', [title]));
+    setAttr(this.el, 'aria-label', tr('Session {0} terminal', [title]));
     this.el.classList.remove('is-gone');
   }
 
@@ -895,7 +895,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     if (e.defaultPrevented) return;
     const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
     const key = e.key.toLowerCase();
-    // Ctrl/⌘+F com o terminal em foco busca na conversa (fora dele, continua sendo a busca do navegador).
+    // Ctrl/⌘+F with terminal focused searches conversation (outside it, remains browser search).
     if (mod && !e.shiftKey && key === 'f') {
       e.preventDefault();
       e.stopPropagation();
@@ -946,7 +946,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     });
     es.addEventListener('error', () => {
       if (this.source !== es) return;
-      // Fechado = o servidor recusou (403/404/429) ou o navegador desistiu; senão, ele mesmo tenta reconectar.
+      // Closed = server rejected (403/404/429) or browser gave up; otherwise, it retries connecting.
       if (es.readyState === ES_CLOSED) {
         es.close();
         this.source = null;
@@ -965,7 +965,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   }
 
   private onInit(data: TerminalInit): void {
-    // Reconexão com o usuário lendo lá em cima: tenta manter a mesma entrada no mesmo lugar.
+    // Reconnection with user reading up above: attempts to preserve same entry at same position.
     const anchor = this.follow ? null : this.captureAnchor();
     this.clear();
     this.conn = 'open';
@@ -973,7 +973,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.truncated = data.truncated;
     this.unread = 0;
     this.ingest(data.entries, true);
-    // A conversa foi remontada: a busca refaz os destaques (mantendo o resultado atual, se ele ainda existir).
+    // Conversation rebuilt: search remakes highlights (preserving current match if still existing).
     if (this.folded) this.runSearch(false);
     const target = anchor ? this.rows.get(anchor.key) : undefined;
     if (anchor && target) this.scroll.scrollTop = target.offsetTop - anchor.offset;
@@ -984,7 +984,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.renderState();
   }
 
-  /** Aplica um lote: cria as linhas novas num fragmento, junta resultados e descarta as linhas mais antigas. */
+  /** Applies a batch: creates new rows in a fragment, joins results, and discards oldest rows. */
   private ingest(entries: readonly TerminalEntry[], initial: boolean): void {
     for (const e of entries) if (e.at > this.lastEntryAt) this.lastEntryAt = e.at;
     const batch = this.log.push(entries);
@@ -998,7 +998,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
         this.hits.delete(key);
         if (this.current?.key === key) this.current = null;
       }
-      // Lendo lá em cima: compensa a altura que saiu do topo para o texto não pular.
+      // Reading up above: compensate height removed from top so text doesn't jump.
       if (!this.follow) this.scroll.scrollTop -= before - this.scroll.scrollHeight;
     }
     const touched: string[] = [];
@@ -1023,7 +1023,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     }
     this.list.append(frag);
     this.applyFilter();
-    // A busca continua valendo: destaca o que chegou (sem mudar o resultado atual).
+    // Search remains active: highlight incoming items (without changing current match).
     if (!initial && this.folded) this.refreshHits(touched);
     if (!initial) {
       if (this.follow) this.scrollToEnd();
@@ -1036,7 +1036,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     if (item.type === 'entry') return entryRow(item.entry, now, this.copier);
     if (item.type === 'orphan') {
       const el = row('orphan', item.result.at, now, mark(''), h('div', { class: 'ui-term__col' }, resultBlock(item.result, this.copier)));
-      if (!el.title) el.title = tr('Resultado de uma ferramenta anterior');
+      if (!el.title) el.title = tr('Result from an earlier tool');
       return el;
     }
     const refs = toolRow(item.tool, now, this.copier);
@@ -1056,14 +1056,14 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.list.replaceChildren();
   }
 
-  // ---------------------------------------------------------------- copiar
+  // ---------------------------------------------------------------- copy
 
-  /** Botão discreto (aparece no hover ou no foco) que copia o texto de uma entrada e confirma com "Copiado". */
+  /** Subtle button (appears on hover or focus) copying entry text and confirming with "Copied". */
   private copier: Copier = (text, what) => {
-    const label = tr('Copiar {0}', [what]);
+    const label = tr('Copy {0}', [what]);
     const icon = h('span', { class: 'ui-term__copy-icon', attrs: { 'aria-hidden': 'true' } });
     icon.innerHTML = ICONS.copy;
-    const done = h('span', { class: 'ui-term__copy-done', text: tr('Copiado') });
+    const done = h('span', { class: 'ui-term__copy-done', text: tr('Copied') });
     const btn = h('button', { class: 'ui-term__copy', type: 'button', title: label, attrs: { 'aria-label': label } }, icon, done);
     let timer: ReturnType<typeof setTimeout> | null = null;
     btn.addEventListener('click', async (e) => {
@@ -1072,28 +1072,28 @@ export class TerminalPanel implements UiComponent, TerminalControl {
       btn.classList.toggle('is-done', ok);
       btn.classList.toggle('is-fail', !ok);
       icon.innerHTML = ok ? ICONS.check : ICONS.copy;
-      setText(done, ok ? tr('Copiado') : tr('Não foi possível copiar'));
-      setTitle(btn, ok ? tr('Copiado') : tr('Não foi possível copiar'));
-      this.ctx.announce(ok ? tr('Copiado.') : tr('Não foi possível copiar.'));
+      setText(done, ok ? tr('Copied') : tr("Couldn't copy"));
+      setTitle(btn, ok ? tr('Copied') : tr("Couldn't copy"));
+      this.ctx.announce(ok ? tr('Copied.') : tr("Couldn't copy."));
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         btn.classList.remove('is-done', 'is-fail');
         icon.innerHTML = ICONS.copy;
-        setText(done, tr('Copiado'));
+        setText(done, tr('Copied'));
         setTitle(btn, label);
       }, COPIED_MS);
     });
     return btn;
   };
 
-  // ---------------------------------------------------------------- filtro
+  // ---------------------------------------------------------------- filter
 
   private setFilter(f: TerminalFilter): void {
     if (f === this.filter) return;
     this.filter = f;
     this.renderFilter();
     this.applyFilter();
-    // O resultado atual pode ter sumido com o filtro.
+    // Current match may have disappeared under filter.
     if (this.folded) {
       this.markCurrent(false);
       this.renderSearch();
@@ -1102,7 +1102,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.renderState();
   }
 
-  /** Setas entre as opções do filtro (padrão de radiogroup). */
+  /** Arrow navigation between filter options (radiogroup standard). */
   private filterKey(e: KeyboardEvent, value: TerminalFilter): void {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
@@ -1122,7 +1122,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     });
   }
 
-  /** Mostra ou esconde cada linha conforme o filtro ("Só prompts" depende do que vem depois de cada resposta). */
+  /** Shows or hides each row according to filter ("Prompts only" depends on what follows each reply). */
   private applyFilter(): void {
     const finals = this.filter === 'prompts' ? finalAnswerKeys(this.log.values()) : NO_FINALS;
     let visible = 0;
@@ -1136,7 +1136,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.visibleRows = visible;
   }
 
-  // ---------------------------------------------------------------- busca
+  // ---------------------------------------------------------------- search
 
   private toggleSearch(): void {
     if (this.searchOpen) this.closeSearch(true);
@@ -1152,7 +1152,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.findBtn.classList.add('is-on');
     this.searchInput.focus();
     this.searchInput.select();
-    // Reaberta com o termo anterior: destaca de novo.
+    // Reopened with previous query: highlight again.
     if (!wasOpen && this.searchInput.value.trim()) this.runSearch(true);
     else this.renderSearch();
   }
@@ -1174,7 +1174,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.searchTimer = setTimeout(() => this.runSearch(true), SEARCH_DEBOUNCE_MS);
   }
 
-  /** Busca pendente (o usuário apertou Enter logo depois de digitar): roda agora. */
+  /** Pending search (user hit Enter right after typing): run now. */
   private flushSearch(): void {
     if (!this.searchTimer) return;
     clearTimeout(this.searchTimer);
@@ -1182,8 +1182,8 @@ export class TerminalPanel implements UiComponent, TerminalControl {
   }
 
   /**
-   * Refaz todos os destaques. `reset` = termo novo: o resultado atual passa a ser o primeiro a partir do que está
-   * na tela; senão, mantém o atual (se ele ainda existir).
+   * Rebuilds all highlights. `reset` = new query: current match becomes the first from what's on
+   * screen; otherwise, preserves current match (if still existing).
    */
   private runSearch(reset: boolean): void {
     this.searchTimer = null;
@@ -1205,7 +1205,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.renderSearch();
   }
 
-  /** Destaques de linhas novas ou alteradas (resultado que chegou), sem mexer no resultado atual. */
+  /** Highlights for new or modified rows (incoming result), without changing current match. */
   private refreshHits(keys: readonly string[]): void {
     for (const key of keys) {
       const old = this.hits.get(key);
@@ -1219,7 +1219,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.renderSearch();
   }
 
-  /** [linha, nº de destaques] das linhas visíveis, na ordem da tela. */
+  /** [row, match count] for visible rows, in screen order. */
   private visibleCounts(): [string, number][] {
     const out: [string, number][] = [];
     for (const [key, el] of this.rows) {
@@ -1229,7 +1229,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     return out;
   }
 
-  /** O primeiro resultado visível a partir do topo da tela (ou o primeiro de todos, se não houver nenhum abaixo). */
+  /** First visible match from top of screen (or first of all if none below). */
   private firstHitInView(): SearchRef | null {
     const top = this.scroll.getBoundingClientRect().top;
     let first: SearchRef | null = null;
@@ -1242,7 +1242,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     return first;
   }
 
-  /** Próximo (1) ou anterior (-1) resultado: abre os blocos recolhidos que o escondem e rola até ele. */
+  /** Next (1) or previous (-1) match: opens collapsed blocks hiding it and scrolls to it. */
   private go(dir: 1 | -1): void {
     if (!this.searchOpen) return this.openSearch();
     this.flushSearch();
@@ -1254,7 +1254,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.renderSearch(counts);
   }
 
-  /** Marca o resultado atual (some se a linha saiu ou foi escondida pelo filtro); com `scroll`, leva até ele. */
+  /** Marks current match (disappears if row was evicted or hidden by filter); with `scroll`, scrolls to it. */
   private markCurrent(scroll: boolean): void {
     this.currentEl?.classList.remove('is-current');
     this.currentEl = null;
@@ -1279,7 +1279,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     const r = span.getBoundingClientRect();
     const c = this.scroll.getBoundingClientRect();
     if (r.top < c.top + 8 || r.bottom > c.bottom - 8) this.scroll.scrollTop += r.top - c.top - (c.height - r.height) / 2;
-    // Saiu do fim para ler o resultado: as mensagens novas não puxam a tela de volta.
+    // Left bottom to read result: incoming messages don't pull screen back down.
     this.follow = this.distanceToEnd() <= STICK_PX;
     this.renderNewButton();
   }
@@ -1288,11 +1288,11 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     const total = counts.reduce((n, [, c]) => n + c, 0);
     const active = this.searchOpen && !!this.folded;
     setText(this.countEl, active ? searchCounter(globalIndex(counts, this.current), total) : '');
-    setTitle(this.countEl, active ? (total ? `${total} ${total === 1 ? tr('resultado') : tr('resultados')}` : tr('Nenhum resultado')) : '');
+    setTitle(this.countEl, active ? (total ? `${total} ${total === 1 ? tr('result') : tr('results')}` : tr('No results')) : '');
     this.searchBox.classList.toggle('is-miss', active && total === 0);
   }
 
-  // ---------------------------------------------------------------- rolagem
+  // ---------------------------------------------------------------- scrolling
 
   private distanceToEnd(): number {
     const s = this.scroll;
@@ -1331,7 +1331,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.scroll.focus({ preventScroll: true });
   }
 
-  // ---------------------------------------------------------------- estado e rodapé
+  // ---------------------------------------------------------------- state and footer
 
   private renderState(): void {
     setHidden(this.reconnEl, this.conn !== 'reconnecting');
@@ -1341,21 +1341,21 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     const empty = this.rows.size === 0;
     const filteredOut = !empty && this.visibleRows === 0;
     setHidden(this.placeholder, !(empty || filteredOut) || this.conn === 'failed');
-    if (filteredOut) setText(this.placeholder, tr('Nada para mostrar com este filtro.'));
-    else if (empty) setText(this.placeholder, !this.loaded ? tr('Abrindo o terminal…') : this.session ? tr('Nenhuma mensagem nesta sessão.') : tr('Nenhuma mensagem nesta sessão ainda.'));
+    if (filteredOut) setText(this.placeholder, tr('Nothing to show with this filter.'));
+    else if (empty) setText(this.placeholder, !this.loaded ? tr('Opening the terminal…') : this.session ? tr('No messages in this session.') : tr('No messages in this session yet.'));
     this.renderNewButton();
   }
 
   private renderNewButton(): void {
     setHidden(this.newBtn, this.follow || this.visibleRows === 0);
-    setText(this.newBtn, this.unread > 0 ? tr('↓ Novas mensagens') : tr('↓ Ir para o fim'));
+    setText(this.newBtn, this.unread > 0 ? tr('↓ New messages') : tr('↓ Jump to the end'));
   }
 
   private renderFooter(): void {
     if (this.id === null) return;
     const now = this.ctx.now();
     if (this.session) {
-      // Sessão do histórico: horário da última atividade (o transcript pode ter crescido desde a listagem).
+      // History session: time of last activity (transcript may have grown since listing).
       const at = Math.max(this.session.lastAt, this.lastEntryAt);
       const text = sessionEndedText(at, now);
       this.stopSpinner();
@@ -1396,7 +1396,7 @@ export class TerminalPanel implements UiComponent, TerminalControl {
     this.spinTimer = setInterval(() => {
       this.spinFrame = (this.spinFrame + 1) % (this.frames.length * 8);
       setText(this.glyph, this.frames[this.spinFrame % this.frames.length]);
-      // O tempo ao lado do texto anda a cada ~1 s, mesmo sem snapshot novo.
+      // Time beside text advances every ~1 s, even without new snapshot.
       if (this.spinFrame % 8 === 0) this.renderFooter();
     }, SPINNER_MS);
   }

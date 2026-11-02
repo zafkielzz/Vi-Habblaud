@@ -1,8 +1,8 @@
-// Prédio de exemplo, do jeito que o servidor do mundo manda ao entrar num prédio (`WorldBuildingDetail`): só para os
-// testes e o modo de demonstração da visita (?mock=1). Só DESCE: nada daqui sobe ao mundo nem entra no pacote do
-// prédio (o pacote sai só de projection.ts, do escritório real). 3 andares e 6 agentes do Claude Code e do Codex:
-// trabalhando, esperando, de olho num shell (no resumo do prédio, conta como trabalhando) e à toa, com um subagente
-// com o pai no prédio e um sem (o pai já saiu).
+// Sample building, matching format sent by world server on building entry (`WorldBuildingDetail`): for tests
+// and visit demo mode (?mock=1) only. Incoming ONLY: nothing here uploads to world or enters building
+// packet (packet produced only by projection.ts, from real office). 3 floors and 6 Claude Code and Codex agents:
+// working, waiting, watching a shell (counts as working in building summary), and idle, with one subagent
+// whose parent is on floor and one without (parent departed).
 import { hash32 } from '../hash';
 import { flattenAppearance } from './appearance-flat';
 import type { WorldAgent, WorldBuildingDetail } from './protocol';
@@ -11,7 +11,7 @@ function agent(id: string, name: string, look: 'f' | 'm', kind: WorldAgent['kind
   return { id, kind, ...(parentId ? { parentId } : {}), provider, status, look, name, parts: flattenAppearance(hash32(id), undefined, look) };
 }
 
-/** Exemplo de interior: ao vivo; `discreet` = modo discreto; `away` = apagado (pausado). Os andares ficam nos dois. */
+/** Sample interior: live; `discreet` = discreet mode; `away` = powered-down (paused). Floors remain in both. */
 export function sampleBuildingDetail(mode: 'live' | 'discreet' | 'away' = 'live'): WorldBuildingDetail {
   const live = mode === 'live';
   const floors: WorldBuildingDetail['floors'] = [

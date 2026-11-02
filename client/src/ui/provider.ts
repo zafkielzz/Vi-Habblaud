@@ -1,16 +1,17 @@
-// De qual ferramenta é cada coisa (Claude Code ou Codex) e os textos que mudam com ela. Puro (sem DOM): testado em
-// ui/provider.test.ts. No protocolo, `provider` ausente quer dizer Claude Code (shared/types.ts); aqui tudo cai nisso.
+// Which tool each item belongs to (Claude Code or Codex) and texts that change with it. Pure (no DOM): tested in
+// ui/provider.test.ts. In the protocol, missing `provider` means Claude Code (shared/types.ts);
+// everything defaults to that here.
 //
-// Identidade visual do Codex (sem logotipo de ninguém): o chip da conta fica "vazado" (fundo escuro, borda e letra na
-// cor da conta, cantos em degrau) e, onde há espaço, um selo de texto "Codex" ao lado do nome.
+// Visual identity for Codex (no proprietary logos): the account chip is "outlined" (dark background, border and
+// letter in account color, stepped corners) and, where space permits, a text badge "Codex" next to the name.
 import type { AccountInfo, OfficeSnapshot, Provider } from '../../../shared/types';
 import { shortcutHint } from './model';
 import { tr } from '../../../shared/i18n';
 
-/** Nome de cada ferramenta como aparece nos textos. */
-export const PROVIDER_NAME: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' };
+/** Name of each tool as displayed in UI text. */
+export const PROVIDER_NAME: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity' };
 
-/** Ferramenta de um agente, conta, sessão ou pedido (ausente = Claude Code). */
+/** Tool of an agent, account, session, or request (absent = Claude Code). */
 export function providerOf(x: { provider?: Provider } | null | undefined): Provider {
   return x?.provider ?? 'claude';
 }
@@ -20,23 +21,24 @@ export function isCodex(x: { provider?: Provider } | null | undefined): boolean 
 }
 
 /**
- * O id de conta tem cara de pasta do Codex (".codex", ".codex-trabalho", ".codex~2", "demo:.codex")? Só para quando a
- * conta já não está no snapshot (ex.: histórico, "Meu dia"): com a conta à mão, vale o `provider` dela.
+ * Does the account id look like a Codex folder (".codex", ".codex-trabalho", ".codex~2", "demo:.codex")?
+ * Only for when the account is no longer in the snapshot (e.g. history, "My Day"): with the account available,
+ * its `provider` takes precedence.
  */
 export function looksLikeCodexId(id: string): boolean {
   return /(?:^|[:/\\])\.?codex(?:[-_.~]|$)/i.test(id);
 }
 
-/** Ferramenta da conta: a do snapshot; sem ela, a dica de quem chamou ou o jeito do id. */
+/** Account tool: from snapshot; without it, caller hint or inferred from id format. */
 export function accountProvider(account: Pick<AccountInfo, 'provider'> | undefined, fallbackId = '', hint?: Provider): Provider {
   if (account) return providerOf(account);
   return hint ?? (looksLikeCodexId(fallbackId) ? 'codex' : 'claude');
 }
 
 /**
- * Letra do chip de uma conta que não está no snapshot: a primeira letra depois do prefixo da pasta
- * (".claude-conta2" -> "C", ".codex-trabalho" -> "T"). A pasta padrão do Codex (".codex") vira "X"; a do Claude Code,
- * "?" (como antes). Nunca devolve "." nem vazio.
+ * Letter for a chip of an account not in the snapshot: first letter after the folder prefix
+ * (".claude-conta2" -> "C", ".codex-trabalho" -> "T"). The default Codex folder (".codex") becomes "X"; Claude Code's,
+ * "?" (as before). Never returns "." or empty.
  */
 export function fallbackShort(id: string, provider: Provider = accountProvider(undefined, id)): string {
   const rest = id
@@ -48,46 +50,50 @@ export function fallbackShort(id: string, provider: Provider = accountProvider(u
   return provider === 'codex' ? 'X' : '?';
 }
 
-/** O selo "Codex" ao lado do nome da conta (não repete quando o nome já diz "Codex"). */
+/** Tool badge next to account name (Codex and Antigravity only; omitted when name already mentions it). */
 export function showsProviderTag(provider: Provider, accountName = ''): boolean {
-  return provider === 'codex' && !/codex/i.test(accountName);
+  if (provider === 'claude') return false;
+  const name = accountName.toLowerCase();
+  // Antigravity workers are named "alice (Agy)": the name already says it.
+  if (provider === 'agy' && name.includes('(agy)')) return false;
+  return !name.includes(PROVIDER_NAME[provider].toLowerCase());
 }
 
-/** Rótulo do chip da conta (dica e leitores de tela): "Conta C (dev@x.com)", "Codex · plano Team". */
+/** Account chip label (tooltip and screen readers): "Account C (dev@x.com)", "Codex · Team plan". */
 export function accountChipLabel(account: Pick<AccountInfo, 'name' | 'email' | 'plan' | 'provider'> | undefined, fallbackId: string, provider: Provider): string {
-  if (!account) return fallbackId ? `${fallbackId}${provider === 'codex' ? ' · Codex' : ''}` : tr('Conta desconhecida');
+  if (!account) return fallbackId ? `${fallbackId}${provider === 'codex' ? ' · Codex' : ''}` : tr('Unknown account');
   if (provider !== 'codex') return `${account.name}${account.email ? ` (${account.email})` : ''}`;
   const tag = showsProviderTag(provider, account.name) ? ' · Codex' : '';
-  return `${account.name}${tag}${account.plan ? tr(' · plano {0}', [account.plan]) : ''}`;
+  return `${account.name}${tag}${account.plan ? tr(' · {0} plan', [account.plan]) : ''}`;
 }
 
 /**
- * Texto do escritório vazio. Os atalhos ("atalhos c ou d") são só das contas do Claude Code, que vêm de aliases do
- * shell (a letra de uma conta do Codex não é um atalho); o Codex só entra quando há uma conta dele.
+ * Empty office text. Shortcuts ("shortcuts c or d") belong only to Claude Code accounts, derived from shell
+ * aliases (a Codex account letter is not a shortcut); Codex is mentioned only when an account for it exists.
  */
 export function emptyOfficeHint(accounts: readonly Pick<AccountInfo, 'short' | 'provider'>[]): string {
   const keys = shortcutHint(accounts.filter((a) => !isCodex(a)));
-  if (!accounts.some(isCodex)) return tr('Abra o Claude Code em qualquer projeto{0} e veja seu agente chegar.', [keys ? ` (${keys})` : '']);
-  return tr('Abra o Claude Code{0} ou o Codex em qualquer projeto e veja seu agente chegar.', [keys ? ` (${keys})` : '']);
+  if (!accounts.some(isCodex)) return tr('Open Claude Code in any project{0} and watch your agent arrive.', [keys ? ` (${keys})` : '']);
+  return tr('Open Claude Code{0} or Codex in any project and watch your agent arrive.', [keys ? ` (${keys})` : '']);
 }
 
-/** Algum pedido de permissão do Codex esperando: o prazo é curto e o cartão conta os segundos (relógio de 1 s). */
+/** Any Codex permission request waiting: deadline is short and card counts seconds (1 s ticker). */
 export function hasCodexPermission(snap: Pick<OfficeSnapshot, 'agents'> | null): boolean {
   return !!snap?.agents.some((a) => a.permission && isCodex(a.permission) && a.status !== 'offline' && a.status !== 'done');
 }
 
-/** Como ver o Codex ao vivo e aprovar pelo escritório (gaveta de um agente do Codex e ajuda). */
-export const CODEX_LIVE_HINT = tr('Para ver o Codex ao vivo e aprovar pelo escritório: `npm run codex:install` e aprove os hooks em `/hooks` no Codex.');
+/** How to view Codex live and approve from the office (Codex agent drawer and help). */
+export const CODEX_LIVE_HINT = tr('To see Codex live and approve from the office: `npm run codex:install`, then approve the hooks in `/hooks` in Codex.');
 
-/** Políticas de aprovação do Codex (`approval_policy`), quando o servidor as manda no lugar do modo de permissão. */
+/** Codex approval policies (`approval_policy`), when server sends them instead of permission mode. */
 const CODEX_APPROVALS: Record<string, string> = {
-  untrusted: tr('Pergunta antes de quase tudo'),
-  'on-request': tr('Pergunta quando precisa'),
-  'on-failure': tr('Pergunta quando um comando falha'),
-  never: tr('Nunca pergunta'),
+  untrusted: tr('Asks before almost everything'),
+  'on-request': tr('Asks when needed'),
+  'on-failure': tr('Asks when a command fails'),
+  never: tr('Never asks'),
 };
 
-/** Aprovação de um agente do Codex em português (valor desconhecido passa como veio). */
+/** Codex agent approval label (unknown value passes through as-is). */
 export function codexApprovalLabel(policy: string | undefined): string {
   if (!policy) return '—';
   return CODEX_APPROVALS[policy] ?? policy;

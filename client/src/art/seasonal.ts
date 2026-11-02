@@ -1,4 +1,4 @@
-// Decorações procedurais em pixel art. Mesma escala dos móveis do escritório.
+// Procedural pixel art decorations. Same scale as office furniture.
 import { PixelBuf } from './core/pixbuf';
 import type { BufSprite } from './core/sprite';
 

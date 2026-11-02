@@ -1,6 +1,6 @@
-// Assets opcionais gerados por IA (quadros, pôsteres e a placa da recepção).
+// Optional AI-generated assets (paintings, posters, and reception sign).
 // GET /assets/manifest.json -> { wallArt: [{ id, kind, file, w, h, tiles, variant?, framed? }], brand: { signage?, mark? } }.
-// Se o manifesto não existir (ou falhar), o mundo segue só com a arte procedural.
+// If manifest does not exist (or fails), world continues with procedural art only.
 
 export interface WallArtAsset {
   id: string;
@@ -8,11 +8,11 @@ export interface WallArtAsset {
   img: HTMLImageElement;
   w: number;
   h: number;
-  /** Largura em tiles do lugar na parede (quadros: 2 ou 4; pôsteres: 1). */
+  /** Width in tiles of wall slot (paintings: 2 or 4; posters: 1). */
   tiles: number;
-  /** Pôster: variante procedural equivalente ('code', 'coffee'...). */
+  /** Poster: equivalent procedural variant ('code', 'coffee'...). */
   variant?: string;
-  /** Versão com moldura pronta (desenhada no lugar do quadro procedural, em tamanho nativo). */
+  /** Pre-framed version (drawn in place of procedural frame, at native size). */
   framed?: BrandAsset;
 }
 
@@ -69,7 +69,7 @@ export async function loadWorldAssets(signal?: AbortSignal): Promise<WorldAssets
       if (!img || (a.kind !== 'painting' && a.kind !== 'poster')) return;
       const w = img.naturalWidth;
       const h = img.naturalHeight;
-      // sem "tiles" no manifesto: deduz pela largura (pinturas largas não cabem num quadro de 2 tiles)
+      // without "tiles" in manifest: infer from width (wide paintings don't fit in a 2-tile frame)
       const tiles = typeof a.tiles === 'number' && a.tiles > 0 ? a.tiles : a.kind === 'poster' ? 1 : w > 40 ? 4 : 2;
       const f = framed[i];
       wallArt.push({

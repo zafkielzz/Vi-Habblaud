@@ -1,6 +1,6 @@
-// Habblaud World › Bloqueados (Fase 5): quem esta conta bloqueou (pelo cartão da pessoa, na cidade) e
-// "Desbloquear" (POST /api/world/unblock, pela conexão com o mundo). Bloquear vale nos dois sentidos: um não vê o outro
-// na rua, nos prédios, nos cumprimentos e nos carimbos. A lista vem do /v1/me (o status relido ao abrir a tela).
+// Habblaud World › Blocked (Phase 5): who this account blocked (from the person's card in the city) and
+// "Unblock" (POST /api/world/unblock, through the connection with the world). Blocking works both ways: neither sees the other
+// on the street, in buildings, in greetings, or in stamps. The list comes from /v1/me (status re-read upon opening the screen).
 import { tr } from '../../../../shared/i18n';
 import type { WorldBlockedPlayer, WorldClient } from '../../net/world';
 import { h, setAttr, setHidden, setText } from '../dom';
@@ -8,27 +8,27 @@ import { worldErrorText } from './world-model';
 
 export interface BlockedHost {
   readonly client: WorldClient | null;
-  /** A lista do último status (undefined antes de chegar). */
+  /** The latest status list (undefined before arriving). */
   list(): WorldBlockedPlayer[] | undefined;
-  /** Relê o status com /v1/me (a lista pode ter mudado na cidade). */
+  /** Re-reads the status with /v1/me (the list might have changed in the city). */
   refresh(): Promise<void>;
-  /** A tela ainda é esta (uma resposta que chega depois de sair dela não mexe em nada). */
+  /** The screen is still this one (a response arriving after navigating away does nothing). */
   current(): boolean;
   announce(text: string): void;
 }
 
-/** A tela: o cabeçalho (com o voltar) vem de settings-world.ts. */
+/** The screen: the header (with back button) comes from settings-world.ts. */
 export function buildBlocked(head: HTMLElement, host: BlockedHost): { el: HTMLElement; sync(): void } {
   const list = h('ul', { class: 'ui-world__blocked' });
-  const note = h('p', { class: 'ui-set__hint', text: tr('Carregando…') });
+  const note = h('p', { class: 'ui-set__hint', text: tr('Loading…') });
   const error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
-  /** Ids desbloqueados nesta tela (somem da lista na hora, antes do status novo). */
+  /** IDs unblocked in this screen (removed from the list immediately, before the new status arrives). */
   const gone = new Set<string>();
   let key = '';
   let loaded = false;
 
   const row = (p: WorldBlockedPlayer): HTMLElement => {
-    const btn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Desbloquear'), attrs: { 'aria-label': tr('Desbloquear {0}', [p.name]) } });
+    const btn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Unblock'), attrs: { 'aria-label': tr('Unblock {0}', [p.name]) } });
     btn.addEventListener('click', async () => {
       const client = host.client;
       if (!client || btn.disabled) return;
@@ -45,7 +45,7 @@ export function buildBlocked(head: HTMLElement, host: BlockedHost): { el: HTMLEl
         return;
       }
       gone.add(p.id);
-      host.announce(tr('{0} desbloqueado.', [p.name]));
+      host.announce(tr('{0} unblocked.', [p.name]));
       sync();
     });
     return h(
@@ -63,12 +63,12 @@ export function buildBlocked(head: HTMLElement, host: BlockedHost): { el: HTMLEl
     if (k === key) return;
     key = k;
     if (!all && !loaded) {
-      setText(note, tr('Carregando…'));
+      setText(note, tr('Loading…'));
       setHidden(note, false);
       list.replaceChildren();
       return;
     }
-    setText(note, items.length ? '' : tr('Ninguém bloqueado.'));
+    setText(note, items.length ? '' : tr('Nobody blocked.'));
     setHidden(note, items.length > 0);
     list.replaceChildren(...items.map(row));
   };
@@ -84,7 +84,7 @@ export function buildBlocked(head: HTMLElement, host: BlockedHost): { el: HTMLEl
       'div',
       { class: 'ui-world__stack' },
       head,
-      h('p', { class: 'ui-set__hint', text: tr('Quem você bloqueia não te vê e você não vê a pessoa: na rua, nos prédios, nos cumprimentos e nos carimbos. Para bloquear alguém, abra o cartão da pessoa na cidade.') }),
+      h('p', { class: 'ui-set__hint', text: tr("People you block don't see you and you don't see them: on the street, in buildings, in greetings and in stamps. To block someone, open their card in the city.") }),
       note,
       list,
       error,

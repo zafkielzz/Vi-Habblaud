@@ -1,15 +1,15 @@
-// Pedido respondido no próprio terminal: o Claude Code mostra o diálogo de permissão ao mesmo tempo em
-// que roda o hook e, quando você responde lá, NÃO encerra o hook (ele seguiria esperando até o tempo
-// limite). Para tirar o pedido do escritório, o registro procura no fim do transcript a chamada de
-// ferramenta do pedido (o hook não recebe o id do tool_use, então a busca é por nome + assinatura dos
-// argumentos) e espera o tool_result dela: aprovou (a ferramenta rodou) ou recusou (resultado de erro).
+// Request answered directly in the terminal: Claude Code displays the permission dialog at the same time
+// it runs the hook, and when answered there, it does NOT terminate the hook (which would keep waiting until
+// timeout). To remove the request from the office, the registry searches the end of the transcript for the tool
+// call of the request (the hook does not receive tool_use id, so search is by name + argument signature)
+// and waits for its tool_result: approved (tool ran) or denied (error result).
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 
-/** Quanto do fim do transcript é lido a cada conferência. */
+/** How much of the end of the transcript is read on each check. */
 export const SCAN_TAIL_BYTES = 512 * 1024;
-/** Chamadas mais antigas que isto (antes do pedido) não são candidatas: são de turnos anteriores. */
+/** Calls older than this (before the request) are not candidates: they belong to previous turns. */
 export const MAX_CALL_AGE_MS = 10 * 60_000;
-/** Corte dos textos na assinatura (o hook também corta argumentos longos antes de mandar). */
+/** Truncation length for signature texts (the hook also truncates long arguments before sending). */
 const SIG_TEXT_MAX = 2_000;
 
 type Rec = Record<string, unknown>;
@@ -29,10 +29,10 @@ function cut(v: unknown): unknown {
 }
 
 /**
- * Assinatura de uma chamada de ferramenta, igual para o `tool_input` do hook e o `input` do tool_use
- * no transcript. Ferramentas conhecidas usam só o argumento principal (o Claude Code pode completar
- * campos opcionais antes de chamar o hook); as demais, todos os argumentos (chaves ordenadas, textos
- * cortados).
+ * Signature of a tool call, identical for the hook's `tool_input` and the `input` of tool_use
+ * in the transcript. Known tools use only the primary argument (Claude Code may fill optional
+ * fields before calling the hook); other tools use all arguments (sorted keys, truncated
+ * text).
  */
 export function callSignature(tool: string, input: unknown): string {
   const r = rec(input) ?? {};
@@ -59,7 +59,7 @@ export function callSignature(tool: string, input: unknown): string {
   }
 }
 
-/** Lê os últimos `bytes` do arquivo (a primeira linha, possivelmente cortada, é descartada). */
+/** Reads the last `bytes` of the file (the first line, possibly truncated, is discarded). */
 function readTail(path: string, bytes: number): string[] {
   const fd = openSync(path, 'r');
   try {
@@ -83,16 +83,16 @@ function readTail(path: string, bytes: number): string[] {
 }
 
 export interface CallScan {
-  /** Chamada do pedido encontrada no transcript (a mais recente que casa e ainda não tinha resultado). */
+  /** Tool call of the request found in the transcript (the most recent that matches and had no result yet). */
   toolUseId?: string;
-  /** A chamada já tem tool_result: o pedido foi respondido (no terminal, ou a sessão seguiu sem ele). */
+  /** Call already has a tool_result: request was answered (in the terminal, or session proceeded without it). */
   answered: boolean;
 }
 
 /**
- * Procura a chamada do pedido no fim do transcript. Com `knownId` (já achada antes), só confere se o
- * resultado chegou. Sem ele, escolhe a chamada mais recente com o mesmo nome e assinatura que ainda não
- * tinha resultado e não é de muito antes do pedido. Arquivo ilegível: lança (quem chama ignora).
+ * Searches for the request's call at the end of the transcript. With `knownId` (found previously), only checks
+ * if the result arrived. Without it, selects the most recent call with matching name and signature that had no
+ * result yet and is not from long before the request. Unreadable file: throws (caller ignores).
  */
 export function scanToolCall(
   path: string,
@@ -102,7 +102,7 @@ export function scanToolCall(
   const calls: Array<{ id: string; at: number }> = [];
   const results = new Set<string>();
   for (const line of readTail(path, tailBytes)) {
-    // Filtro barato antes do JSON.parse: só interessam linhas com tool_use ou tool_result.
+    // Cheap filter before JSON.parse: only lines with tool_use or tool_result are relevant.
     if (!line.includes('"tool_use"') && !line.includes('"tool_result"')) continue;
     let j: Rec | undefined;
     try {

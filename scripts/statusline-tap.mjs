@@ -1,39 +1,37 @@
 #!/usr/bin/env node
-// Tap de statusline do Habblaud: captura o uso do plano (5h e semanal) SEM ler credenciais.
+// Habblaud statusline tap: captures plan usage (5h and weekly) WITHOUT reading credentials.
 //
-// O Claude Code envia ao comando de statusline, pelo stdin, um JSON com `rate_limits`
-// ({five_hour:{used_percentage, resets_at}, seven_day:{...}}, resets_at em segundos). Este script
-// fica "na frente" do statusline original:
+// Claude Code sends JSON with `rate_limits` ({five_hour:{used_percentage, resets_at}, seven_day:{...}},
+// resets_at in seconds) to the statusline command via stdin. This script sits "in front" of the original statusline:
 //
-//   node /caminho/do/habblaud/scripts/statusline-tap.mjs -- <comando original do statusline>
+//   node /path/to/habblaud/scripts/statusline-tap.mjs -- <original statusline command>
 //
-// 1. lê todo o stdin;
-// 2. se houver rate_limits, grava <HABBLAUD_USAGE_DIR ou ~/.habblaud/usage>/<pasta da conta>.json com
-//    SÓ {accountId, configDir, fetchedAt, five_hour, seven_day} (nada mais do stdin, por privacidade);
-// 3. roda o comando original com o MESMO stdin, herdando stdout/stderr, e sai com o código dele (no shell em que o
-//    Claude Code o rodaria: ver originalShell).
-//    Sem comando original, não imprime nada.
+// 1. reads all stdin;
+// 2. if rate_limits is present, saves <HABBLAUD_USAGE_DIR or ~/.habblaud/usage>/<account folder>.json with
+//    ONLY {accountId, configDir, fetchedAt, five_hour, seven_day} (nothing else from stdin, for privacy);
+// 3. runs the original command with the SAME stdin, inheriting stdout/stderr, and exits with its code (in the shell
+//    where Claude Code would run it: see originalShell).
+//    Without an original command, prints nothing.
 //
-// Regras: Node puro e sem dependências; qualquer falha na captura é ignorada em silêncio — o
-// statusline nunca pode quebrar nem ficar lento por causa do Habblaud. Instalação automática
-// (com backup do settings.json): npm run usage:install.
+// Rules: Pure Node and no dependencies; any capture failure is silently ignored — the statusline must never break
+// or slow down because of Habblaud. Automatic installation (with settings.json backup): npm run usage:install.
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Valores idênticos gravados há menos que isto não são regravados. */
+/** Identical values written less than this long ago are not rewritten. */
 const MIN_REWRITE_MS = 10_000;
 
-/** Comando original: tudo depois de `--` (o instalador põe entre aspas simples o que não for trivial). */
+/** Original command: everything after `--` (installer single-quotes anything non-trivial). */
 export function originalCommand(argv) {
   const i = argv.indexOf('--');
   const rest = i >= 0 ? argv.slice(i + 1) : argv;
   return rest.join(' ').trim();
 }
 
-/** Config dir da conta: pelo transcript_path (trecho antes de "/projects/"), CLAUDE_CONFIG_DIR ou ~/.claude. */
+/** Account config dir: via transcript_path (part before "/projects/"), CLAUDE_CONFIG_DIR or ~/.claude. */
 export function configDirOf(input, env = process.env, home = env.HOME || homedir()) {
   const tp = typeof input?.transcript_path === 'string' ? input.transcript_path : '';
   const at = tp.lastIndexOf('/projects/');
@@ -58,7 +56,7 @@ function windowOf(w) {
   return resets === undefined ? { utilization } : { utilization, resets_at: resets };
 }
 
-/** Registro gravado (ou undefined, se o JSON não trouxer rate_limits utilizáveis). */
+/** Saved record (or undefined if JSON has no usable rate_limits). */
 export function usageRecord(input, now, env = process.env, home = env.HOME || homedir()) {
   const rl = input && typeof input === 'object' ? input.rate_limits : undefined;
   if (!rl || typeof rl !== 'object') return undefined;
@@ -77,7 +75,7 @@ export function usageDirOf(env = process.env, home = env.HOME || homedir()) {
   return d ? resolve(d.replace(/^~(?=\/|$)/, home)) : join(home, '.habblaud', 'usage');
 }
 
-/** Grava de forma atômica (tmp + rename, modo 600). Devolve false quando nada precisou mudar. */
+/** Atomically writes (tmp + rename, mode 600). Returns false when nothing needed to change. */
 export function writeUsage(rec, dir, now) {
   const file = join(dir, `${rec.accountId}.json`);
   try {
@@ -86,7 +84,7 @@ export function writeUsage(rec, dir, now) {
       JSON.stringify([prev.configDir, prev.five_hour, prev.seven_day]) === JSON.stringify([rec.configDir, rec.five_hour, rec.seven_day]);
     if (same && typeof prev.fetchedAt === 'number' && now - prev.fetchedAt >= 0 && now - prev.fetchedAt < MIN_REWRITE_MS) return false;
   } catch {
-    // primeiro registro (ou ilegível): grava
+    // first record (or unreadable): write
   }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
@@ -104,9 +102,9 @@ function isFile(p) {
 }
 
 /**
- * Shell do comando original: o mesmo em que o Claude Code roda o statusline. Fora do Windows, o /bin/sh. No Windows,
- * o Git Bash (CLAUDE_CODE_GIT_BASH_PATH ou o bin\bash.exe da instalação do git.exe do PATH; nunca o `bash` do PATH,
- * que pode ser o do WSL); sem ele, o padrão do Node (cmd.exe).
+ * Original command shell: the same one where Claude Code runs the statusline. Outside Windows, /bin/sh. On Windows,
+ * Git Bash (CLAUDE_CODE_GIT_BASH_PATH or bin\bash.exe from git.exe in PATH; never `bash` from PATH, which might be
+ * WSL's); without it, Node's default (cmd.exe).
  */
 export function originalShell(env = process.env) {
   if (process.platform !== 'win32') return true;
@@ -114,14 +112,14 @@ export function originalShell(env = process.env) {
   if (explicit && isFile(explicit)) return explicit;
   for (const dir of (env.PATH ?? '').split(delimiter)) {
     if (!dir || !isAbsolute(dir) || !isFile(join(dir, 'git.exe'))) continue;
-    // git.exe em <Git>\cmd (o do PATH do Windows) ou em <Git>\mingw64\bin (o do PATH do Git Bash).
+    // git.exe in <Git>\cmd (Windows PATH) or <Git>\mingw64\bin (Git Bash PATH).
     const bash = [resolve(dir, '..', 'bin', 'bash.exe'), resolve(dir, '..', '..', 'bin', 'bash.exe')].find(isFile);
     if (bash) return bash;
   }
   return true;
 }
 
-/** A captura: nunca lança. */
+/** The capture: never throws. */
 export function tap(stdinText, env = process.env, now = Date.now()) {
   try {
     if (!stdinText || !stdinText.includes('rate_limits')) return false;
@@ -144,14 +142,14 @@ async function main() {
   try {
     input = await readStdin();
   } catch {
-    // sem stdin legível: segue só com o comando original
+    // no readable stdin: continue only with original command
   }
   const command = originalCommand(process.argv.slice(2));
   if (!command) {
     tap(input.toString('utf8'));
     return;
   }
-  // O comando original começa antes da captura (que roda enquanto ele trabalha): zero atraso extra.
+  // Original command starts before capture (which runs while it works): zero extra delay.
   let child;
   try {
     child = spawn(command, { shell: originalShell(), stdio: ['pipe', 'inherit', 'inherit'] });
@@ -165,13 +163,13 @@ async function main() {
     child.on('close', (code, signal) => ok(code ?? (signal ? 1 : 0)));
   });
   for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => child.kill(sig));
-  child.stdin.on('error', () => {}); // o comando pode sair sem ler o stdin (EPIPE)
+  child.stdin.on('error', () => {}); // command may exit without reading stdin (EPIPE)
   child.stdin.end(input);
   tap(input.toString('utf8'));
   process.exitCode = await done;
 }
 
-/** Chamado direto (e não importado pelos testes)? Compara caminhos reais (o repo pode ser um symlink). */
+/** Called directly (and not imported by tests)? Compares real paths (repo may be a symlink). */
 function isMain() {
   try {
     return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));

@@ -1,5 +1,5 @@
-// Mesa de som: um AudioContext para tudo (criado só depois de um gesto do usuário, como pede a
-// política de autoplay), volume mestre com limitador e o agendador que decide o que toca.
+// Sound board: one AudioContext for everything (created only after a user gesture, per
+// autoplay policy), master volume with limiter, and scheduler deciding what plays.
 import { SoundScheduler, type SoundKind, type SoundSettings } from './scheduler';
 import { makeNoise, playVoice } from './synth';
 
@@ -16,8 +16,8 @@ export class SoundBoard {
   }
 
   /**
-   * Precisa ser chamado a partir de um gesto do usuário (clique/tecla) para o navegador liberar o
-   * áudio. Resolve quando o áudio está pronto (ou não pôde ser liberado).
+   * Must be called from a user gesture (click/key) for the browser to unlock
+   * audio. Resolves when audio is ready (or could not be unlocked).
    */
   unlock(): Promise<void> {
     if (!this.enabled) return Promise.resolve();
@@ -26,7 +26,7 @@ export class SoundBoard {
         const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!Ctor) return Promise.resolve();
         const ac = new Ctor();
-        // limitador suave: vários sons juntos nunca estouram
+        // soft limiter: multiple simultaneous sounds never clip
         const comp = ac.createDynamicsCompressor();
         comp.threshold.value = -18;
         comp.knee.value = 12;
@@ -44,7 +44,7 @@ export class SoundBoard {
     return Promise.resolve();
   }
 
-  /** Toca `kind` se a preferência e os limites deixarem. Devolve se tocou. */
+  /** Plays `kind` if preference and limits allow. Returns whether it played. */
   play(kind: SoundKind, opts: { gain?: number; pan?: number; count?: number } = {}): boolean {
     const ac = this.ac;
     if (!ac || !this.out || ac.state !== 'running') return false;

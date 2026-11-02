@@ -1,9 +1,11 @@
-// Servidor do Habblaud: observa as sessões abertas do Claude Code (todas as contas),
-// mantém o modelo do escritório e transmite via SSE. Sem dependências de runtime.
-//   npm run dev    -> tsx server/index.ts --dev (Vite em middleware mode, HMR no mesmo servidor)
-//   npm start      -> node dist/server/index.js (serve dist/client)
+// Habblaud server: watches open Claude Code sessions (all accounts),
+// maintains the office model, and broadcasts via SSE. No runtime dependencies.
+//   npm run dev    -> tsx server/index.ts --dev (Vite in middleware mode, HMR on the same server)
+//   npm start      -> node dist/server/index.js (serves dist/client)
 import http from 'node:http';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import type { PtyInfo } from '../shared/types';
 import { codexDirsRefused, isDefaultDir } from './accounts/detect';
 import { AccountsService } from './accounts/service';
 import { isTruthy, loadConfig, messagesOffReason, terminalOffReason, worldSocketUrl } from './config';
@@ -21,6 +23,7 @@ import { errMsg, log } from './log';
 import { NameStore } from './model/names';
 import { Office } from './model/office';
 import { RoomAliases } from './model/room-aliases';
+import { createAccountsRoutes } from './http/accounts';
 import { createPtyRoutes } from './http/pty';
 import { claudeBinFrom, isExecutableFile, loadPty, PtyManager, type ScreenFactory, type SpawnPty } from './pty/manager';
 import { loadHeadlessScreen } from './pty/screen';
@@ -36,10 +39,17 @@ import type { CodexLive } from './sources/codex/live';
 import { ClaudeWatcher } from './sources/watcher';
 import { discoverCodexDirs } from './sources/codex/accounts';
 import { CodexHistory } from './sources/codex/history';
+import { AgySource, type AgySeat } from './sources/agy/source';
+import { CLAUDE_WORKER, seatSuffix, TeamService, workerAgentId } from './team';
+import { WorkerService, type WorkerTarget } from './workers/service';
+import { BoardService } from './board';
+import { agyProfilesRoot } from './sources/agy/profiles';
+import { RulesLog } from './rules-log';
+import { rulesText } from '../shared/rules';
 import { CodexSource } from './sources/codex/source';
 import { createBuildReader, readBuildInfo } from './build';
 import { UpdateChecker } from './updates/checker';
-import { getLocale, tr } from '../shared/i18n';
+import { tr } from '../shared/i18n';
 import type { WorldLocale } from '../shared/world/protocol';
 import { createCliRunner, createOpener, SpawnService } from './spawn/spawn';
 import { runnableClaudeBin } from './claude-bin';
@@ -62,8 +72,8 @@ import { WorldViewer } from './world/viewer';
 const config = loadConfig();
 const startedAt = Date.now();
 
-// Nome antigo (CodeTown, até a 0.3.2): leva ~/.codetown para ~/.habblaud antes de ler qualquer estado e avisa
-// das variáveis CODETOWN_* que não valem mais. No Docker, quem migra é o docker:up.
+// Legacy name (CodeTown, up to 0.3.2): moves ~/.codetown to ~/.habblaud before reading any state and warns
+// about CODETOWN_* env vars that are no longer valid. In Docker, docker:up handles migration.
 if (!config.inDocker) {
   const r = migrateLegacyStateDir(config.home);
   const msg = describeStateMigration(r);
@@ -74,13 +84,13 @@ if (legacyEnv) log.warn(legacyEnv);
 
 const names = new NameStore(join(config.dataDir, 'names.json'));
 names.load();
-// Nomes de sala escolhidos pelo usuário (botão direito > Renomear).
+// Room names chosen by the user (right-click > Rename).
 const roomAliases = new RoomAliases(join(config.dataDir, 'rooms.json'));
 roomAliases.load();
 
-// Office, contas e fontes de agentes se referenciam (avisos de mudança / fontes): ligação tardia.
-const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string } = {};
-// Versão nova: consulta a release mais recente no GitHub a cada 6 h (HABBLAUD_UPDATE_CHECK=0 desliga).
+// Office, accounts, and agent sources reference each other (change notifications / sources): late binding.
+const late: { office?: Office; agents?: SourceSet; permissions?: PermissionRegistry; messages?: MessageRegistry; ptys?: PtyManager; ptyOff?: string; workers?: WorkerService } = {};
+// New version: checks the latest release on GitHub every 6 h (HABBLAUD_UPDATE_CHECK=0 turns it off).
 const updates = new UpdateChecker({
   current: config.version,
   repo: config.repo,
@@ -89,12 +99,12 @@ const updates = new UpdateChecker({
   onChange: () => late.office?.markDirty(),
 });
 updates.load();
-// Habblaud World (server/world/): a conta e o personagem neste computador. Ligado por padrão (server.habblaud.com, ou
-// HABBLAUD_WORLD_URL); nada sai do computador antes de a pessoa criar a conta e entrar. HABBLAUD_WORLD=0 esconde tudo
-// (rotas 404 e nada na interface); uma HABBLAUD_WORLD_URL recusada deixa o recurso desligado.
+// Habblaud World (server/world/): account and character on this computer. Enabled by default (server.habblaud.com, or
+// HABBLAUD_WORLD_URL); nothing leaves the computer before the user creates an account and signs in. HABBLAUD_WORLD=0
+// hides everything (404 routes and nothing in the UI); a rejected HABBLAUD_WORLD_URL keeps the feature disabled.
 const worldStore = new WorldSettingsStore(join(config.dataDir, 'world.json'));
 if (config.world.enabled && config.world.url) worldStore.load();
-// O social leve do dono (world/social.ts): likes do dia, "enquanto você estava fora", batidas na porta e bloqueados.
+// Owner's light social features (world/social.ts): daily likes, "while you were away", door knocks, and blocked users.
 const worldSocial = config.world.enabled ? new OwnerSocial({ session: () => worldStore.get()?.deviceId, onChange: () => late.office?.markDirty() }) : undefined;
 const world = config.world.enabled
   ? new WorldService({
@@ -117,7 +127,7 @@ const office = new Office({
   names,
   roomAlias: (path) => roomAliases.get(path),
   version: config.version,
-  // No modo dev o Vite serve o cliente direto do código-fonte: não há build para comparar.
+  // In dev mode Vite serves the client directly from source code: no build to compare.
   build: config.dev ? undefined : createBuildReader(config.rootDir),
   startedAt,
   accounts: (sessions) => accounts.list(sessions),
@@ -126,32 +136,102 @@ const office = new Office({
   terminal: config.terminal,
   permissions: () => late.permissions?.snapshot() ?? new Map(),
   messages: config.messages ? () => late.messages?.reachable() ?? new Set() : undefined,
-  ptys: () => (late.ptys ? { status: late.ptys.status(), list: late.ptys.list() } : { status: { enabled: false, reason: late.ptyOff ?? tr('desligado') }, list: [] }),
+  ptys: () => (late.ptys ? { status: late.ptys.status(), list: late.ptys.list() } : { status: { enabled: false, reason: late.ptyOff ?? tr('off') }, list: [] }),
   updates: () => updates.status(),
   world: () => world?.meta() ?? { enabled: false, configured: false, state: 'off' },
 });
-// Fontes de agentes, uma por ferramenta (sources/source.ts): a do Claude Code e, depois dela, a do Codex (quando há
-// pastas do Codex; HABBLAUD_CODEX=0 desliga), com o histórico dela no HistorySet abaixo e as contas registradas por
-// ela mesma (accounts.setProviderAccounts). `codex` também recebe os eventos dos hooks do Codex (CodexLive).
-const claude = new ClaudeWatcher({ accounts, office, inDocker: config.inDocker });
+// Agent sources, one per tool (sources/source.ts): Claude Code's and, after it, Codex's (when Codex
+// directories exist; HABBLAUD_CODEX=0 turns it off), with its history in HistorySet below and accounts registered by
+// itself (accounts.setProviderAccounts). `codex` also receives events from Codex hooks (CodexLive).
+// Claude workers' sessions run in the office's terminals and are shown by server/workers, not as sessions.
+const claude = new ClaudeWatcher({ accounts, office, inDocker: config.inDocker, ignore: (_acc, pid) => !!late.workers?.ownsPid(pid) });
 const agents = new SourceSet([claude]);
 const codexDirs = config.codex ? discoverCodexDirs(process.env, config.home) : [];
 const codex = codexDirs.length ? new CodexSource({ accounts, office, dirs: codexDirs, env: process.env, home: config.home }) : undefined;
 if (codex) agents.add(codex);
-// Eventos dos hooks do Codex (POST /api/codex/events, mod/habblaud-codex/hook.mjs): vão para a fonte do Codex ao vivo
-// (CodexLive); sem ela (nenhuma pasta do Codex ou HABBLAUD_CODEX=0) a rota responde {ok: false}.
+// Board › Tasks and News (server/board.ts): each room's handoff file and today's commits, plus what sources report.
+const board = new BoardService({ office, folders: () => team.offices.map((o) => o.folder) });
+// Antigravity CLI workers (sources/agy/): every profile in ~/.agy_profiles is an account, the ones registered in the
+// team are workers in config.agy.room; HABBLAUD_AGY=0 turns it off. Linux only (reads /proc).
+const agyRoot = agyProfilesRoot(process.env, config.home);
+const agy = config.agy.enabled && process.platform === 'linux'
+  ? new AgySource({
+      accounts,
+      office,
+      root: agyRoot,
+      room: config.agy.room,
+      home: config.home,
+      usageMs: config.agy.usageMs,
+      jobsDir: join(config.dataDir, 'agy-jobs'),
+      news: (item) => {
+        if (board.feed.add(item)) board.publish();
+      },
+    })
+  : undefined;
+if (agy) agents.add(agy);
+// The offices (server/team.ts): one team per project folder (its boss and registered workers), in
+// ~/.agy_profiles/team.json, where agy-ask reads it too (without Antigravity, in the data dir: only the bosses matter).
+// Office rules' refusals (rules-log.jsonl next to team.json, written by agy-ask and the rules hook of agy-hub).
+const rulesLog = new RulesLog(join(agy ? agyRoot : config.dataDir, 'rules-log.jsonl'));
+const team = new TeamService({
+  office,
+  violations: (id) => rulesLog.of(id),
+  folderPlan: (folder) => board.folderPlan(folder),
+  file: join(agy ? agyRoot : config.dataDir, 'team.json'),
+  // Each office's building has its workers room: the first one is the Antigravity room, the others "<it>@<office>".
+  workersRoom: (id, first) => (first ? config.agy.room : `${config.agy.room}@${id}`),
+  legacyBossFile: join(config.dataDir, 'boss.json'),
+  profiles: () => agy?.profiles() ?? [],
+  rescanProfiles: () => agy?.rescan(),
+  claudeAccounts: () => accounts.entries().map((e) => ({ worker: `${CLAUDE_WORKER}${e.id}`, account: e.id })),
+  seed: () => agy?.seed() ?? [],
+  onWorkers: (w, agyBosses) => {
+    agy?.setTeam(w, agyBosses, agySeats());
+    late.workers?.sync();
+  },
+  onDeleteOffice: (id) => {
+    late.workers?.cancel({ office: id });
+    rulesLog.dropOffice(id);
+  },
+  extra: () => (late.workers ? { sessions: late.workers.sessionList(), jobs: late.workers.jobs() } : {}),
+});
+agy?.setTeam(team.workers, team.agyBosses, agySeats());
+
+/**
+ * The Antigravity characters: one per office a worker belongs to (its first office keeps "agy:accN", the next ones
+ * "agy:accN@<office>" named "… (2)"), each in its office's workers room; each Antigravity boss in its office's folder.
+ */
+function agySeats(): AgySeat[] {
+  const out: AgySeat[] = [];
+  for (const seat of team.seats()) {
+    if (seat.worker.startsWith(CLAUDE_WORKER)) continue;
+    const p = agy?.profileOf(seat.worker);
+    if (!p) continue;
+    out.push({ acc: seat.worker, agentId: seat.agentId, name: `${p.name}${seatSuffix(seat.n)}`, room: team.workersRoomOf(seat.office) ?? config.agy.room, office: seat.office });
+  }
+  for (const o of team.offices) {
+    if (o.boss?.kind !== 'agy' || !o.boss.acc) continue;
+    const p = agy?.profileOf(o.boss.acc);
+    if (p) out.push({ acc: o.boss.acc, agentId: o.boss.id, name: p.name, room: o.folder || config.agy.room, office: o.id });
+  }
+  return out;
+}
+team.start();
+// Events from Codex hooks (POST /api/codex/events, mod/habblaud-codex/hook.mjs): go to live Codex source
+// (CodexLive); without it (no Codex directory or HABBLAUD_CODEX=0) the route responds with {ok: false}.
 const codexLive: CodexLive | undefined = codex;
 late.office = office;
 late.agents = agents;
-// Página que pode responder pelo escritório: Host local na porta local; na remota, só com permissions liberado.
+// Page that can answer on behalf of the office: local Host on local port; on remote, only with permissions allowed.
 const hub = new Hub(office, {
   canAnswer: (req) => (isRemoteRequest(req) ? !!config.remote?.allow.has('permissions') : isLoopbackHost(req.headers.host)),
 });
-// "Meu dia": amostra o escritório a cada segundo e persiste em <dataDir>/stats/ (ver history/daystats.ts).
+// "My day": samples the office every second and persists to <dataDir>/stats/ (see history/daystats.ts).
 const stats = new DayStatsService({ dir: join(config.dataDir, 'stats'), snapshot: () => hub.current() });
 stats.load();
-// O prédio no Habblaud World (world/uplink.ts): só com o servidor do mundo aceito. Conecta sozinho com a conta aprovada, o
-// personagem criado, a trava do terminal e sem pausa; o pacote sai só da projeção (shared/world/projection.ts).
+// Building in Habblaud World (world/uplink.ts): only with accepted world server. Connects automatically with approved
+// account, created character, terminal lock, and without pause; packet comes only from projection
+// (shared/world/projection.ts).
 const worldTokens = new BuildingTokens({ stats });
 const worldUplink =
   world && config.world.url
@@ -162,7 +242,7 @@ const worldUplink =
           const b = readBuildInfo(config.rootDir);
           return { commit: b.commit, dirty: b.dirty };
         },
-        locale: () => getLocale() as WorldLocale,
+        locale: (): WorldLocale => 'en', // the World has no Vietnamese
         store: worldStore,
         canAct: () => config.terminal,
         agents: () => office.list(),
@@ -176,7 +256,7 @@ const worldUplink =
       })
     : undefined;
 if (world && worldUplink) world.attachUplink(worldUplink);
-// A cena Mundo (world/viewer.ts): a cidade pela mesma conexão do prédio, só com a cena aberta no navegador.
+// World scene (world/viewer.ts): the city over the same building connection, only with the scene open in the browser.
 const worldViewer = worldUplink ? new WorldViewer() : undefined;
 if (worldUplink && worldViewer) {
   worldViewer.attach(worldUplink);
@@ -186,18 +266,18 @@ if (worldUplink && worldSocial) {
   worldSocial.attach(worldUplink);
   worldUplink.attachOwner(worldSocial);
 }
-// Terminal: só existe com bind local (ver terminalOffReason em config.ts).
-// Cada agente com o parser da ferramenta dele (o do Claude Code por padrão).
+// Terminal: only exists with local bind (see terminalOffReason in config.ts).
+// Each agent uses its tool's parser (Claude Code's by default).
 const terminals = config.terminal
   ? new TerminalStreams({ office, transcriptPathOf: (id) => agents.transcriptPathOf(id), parserFor: (id) => agents.parserFor(id) })
   : undefined;
-// Histórico do terminal (sessões recentes, abertas ou encerradas, de todas as ferramentas): mesma trava.
+// Terminal history (recent sessions, open or closed, across all tools): same lock.
 const history = config.terminal
   ? new HistorySet([new SessionHistory({ accounts: () => accounts.entries(), openAgentOf: (acc, sid) => openMainAgent(office.list(), acc, sid) })])
   : undefined;
 if (history && codex) history.add(new CodexHistory({ accounts: () => accounts.entriesOf('codex'), openAgentOf: (acc, sid) => openMainAgent(office.list(), acc, sid) }));
-// Entregas: o fim de cada pedido, lido dos transcripts do histórico (mesma trava do terminal). Os arquivos entregues
-// são lidos aqui (Node, ou pasta de conta montada no Docker) ou pelo auxiliar do host.
+// Deliveries: the end of each prompt, read from history transcripts (same lock as terminal). Delivered files
+// are read here (Node, or account directory mounted in Docker) or by the host helper.
 const deliveries = history
   ? new DeliveryIndex({
       sessions: () => history.list(),
@@ -224,43 +304,43 @@ const deliveryFiles = deliveries
       },
     })
   : undefined;
-// Linha do tempo do timelapse: grava cada snapshot novo (com throttle) em <dataDir>/timeline.
+// Timelapse timeline: records each new snapshot (throttled) to <dataDir>/timeline.
 const timelineDir = join(config.dataDir, TIMELINE_DIR);
 const timeline = config.timeline ? new TimelineRecorder({ dir: timelineDir }) : undefined;
 if (timeline) hub.onSnapshot((snap) => timeline.ingest(snap));
-// Responder pelo escritório (hook PermissionRequest): age sobre as sessões, então segue a mesma trava.
+// Reply from the office (PermissionRequest hook): acts on sessions, so follows the same lock.
 const permissions = config.terminal
   ? new PermissionRegistry({
       office,
       viewers: () => hub.localSize,
       answerLater: () => !!config.remote?.allow.has('permissions'),
-      // Só o Claude Code: a busca da resposta dada no terminal lê o formato do transcript dele.
+      // Claude Code only: searching for the response given in the terminal reads its transcript format.
       transcriptPathOf: (id) => claude.transcriptPathOf(id),
-      // Pedidos do hook do Codex: a conta pela pasta CODEX_HOME que ele manda.
+      // Requests from the Codex hook: account from CODEX_HOME directory it sends.
       codexAccount: (account, codexHome) => codexAccountOf(accounts.entriesOf('codex'), account, codexHome),
       demoDecide: (id, d) => office.decideDemoPermission(id, d),
       demoDetail: (id) => office.demoPermission(id),
     })
   : undefined;
 late.permissions = permissions;
-// Mensagens pelo escritório (plugin habblaud-mensagens): entram na sessão como se você as tivesse digitado, então
-// seguem a mesma trava (e HABBLAUD_MENSAGENS=0 desliga só elas). Ao Codex vão por `codex queue` (messages/codex.ts):
-// fora do Docker o próprio servidor roda o comando (HABBLAUD_CODEX_BIN ou `codex` do PATH); no Docker, o auxiliar do
-// host (npm run codex:bridge).
+// Messages from the office (plugin habblaud-mensagens): enter the session as if you typed them, so they
+// follow the same lock (and HABBLAUD_MENSAGENS=0 disables only them). Sent to Codex via `codex queue`
+// (messages/codex.ts): outside Docker the server itself runs the command (HABBLAUD_CODEX_BIN or `codex` in PATH);
+// in Docker, via the host helper (npm run codex:bridge).
 const codexBin = config.messages && !config.inDocker ? findCodexBin(process.env) : undefined;
-// Terminal interativo e Novo agente: os dois rodam o Claude Code neste computador, então pedem a mesma liberação,
-// HABBLAUD_PTY=1 (aceita os mesmos valores do HABBLAUD_TERMINAL).
+// Interactive terminal and New agent: both run Claude Code on this computer, so require the same opt-in,
+// HABBLAUD_PTY=1 (accepts the same values as HABBLAUD_TERMINAL).
 const ptyFlag = process.env.HABBLAUD_PTY?.trim();
 const ptyOptIn = isTruthy(ptyFlag);
-// Novo agente pelo escritório (sessão do Claude Code em segundo plano, ou a tela do app do Claude preenchida): a
-// liberação acima mais a trava das mensagens. No Docker, quem roda é o auxiliar do host (npm run codex:bridge).
+// New agent from the office (Claude Code background session, or pre-filled Claude app screen): the
+// opt-in above plus the messages lock. In Docker, run by the host helper (npm run codex:bridge).
 const spawnOn = config.messages && ptyOptIn;
 const attachments = spawnOn ? new AttachmentStore() : undefined;
 const spawnBin = config.inDocker ? undefined : runnableClaudeBin(process.env);
 const spawn = spawnOn
   ? new SpawnService(config.inDocker ? { attachments } : { opener: createOpener(), cli: spawnBin ? createCliRunner(spawnBin) : undefined, attachments })
   : undefined;
-// Ditado: no Docker quem transcreve é o auxiliar do host; no Node, o servidor, se achar o Whisper local.
+// Dictation: in Docker transcribed by the host helper; in Node, by the server if local Whisper is found.
 const whisper = config.messages && !config.inDocker ? findWhisper() : undefined;
 const dictation = config.messages
   ? new DictationService(whisper && !('missing' in whisper) ? { transcriber: createWhisperTranscriber(whisper) } : {})
@@ -278,18 +358,18 @@ const messages = config.messages
   : undefined;
 late.messages = messages;
 
-// Terminal interativo (abrir/assumir sessões e encerrar agentes): opt-in com HABBLAUD_PTY=1, só com bind local, fora
-// do Docker, com node-pty e o executável do claude no PATH.
+// Interactive terminal (open/take over sessions and stop agents): opt-in with HABBLAUD_PTY=1, local bind only,
+// outside Docker, with node-pty and claude executable in PATH.
 const claudeBinSetting = process.env.HABBLAUD_CLAUDE_BIN?.trim();
 const claudeBin = claudeBinFrom();
 let spawnPty: SpawnPty | null = null;
 let ptyScreen: ScreenFactory | undefined;
 let ptyOff: string | undefined;
-if (!ptyOptIn) ptyOff = ptyFlag ? tr('desligado por HABBLAUD_PTY={0}', [ptyFlag]) : tr('desligado (ligue com HABBLAUD_PTY=1)');
-else if (config.inDocker) ptyOff = tr('indisponível no Docker (rode com npm start)');
-else if (!config.terminal) ptyOff = tr('mesma trava do terminal ({0})', [terminalOffReason(process.env, config.host, config.inDocker)]);
-else if (!claudeBin) ptyOff = claudeBinSetting ? tr('HABBLAUD_CLAUDE_BIN não encontrado no PATH ({0})', [claudeBinSetting]) : tr('executável "claude" não encontrado no PATH (defina HABBLAUD_CLAUDE_BIN)');
-else if (!isExecutableFile(claudeBin)) ptyOff = tr('o executável do Claude Code não roda: {0} (confira o HABBLAUD_CLAUDE_BIN)', [claudeBin]);
+if (!ptyOptIn) ptyOff = ptyFlag ? tr('off via HABBLAUD_PTY={0}', [ptyFlag]) : tr('off (turn it on with HABBLAUD_PTY=1)');
+else if (config.inDocker) ptyOff = tr('unavailable in Docker (run with npm start)');
+else if (!config.terminal) ptyOff = tr('same lock as the terminal ({0})', [terminalOffReason(process.env, config.host, config.inDocker)]);
+else if (!claudeBin) ptyOff = claudeBinSetting ? tr('HABBLAUD_CLAUDE_BIN not found in PATH ({0})', [claudeBinSetting]) : tr('"claude" executable not found in PATH (set HABBLAUD_CLAUDE_BIN)');
+else if (!isExecutableFile(claudeBin)) ptyOff = tr("the Claude Code executable doesn't run: {0} (check HABBLAUD_CLAUDE_BIN)", [claudeBin]);
 else {
   const loaded = await loadPty();
   spawnPty = loaded.spawn;
@@ -297,29 +377,116 @@ else {
   if (spawnPty) {
     const screen = await loadHeadlessScreen();
     ptyScreen = screen.create ?? undefined;
-    if (screen.reason) log.warn(tr('Terminal interativo sem a tela completa ({0}): ao reconectar, modos como a colagem entre colchetes podem se perder.', [screen.reason]));
+    if (screen.reason) log.warn(tr('Interactive terminal without the full screen ({0}): on reconnect, modes like bracketed paste may be lost.', [screen.reason]));
   }
 }
 const ptys = spawnPty
   ? new PtyManager({
       spawn: spawnPty,
       claudeBin: claudeBin ?? 'claude',
+      agy: agy ? { bin: join(config.home, '.local', 'bin', 'agy-as'), cwd: config.agy.room, worker: (id) => agy.worker(id) } : undefined,
       accounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
       agent: (id) => {
         const a = office.get(id);
         return a && { id: a.id, kind: a.kind, account: a.account, sessionId: a.sessionId, cwd: office.roomPath(a.roomId) };
       },
       onChange: () => office.markDirty(),
+      reopen: (id) => {
+        const o = team.offices.find((x) => x.boss?.kind === 'agy' && x.boss.id === id);
+        return o ? openAgyBossTerminal(o.id, o.boss!.acc!) : undefined;
+      },
       createScreen: ptyScreen,
     })
   : undefined;
 late.ptys = ptys;
 late.ptyOff = ptyOff;
 
+// Worker terminals (server/workers): jobs typed into each registered worker's terminal, answered from its conversation
+// file; you can watch them. Needs the interactive terminal.
+const agyBin = join(config.home, '.local', 'bin', 'agy-as');
+/** A worker's characters per office (named "… (2)" after the first), each in its office's workers room. */
+const seatsOf = (worker: string, name: string) =>
+  team
+    .seats()
+    .filter((x) => x.worker === worker)
+    .map((x) => ({ office: x.office, agentId: x.agentId, name: `${name}${seatSuffix(x.n)}`, room: team.workersRoomOf(x.office) ?? config.agy.room }));
+const workers = ptys
+  ? new WorkerService({
+      office,
+      ptys,
+      targets: () =>
+        team.workers.flatMap((id): WorkerTarget[] => {
+          if (id.startsWith(CLAUDE_WORKER)) {
+            const e = accounts.entries().find((x) => x.id === id.slice(CLAUDE_WORKER.length));
+            if (!e) return [];
+            const name = tr('{0} (Claude worker)', [e.detected.email?.split('@')[0] ?? e.id]);
+            return [{ id, kind: 'claude', agentId: workerAgentId(id), account: e.id, name, configDir: e.dir, isDefault: isDefaultDir(e.dir, config.home), seats: seatsOf(id, name) }];
+          }
+          const p = agy?.profileOf(id);
+          return p ? [{ id, kind: 'agy', agentId: workerAgentId(id), account: p.account, name: p.name, acc: id, stateDir: p.stateDir, seats: seatsOf(id, p.name) }] : [];
+        }),
+      agyBin,
+      claudeBin: claudeBin ?? 'claude',
+      rulesHook: [process.env.HABBLAUD_RULES_HOOK?.trim(), join(config.home, '.local', 'bin', 'rules-hook')].find((p) => p && existsSync(p)),
+      room: config.agy.room,
+      logFile: join(agyRoot, 'agy-ask.log.jsonl'),
+      onChange: () => team.publish(),
+      offices: { has: (w, o) => team.isWorker(w, o), of: (w) => team.officeOfWorker(w) },
+      board: (item) => agy?.upsertJob(item),
+    })
+  : undefined;
+late.workers = workers;
+if (workers) {
+  agy?.setExternal((acc, officeId) => workers.statusOf(acc, officeId));
+  workers.start();
+}
+
+/** "＋ Boss" with an Antigravity account: appoints it and opens its terminal (after its worker terminal closed). */
+async function appointAgyBoss(officeId: string | undefined, acc: string, cwd?: string): Promise<{ ok: true; pty?: PtyInfo } | { ok: false; status: number; error: string }> {
+  if (!ptys) return { ok: false, status: 503, error: tr('the interactive terminal is off (HABBLAUD_PTY=1)') };
+  if (cwd !== undefined && !isAbsolute(cwd)) return { ok: false, status: 400, error: tr('folder not found: {0}', [cwd]) };
+  const wasWorker = team.isWorker(acc);
+  const r = team.appointAgy(officeId, acc, agy?.profileOf(acc)?.name);
+  if (!r.ok) return r;
+  const agentId = `agy:${acc}`;
+  // Its worker terminal is closing (one agy per profile): wait for it before opening the boss's.
+  for (let i = 0; wasWorker && ptys.ofAgent(agentId) && i < 40; i++) await new Promise((ok) => setTimeout(ok, 200));
+  try {
+    return { ok: true, pty: openAgyBossTerminal(team.officeOf(officeId)!.id, acc, cwd) };
+  } catch (err) {
+    return { ok: false, status: 500, error: errMsg(err) };
+  }
+}
+
+/**
+ * An Antigravity boss's terminal (the open one, or a new idle agy: no prompt, no quota), in its office's folder;
+ * AGY_BOSS=1 makes agy load the boss's rules (agy-hub), AGY_OFFICE names the office for agy-ask.
+ */
+function openAgyBossTerminal(officeId: string, acc: string, cwd?: string): PtyInfo {
+  const agentId = `agy:${acc}`;
+  const open = ptys!.ofAgent(agentId);
+  if (open) return open;
+  const folder = team.officeOf(officeId)?.folder;
+  const desk = join(config.agy.room, 'boss');
+  const where = cwd ?? (folder && existsSync(folder) ? folder : existsSync(desk) ? desk : config.agy.room);
+  return ptys!.openProgram({ agentId, account: agentId, file: agyBin, args: [acc], cwd: where, env: { AGY_BOSS: '1', AGY_OFFICE: officeId } });
+}
+if (ptys) {
+  for (const o of team.offices) {
+    if (o.boss?.kind !== 'agy') continue;
+    try {
+      openAgyBossTerminal(o.id, o.boss.acc!);
+    } catch (err) {
+      log.warn(tr("Couldn't open the Antigravity boss's terminal: {0}", [errMsg(err)]));
+    }
+  }
+}
+
 if (config.demo) office.setDemo(true);
-// As fontes síncronas (a do Claude Code) terminam o boot aqui, antes de o hub começar a transmitir.
+// Synchronous sources (Claude Code) finish booting here, before the hub starts broadcasting.
 void agents.start();
 accounts.start();
+board.start();
 hub.start();
 if (timeline) {
   timeline.start();
@@ -330,15 +497,61 @@ messages?.start();
 stats.start();
 updates.start();
 worldUplink?.start();
+// New rule violations: one Board news item each, and the offices again (their logs, the rules boards flash).
+const rulesTimer = setInterval(() => {
+  try {
+    const fresh = rulesLog.poll();
+    if (!fresh.length) return;
+    for (const v of fresh) {
+      const name = team.officeOf(v.office)?.name ?? v.office;
+      board.feed.add({ id: `rule:${v.at}:${v.office}:${v.who}:${v.kind}`, at: v.at, kind: 'rule', icon: '📜', text: tr('{0} stopped by the rules of {1}', [v.who, name]), detail: v.detail });
+    }
+    board.publish();
+    team.publish();
+  } catch (err) {
+    log.warnOnce(`rules:${errMsg(err)}`, tr('Reading the rules log failed: {0}', [errMsg(err)]));
+  }
+}, 2_000);
+rulesTimer.unref?.();
 const ticker = setInterval(() => {
   try {
     office.tick();
   } catch (err) {
-    log.warnOnce(`tick:${errMsg(err)}`, tr('Falha no relógio do escritório: {0}', [errMsg(err)]));
+    log.warnOnce(`tick:${errMsg(err)}`, tr('Office clock failed: {0}', [errMsg(err)]));
   }
 }, 250);
 
 const api = createApiHandler({
+  editPlan: (target, mtime, edit) => {
+    if ('room' in target) return board.editPlan(target.room, mtime, edit);
+    const folder = team.offices.find((o) => o.id === target.office)?.folder;
+    return folder ? board.editFolderPlan(folder, mtime, edit) : { ok: false, status: 404, error: tr('office not found: {0}', [target.office]) };
+  },
+  team: {
+    appoint: (office, id, pending) => team.appoint(office, id, pending),
+    setWorker: (office, acc, on) => team.setWorker(office, acc, on),
+    appointAgy: agy ? appointAgyBoss : undefined,
+    createOffice: (name, folder) => team.createOffice(name, folder),
+    renameOffice: (office, name) => team.renameOffice(office, name),
+    setFolder: (office, folder) => team.setFolder(office, folder),
+    deleteOffice: (office) => team.deleteOffice(office),
+    setRules: (office, rules, rev) => team.setRules(office, rules, rev),
+    proposeRule: (office, p) => team.proposeRule(office, p),
+    decideRule: (office, id, accept) => team.decideRule(office, id, accept),
+    rulesView: (id, who) => {
+      const o = team.officeOf(id);
+      const rules = team.rulesOf(id);
+      return o && rules ? { office: o.id, name: o.name, folder: o.folder, rules, text: rulesText(o, rules, who) } : undefined;
+    },
+  },
+  workers: workers
+    ? {
+        ask: (input) => workers.ask(input),
+        waitJob: (id, s) => workers.waitJob(id, s),
+        cancel: (p) => workers.cancel(p),
+      }
+    : undefined,
+  agy: agy ? { assign: (id, job) => agy.assign(id, job), stop: (id) => agy.stopJobs(id), setDefaults: (id, d) => agy.setDefaults(id, d) } : undefined,
   renameRoom: (id, name) => {
     const path = office.roomPath(id);
     if (!path) return undefined;
@@ -359,6 +572,18 @@ const api = createApiHandler({
   permissions: permissions ? createPermissionRoutes(permissions) : undefined,
   messages: messages ? createMessageRoutes(messages) : undefined,
   pty: ptys ? createPtyRoutes(ptys) : undefined,
+  accountsApi: ptys
+    ? createAccountsRoutes({
+        ptys,
+        home: config.home,
+        agyRoot: agyProfilesRoot(process.env, config.home),
+        claudeBin: claudeBin ?? 'claude',
+        agyBin: join(config.home, '.local', 'bin', 'agy-as'),
+        claudeAccounts: () => accounts.entries().map((a) => ({ id: a.id, dir: a.dir, isDefault: isDefaultDir(a.dir, config.home) })),
+        addClaudeDir: (dir) => accounts.addDir(dir),
+        refresh: () => accounts.refresh(),
+      })
+    : undefined,
   spawn,
   attachments,
   dictation,
@@ -389,10 +614,10 @@ function parseUrl(req: http.IncomingMessage): URL {
   }
 }
 
-/** Quem atende o que não é /api: o Vite (dev) ou os arquivos de dist/client (produção). */
+/** Handles non-/api requests: Vite (dev) or dist/client static files (production). */
 let fallback: (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => void;
 if (config.dev) {
-  // Import dinâmico: o bundle de produção nunca carrega o Vite.
+  // Dynamic import: production bundle never loads Vite.
   const { createServer } = await import('vite');
   const vite = await createServer({
     configFile: join(config.rootDir, 'vite.config.ts'),
@@ -406,7 +631,7 @@ if (config.dev) {
   fallback = (req, res, url) => serveStatic(req, res, url.pathname);
 }
 
-// Host/Origin/Content-Type: barra DNS rebinding e CSRF antes de qualquer rota (inclusive o Vite).
+// Host/Origin/Content-Type: blocks DNS rebinding and CSRF before any route (including Vite).
 const guard = createRequestGuard({ allowedHosts: config.allowedHosts });
 
 server.on('request', (req, res) => {
@@ -415,21 +640,21 @@ server.on('request', (req, res) => {
     if (guard(req, res)) return;
     if (!api(req, res, url)) fallback(req, res, url);
   } catch (err) {
-    log.warn(tr('Erro ao responder {0} {1}: {2}', [req.method, url.pathname, errMsg(err)]));
-    if (!res.headersSent) sendJson(res, 500, { error: tr('erro interno') });
+    log.warn(tr('Error responding to {0} {1}: {2}', [req.method, url.pathname, errMsg(err)]));
+    if (!res.headersSent) sendJson(res, 500, { error: tr('internal error') });
     else res.destroy();
   }
 });
 
 server.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EADDRINUSE') log.error(tr('A porta {0} já está em uso (defina HABBLAUD_PORT para usar outra).', [config.port]));
-  else log.error(tr('Erro no servidor HTTP: {0}', [errMsg(err)]));
+  if (err.code === 'EADDRINUSE') log.error(tr('Port {0} is already in use (set HABBLAUD_PORT to use another one).', [config.port]));
+  else log.error(tr('HTTP server error: {0}', [errMsg(err)]));
   process.exit(1);
 });
 
 /**
- * Porta remota (celular na rede local): o mesmo app, mas toda requisição passa pelo login (http/remote.ts) antes da
- * API. A porta principal segue só local; quem separa as duas é a porta em que a conexão chegou.
+ * Remote port (mobile on local network): the same app, but every request goes through login (http/remote.ts) before
+ * the API. The main port remains local-only; they are distinguished by the incoming connection port.
  */
 let remoteListener: RemoteListener | undefined;
 if (config.remote) {
@@ -449,8 +674,8 @@ if (config.remote) {
         if (gate(req, res, url)) return;
         if (!api(req, res, url)) fallback(req, res, url);
       } catch (err) {
-        log.warn(tr('Erro ao responder (remoto) {0} {1}: {2}', [req.method, url.pathname, errMsg(err)]));
-        if (!res.headersSent) sendJson(res, 500, { error: tr('erro interno') });
+        log.warn(tr('Error responding (remote) to {0} {1}: {2}', [req.method, url.pathname, errMsg(err)]));
+        if (!res.headersSent) sendJson(res, 500, { error: tr('internal error') });
         else res.destroy();
       }
     },
@@ -458,11 +683,11 @@ if (config.remote) {
     config.allowedHosts,
   );
   remoteListener.server.once('listening', () => {
-    const allow = [...remote.allow].join(', ') || tr('só ver');
-    const where = config.inDocker ? tr('publicada pelo HABBLAUD_REMOTE_BIND') : remote.host;
-    const scheme = remote.tls ? 'HTTPS' : tr('HTTP SEM criptografia (HABBLAUD_REMOTE_INSECURE_HTTP)');
-    log.info(tr('   Acesso remoto: ligado na porta {0} ({1}), {2}, com login; libera: {3}.', [remote.port, where, scheme, allow]));
-    if (remote.allow.has('spawn') && !spawn) log.warn(tr('   Acesso remoto: "spawn" liberado, mas o Novo agente está desligado (ligue com HABBLAUD_PTY=1).'));
+    const allow = [...remote.allow].join(', ') || tr('view only');
+    const where = config.inDocker ? tr('published via HABBLAUD_REMOTE_BIND') : remote.host;
+    const scheme = remote.tls ? 'HTTPS' : tr('HTTP WITHOUT encryption (HABBLAUD_REMOTE_INSECURE_HTTP)');
+    log.info(tr('   Remote access: on at port {0} ({1}), {2}, with login; allows: {3}.', [remote.port, where, scheme, allow]));
+    if (remote.allow.has('spawn') && !spawn) log.warn(tr('   Remote access: "spawn" allowed, but New agent is off (turn it on with HABBLAUD_PTY=1).'));
   });
 } else if (config.remoteWarning) {
   log.warn(`   ${config.remoteWarning}.`);
@@ -470,72 +695,72 @@ if (config.remote) {
 
 server.listen(config.port, config.host, () => {
   const host = config.host === '0.0.0.0' || config.host === '::' ? 'localhost' : config.host;
-  log.info(tr('🏢 Habblaud {0}{1}{2} em http://{3}:{4}', [config.version, config.dev ? ' (dev)' : '', config.inDocker ? ' (docker)' : '', host, config.port]));
+  log.info(tr('🏢 Habblaud {0}{1}{2} at http://{3}:{4}', [config.version, config.dev ? ' (dev)' : '', config.inDocker ? ' (docker)' : '', host, config.port]));
   const list = accounts.entries();
-  if (!list.length) log.warn(tr('Nenhuma pasta do Claude Code encontrada (defina HABBLAUD_CLAUDE_DIRS).'));
+  if (!list.length) log.warn(tr('No Claude Code folder found (set HABBLAUD_CLAUDE_DIRS).'));
   for (const dir of codexDirsRefused(process.env, config.home)) {
-    log.warn(tr('{0} é uma pasta do Codex, não do Claude Code: fica fora das contas do Claude Code.', [dir]));
+    log.warn(tr('{0} is a Codex folder, not a Claude Code one: it stays out of the Claude Code accounts.', [dir]));
   }
   for (const a of list) {
     const src = agents.sources().find((s) => s.label === a.id);
     const usage = accounts.usageView(a.id).status;
-    log.info(tr('   Conta {0} ({1}): {2} sessão(ões) aberta(s) · uso: {3} · {4}', [a.detected.short, a.id, src?.sessions ?? 0, usage, a.dir]));
+    log.info(tr('   Account {0} ({1}): {2} open session(s) · usage: {3} · {4}', [a.detected.short, a.id, src?.sessions ?? 0, usage, a.dir]));
   }
   if (codex) {
     const codexAccounts = codex.accountEntries();
     const open = codex.sources().reduce((n, s) => n + s.sessions, 0);
-    log.info(tr('   Codex: {0} conta(s), {1} sessão(ões) aberta(s).', [codexAccounts.length, open]));
+    log.info(tr('   Codex: {0} account(s), {1} open session(s).', [codexAccounts.length, open]));
     for (const a of codexAccounts) {
-      log.info(tr('   Conta {0} do Codex ({1}): uso: {2} · {3}', [a.detected.short, a.id, accounts.usageView(a.id).status, a.detected.configDir]));
+      log.info(tr('   Codex account {0} ({1}): usage: {2} · {3}', [a.detected.short, a.id, accounts.usageView(a.id).status, a.detected.configDir]));
     }
   } else {
-    log.info(tr('   Codex: {0}.', [config.codex ? tr('nenhuma pasta do Codex encontrada (defina HABBLAUD_CODEX_DIRS)') : tr('desligado (HABBLAUD_CODEX=0)')]));
+    log.info(tr('   Codex: {0}.', [config.codex ? tr('no Codex folder found (set HABBLAUD_CODEX_DIRS)') : tr('off (HABBLAUD_CODEX=0)')]));
   }
-  if (office.isDemo()) log.info(tr('   Modo demonstração ligado (agentes simulados misturados aos reais).'));
-  if (config.terminal) log.info(tr('   Terminal: ligado (acesso só local).'));
-  else log.info(tr('   Terminal: desligado ({0}).', [terminalOffReason(process.env, config.host, config.inDocker)]));
-  log.info(ptys ? tr('   Terminal interativo: ligado ({0}).', [claudeBin]) : tr('   Terminal interativo: {0}.', [ptyOff ?? tr('desligado')]));
+  if (office.isDemo()) log.info(tr('   Demo mode on (simulated agents mixed in with the real ones).'));
+  if (config.terminal) log.info(tr('   Terminal: on (local access only).'));
+  else log.info(tr('   Terminal: off ({0}).', [terminalOffReason(process.env, config.host, config.inDocker)]));
+  log.info(ptys ? tr('   Interactive terminal: on ({0}).', [claudeBin]) : tr('   Interactive terminal: {0}.', [ptyOff ?? tr('off')]));
   log.info(
     !spawn
-      ? tr('   Novo agente: desligado ({0}).', [!ptyOptIn ? tr('ligue com HABBLAUD_PTY=1') : tr('mesma trava das mensagens')])
+      ? tr('   New agent: off ({0}).', [!ptyOptIn ? tr('turn it on with HABBLAUD_PTY=1') : tr('same lock as messages')])
       : config.inDocker
-        ? tr('   Novo agente: ligado, pelo auxiliar do host (deixe npm run codex:bridge rodando no computador).')
+        ? tr('   New agent: on, via the host helper (keep npm run codex:bridge running on the computer).')
         : spawnBin
-          ? tr('   Novo agente: ligado ({0} --bg; pasta ainda não confiável abre no app do Claude).', [spawnBin])
-          : tr('   Novo agente: ligado, só pelo app do Claude (claude não encontrado no PATH).'),
+          ? tr('   New agent: on ({0} --bg; a folder not yet trusted opens in the Claude app).', [spawnBin])
+          : tr('   New agent: on, only via the Claude app (claude not found in PATH).'),
   );
-  log.info(timeline ? tr('   Linha do tempo (timelapse): gravando em {0}.', [timelineDir]) : tr('   Linha do tempo (timelapse): gravação desligada (HABBLAUD_TIMELINE).'));
-  log.info(tr('   Responder pelo escritório: {0}.', [config.terminal ? tr('ligado (precisa do mod: npm run mod:install; ou do hook antigo: npm run hooks:install)') : tr('desligado (mesma trava do terminal)')]));
+  log.info(timeline ? tr('   Timeline (timelapse): recording to {0}.', [timelineDir]) : tr('   Timeline (timelapse): recording off (HABBLAUD_TIMELINE).'));
+  log.info(tr('   Reply from the office: {0}.', [config.terminal ? tr('on (needs the mod: npm run mod:install; or the old hook: npm run hooks:install)') : tr('off (same lock as the terminal)')]));
   log.info(
     config.messages
-      ? tr('   Mensagens pelo escritório: ligadas (precisa do plugin habblaud-mensagens: npm run mod:install).')
-      : tr('   Mensagens pelo escritório: desligadas ({0}).', [messagesOffReason(process.env, config.host, config.inDocker)]),
+      ? tr('   Messages from the office: on (needs the habblaud-mensagens plugin: npm run mod:install).')
+      : tr('   Messages from the office: off ({0}).', [messagesOffReason(process.env, config.host, config.inDocker)]),
   );
   if (config.messages) {
     log.info(
       codexBin
-        ? tr('   Mensagens ao Codex: pelo codex queue ({0}).', [codexBin])
+        ? tr('   Messages to Codex: via codex queue ({0}).', [codexBin])
         : config.inDocker
-          ? tr('   Mensagens ao Codex: pelo auxiliar do host (deixe npm run codex:bridge rodando no Mac).')
-          : tr('   Mensagens ao Codex: sem o binário do Codex (codex no PATH ou HABBLAUD_CODEX_BIN); o auxiliar npm run codex:bridge também serve.'),
+          ? tr('   Messages to Codex: via the host helper (keep npm run codex:bridge running on the Mac).')
+          : tr('   Messages to Codex: no Codex binary (codex in PATH or HABBLAUD_CODEX_BIN); the npm run codex:bridge helper also works.'),
     );
   }
   if (config.world.warning) log.warn(`   ${config.world.warning}.`);
   log.info(
     !world
-      ? tr('   Habblaud World: escondido (HABBLAUD_WORLD=0).')
+      ? tr('   Habblaud World: hidden (HABBLAUD_WORLD=0).')
       : !config.world.url
-        ? tr('   Habblaud World: desligado (HABBLAUD_WORLD_URL recusada).')
-        : tr('   Habblaud World: {0}, conta neste computador: {1}{2}.', [
-            config.world.defaultUrl ? tr('{0} (padrão)', [config.world.url]) : config.world.url,
+        ? tr('   Habblaud World: off (HABBLAUD_WORLD_URL rejected).')
+        : tr('   Habblaud World: {0}, account on this computer: {1}{2}.', [
+            config.world.defaultUrl ? tr('{0} (default)', [config.world.url]) : config.world.url,
             world.state(),
-            config.terminal ? '' : tr(' (só leitura: a trava do terminal está desligada)'),
+            config.terminal ? '' : tr(' (read-only: the terminal lock is off)'),
           ]),
   );
   log.info(
     updates.enabled
-      ? tr('   Versão nova: verificando as releases de github.com/{0} a cada 6 h.', [config.repo])
-      : tr('   Versão nova: verificação desligada ({0}).', [config.repo ? 'HABBLAUD_UPDATE_CHECK' : tr('package.json sem repositório no GitHub')]),
+      ? tr('   New version: checking github.com/{0} releases every 6 h.', [config.repo])
+      : tr('   New version: check off ({0}).', [config.repo ? 'HABBLAUD_UPDATE_CHECK' : tr('package.json has no GitHub repository')]),
   );
 });
 
@@ -543,11 +768,13 @@ let shuttingDown = false;
 function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
-  log.info(tr('Encerrando ({0})…', [signal]));
+  log.info(tr('Shutting down ({0})…', [signal]));
   clearInterval(ticker);
+  clearInterval(rulesTimer);
   stats.stop();
   agents.stop();
   accounts.stop();
+  board.stop();
   hub.stop();
   terminals?.stop();
   timeline?.stop();

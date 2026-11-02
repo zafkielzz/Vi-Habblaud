@@ -1,4 +1,4 @@
-// Histórico fictício do "Meu dia" com a conta do Codex: ela sempre tem algum projeto, com tokens e sem custo.
+// Fictional "My day" history with the Codex account: it always has some project, with tokens and without cost.
 import { describe, expect, it } from 'vitest';
 import type { AgentInfo } from '../types';
 import { dayKeyOf, queryDay, StatsBook, type StatsView } from '../daystats';
@@ -13,7 +13,7 @@ function agent(id: string, roomId: string, account: string): AgentInfo {
     roomId,
     name: id,
     look: 'f',
-    role: 'Agente principal',
+    role: 'Main agent',
     sessionId: `s-${id}`,
     account,
     status: 'working',
@@ -27,8 +27,8 @@ function agent(id: string, roomId: string, account: string): AgentInfo {
   };
 }
 
-describe('seedDemoHistory com o Codex', () => {
-  it('o Codex ganha projeto no histórico (tokens, sem custo); o Claude Code continua com custo', () => {
+describe('seedDemoHistory with Codex', () => {
+  it('Codex gets a project in history (tokens, no cost); Claude Code continues with cost', () => {
     const view: StatsView = {
       agents: [agent('demo:1', 'demo:/dev/loja-virtual', 'demo:.claude'), agent('demo:2', 'demo:/dev/loja-virtual', 'demo:.codex')],
       rooms: [{ id: 'demo:/dev/loja-virtual', name: 'loja-virtual' }],
@@ -43,7 +43,7 @@ describe('seedDemoHistory com o Codex', () => {
       seedDemoHistory(book, view, now, 'UTC', seed);
       const d = queryDay(book.list(), '2026-10-08', 'UTC', now);
       const codex = d.accounts.find((a) => a.id === 'demo:.codex');
-      expect(codex, `semente ${seed}`).toBeDefined();
+      expect(codex, `seed ${seed}`).toBeDefined();
       expect(codex!.counts.tokensIn).toBeGreaterThan(0);
       expect(codex!.counts.costUSD).toBe(0);
       expect(d.accounts.find((a) => a.id === 'demo:.claude')!.counts.costUSD).toBeGreaterThan(0);

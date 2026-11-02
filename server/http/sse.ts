@@ -1,17 +1,17 @@
-// Transmissão em tempo real (Server-Sent Events) em GET /api/stream.
-// Eventos nomeados: snapshot | feed | notice (o `data` é o JSON do protocolo em shared/types.ts).
-// Snapshots saem com throttle (~200 ms); feed e avisos vão em lote logo depois do snapshot.
+// Real-time broadcast (Server-Sent Events) on GET /api/stream.
+// Named events: snapshot | feed | notice (the `data` is protocol JSON from shared/types.ts).
+// Snapshots are throttled (~200 ms); feed and notices are batched right after snapshot.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { OfficeSnapshot } from '../../shared/types';
 import type { Office } from '../model/office';
 import { isLoopbackHost } from './guard';
 
-/** Cliente lento demais (buffer acumulado acima disto) é desconectado; o EventSource reconecta. */
+/** Overly slow client (buffer accumulated above this) is disconnected; EventSource reconnects. */
 const MAX_BUFFERED = 8 * 1024 * 1024;
 
 export class Hub {
   private clients = new Set<ServerResponse>();
-  /** Clientes que abriram a página por um Host local (os únicos que podem responder pedidos de permissão). */
+  /** Clients that opened the page via local Host (only ones allowed to answer permission requests). */
   private local = new WeakSet<ServerResponse>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private pinger: ReturnType<typeof setInterval> | null = null;
@@ -20,7 +20,7 @@ export class Hub {
   private snapshotCbs = new Set<(snap: OfficeSnapshot) => void>();
   private readonly throttleMs: number;
   private readonly pingMs: number;
-  /** Quem pode responder pelo escritório; padrão: Host local. A porta remota (http/remote.ts) troca a regra. */
+  /** Who can answer for the office; default: local Host. Remote port (http/remote.ts) overrides rule. */
   private readonly canAnswer: (req: IncomingMessage) => boolean;
 
   constructor(
@@ -53,20 +53,20 @@ export class Hub {
     return this.clients.size;
   }
 
-  /** Avisado a cada snapshot novo transmitido (ex.: o gravador da linha do tempo). */
+  /** Notified on each new snapshot broadcast (e.g. timeline recorder). */
   onSnapshot(cb: (snap: OfficeSnapshot) => void): () => void {
     this.snapshotCbs.add(cb);
     return () => void this.snapshotCbs.delete(cb);
   }
 
-  /** Páginas conectadas por um Host local (localhost/127.x): quem pode responder pelo escritório. */
+  /** Pages connected via local Host (localhost/127.x): who can answer for the office. */
   get localSize(): number {
     let n = 0;
     for (const c of this.clients) if (this.local.has(c) && !c.destroyed && !c.writableEnded) n++;
     return n;
   }
 
-  /** Conecta um cliente: snapshot completo + últimos 50 itens do feed, depois o fluxo ao vivo. */
+  /** Connects a client: full snapshot + last 50 feed items, then live stream. */
   attach(req: IncomingMessage, res: ServerResponse): void {
     req.socket.setTimeout(0);
     req.socket.setNoDelay(true);
@@ -88,7 +88,7 @@ export class Hub {
     res.on('error', drop);
   }
 
-  /** Fecha a revisão agora e transmite o que houver. Devolve o snapshot atual. */
+  /** Flushes revision now and broadcasts pending data. Returns current snapshot. */
   flush(): OfficeSnapshot {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -100,7 +100,7 @@ export class Hub {
         try {
           cb(r.snapshot);
         } catch {
-          // quem escuta não atrapalha a transmissão
+          // listeners do not disrupt broadcast
         }
       }
     }
@@ -109,7 +109,7 @@ export class Hub {
     return r.snapshot;
   }
 
-  /** Snapshot atual (depois de transmitir o que estiver pendente), com `serverTime` de agora. */
+  /** Current snapshot (after broadcasting pending data), with current serverTime. */
   current(): OfficeSnapshot {
     return { ...this.flush(), serverTime: Date.now() };
   }

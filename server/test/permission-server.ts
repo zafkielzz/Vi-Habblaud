@@ -1,8 +1,8 @@
-// Servidor de teste para "responder pelo escritório": Office + Hub + rotas de verdade (guard, app e
-// /api/permissions) numa porta livre do 127.0.0.1, com um agente principal na sessão "sess-1".
-// Usado pelos testes das rotas e do hook (mod/habblaud-permissoes/hooks/permission-hook.mjs rodado como processo).
-// Com `codex`, também um agente principal do Codex (conta ".codex", thread CODEX_THREAD) e a fonte do Codex ao vivo
-// (`codexLive`, um falso) para o hook do Codex (mod/habblaud-codex/hook.mjs).
+// Test server for "answering from the office": Office + Hub + real routes (guard, app, and
+// /api/permissions) on a free port on 127.0.0.1, with a main agent in session "sess-1".
+// Used by tests for routes and hook (mod/habblaud-permissoes/hooks/permission-hook.mjs run as process).
+// With `codex`, also a main agent for Codex (account ".codex", thread CODEX_THREAD) and live Codex source
+// (`codexLive`, a fake) for the Codex hook (mod/habblaud-codex/hook.mjs).
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { AccountsService } from '../accounts/service';
@@ -18,7 +18,7 @@ import { tempDir } from './fixtures';
 
 export const MAIN = 'acc:1';
 export const SESSION = 'sess-1';
-/** Thread (sintético) do agente do Codex do servidor de teste. */
+/** Thread (synthetic) of test server's Codex agent. */
 export const CODEX_THREAD = '0199b0c0-1234-7abc-8def-0123456789ab';
 export const CODEX_MAIN = `.codex:${CODEX_THREAD}`;
 
@@ -27,7 +27,7 @@ export interface PermissionServer {
   port: number;
   office: Office;
   registry?: PermissionRegistry;
-  /** Páginas locais "abertas" (o que Hub.localSize diria). */
+  /** "Open" local pages (what Hub.localSize would report). */
   setViewers(n: number): void;
   close(): Promise<void>;
 }
@@ -81,9 +81,9 @@ export async function servePermissions(
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   const port = (server.address() as AddressInfo).port;
-  office.addMain({ id: MAIN, account: 'acc', sessionId: SESSION, cwd: '/p/loja', role: 'Agente principal', startedAt: Date.now(), status: 'working' });
+  office.addMain({ id: MAIN, account: 'acc', sessionId: SESSION, cwd: '/p/loja', role: 'Main agent', startedAt: Date.now(), status: 'working' });
   if (opts.codex) {
-    office.addMain({ id: CODEX_MAIN, provider: 'codex', account: '.codex', sessionId: CODEX_THREAD, cwd: '/p/loja', role: 'Agente principal', startedAt: Date.now(), status: 'working' });
+    office.addMain({ id: CODEX_MAIN, provider: 'codex', account: '.codex', sessionId: CODEX_THREAD, cwd: '/p/loja', role: 'Main agent', startedAt: Date.now(), status: 'working' });
   }
   if (opts.demo) office.setDemo(true);
   return {
@@ -105,7 +105,7 @@ export async function servePermissions(
   };
 }
 
-/** Requisição crua (dá para trocar Host, Origin e Content-Type). */
+/** Raw request (allows swapping Host, Origin, and Content-Type). */
 export function request(
   base: string,
   path: string,
@@ -135,7 +135,7 @@ export function request(
   });
 }
 
-/** JSON do hook PermissionRequest (sintético) para a sessão de teste. */
+/** PermissionRequest hook JSON (synthetic) for test session. */
 export function hookJson(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     session_id: SESSION,

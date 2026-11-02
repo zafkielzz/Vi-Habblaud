@@ -1,17 +1,17 @@
-// Regras puras da camada de texto do mundo (balões e enquadramento).
+// Pure rules for world text overlay layer (bubbles and framing).
 import { describe, expect, it } from 'vitest';
 import { overviewFrame } from '../camera';
 import { rationBubbles, waitBubbleText } from './overlay';
 
-describe('balões', () => {
-  it('espera: só o motivo, sem o prefixo redundante', () => {
-    expect(waitBubbleText('aprovar uma permissão')).toBe('Aprovar uma permissão');
-    expect(waitBubbleText('Precisa de você: escolher uma opção')).toBe('Escolher uma opção');
-    expect(waitBubbleText(undefined)).toBe('Responder no terminal');
-    expect(waitBubbleText('   ')).toBe('Responder no terminal');
+describe('bubbles', () => {
+  it('waiting: reason only, without redundant prefix', () => {
+    expect(waitBubbleText('approve a permission')).toBe('Approve a permission');
+    expect(waitBubbleText('Needs you: choose an option')).toBe('Choose an option');
+    expect(waitBubbleText(undefined)).toBe('Answer in terminal');
+    expect(waitBubbleText('   ')).toBe('Answer in terminal');
   });
 
-  it('visão geral: no máximo 1 balão com texto por área e 4 na tela (mais recentes primeiro)', () => {
+  it('overview: at most 1 text bubble per area and 4 on screen (most recent first)', () => {
     const items = [
       { room: 'a', prio: 50, changedAt: 10 },
       { room: 'a', prio: 50, changedAt: 30 },
@@ -23,23 +23,23 @@ describe('balões', () => {
     ];
     const keep = rationBubbles(items, 1, 4);
     expect(keep.size).toBe(4);
-    expect(keep.has(1)).toBe(true); // o mais recente da área "a"
+    expect(keep.has(1)).toBe(true); // most recent in area "a"
     expect(keep.has(0) || keep.has(2)).toBe(false);
-    expect(keep.has(3)).toBe(false); // prioridade menor perde para as outras áreas
+    expect(keep.has(3)).toBe(false); // lower priority yields to other areas
   });
 });
 
-describe('visão geral', () => {
+describe('overview', () => {
   const building = { x: 0, y: 0, w: 4 * 16 * 16, h: 29 * 16 };
 
-  it('enquadra o prédio na área livre (fora dos painéis), com folga para as placas acima', () => {
+  it('frames building in available area (outside panels), with clearance for signs above', () => {
     const free = overviewFrame(building, 1440, 900, { top: 0, right: 0, bottom: 0, left: 0 });
     const ui = overviewFrame(building, 1440, 900, { top: 64, right: 0, bottom: 200, left: 320 });
     expect(ui.zoom).toBeLessThan(free.zoom);
-    // a altura do enquadramento (placas + prédio + meio-fio) cabe entre a barra superior e a inferior
+    // framed height (signs + building + curb) fits between top and bottom bars
     const h = (building.h + 3.5 * 16) * ui.zoom;
     expect(h).toBeLessThanOrEqual(900 - 64 - 200 - 30);
-    // começa acima da parede norte (placas) e termina abaixo da fachada sul
+    // starts above north wall (signs) and ends below south facade
     expect(ui.cy).toBeGreaterThan(building.h / 2);
     expect(ui.dy).toBeGreaterThan(0);
   });

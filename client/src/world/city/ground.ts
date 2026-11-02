@@ -1,7 +1,7 @@
-// Chão da cidade (navegador): a célula de quarteirão desenhada UMA vez e repetida em todos os quarteirões (calçada,
-// meio-fio, pista com faixa tracejada, faixas de pedestres, gramado dos lotes), a célula da praça (piso de pedra,
-// anel de mármore, canteiros), o chão dos jardins dos lotes vazios (caminhos, lago, deck, canteiros de pomar) e os
-// sprites próprios da cidade (fonte, floreira). Árvores, postes e bancos vêm de render/props.ts (os do escritório).
+// City ground (browser): block cell drawn ONCE and repeated across all blocks (sidewalk,
+// curb, roadway with dashed stripe, crosswalks, lot lawns), plaza cell (stone pavement,
+// marble ring, flowerbeds), ground of empty-lot gardens (paths, pond, deck, orchard beds), and
+// city's own sprites (fountain, planter). Trees, lamp posts, and benches come from render/props.ts (office ones).
 import { TILE, type ArtModule } from '../../art/api';
 import { mulberry32 } from '../../../../shared/hash';
 import { BLOCK_TILES, DOOR, FOUNTAIN, LOT, SIDEWALK } from '../../../../shared/world/city';
@@ -24,11 +24,11 @@ function safe(fn: () => void): void {
   try {
     fn();
   } catch {
-    // arte incompleta não derruba a cidade
+    // incomplete art does not crash the city
   }
 }
 
-/** Grama ~15% menos saturada, como a área externa do escritório. */
+/** Grass ~15% less saturated, matching the office outdoor area. */
 function desaturate(ctx: Ctx, x: number, y: number, w: number, h: number, k = 0.16): void {
   ctx.save();
   try {
@@ -36,12 +36,12 @@ function desaturate(ctx: Ctx, x: number, y: number, w: number, h: number, k = 0.
     ctx.fillStyle = `rgba(128,128,128,${k})`;
     ctx.fillRect(x, y, w, h);
   } catch {
-    // sem o modo de mistura
+    // without blend mode
   }
   ctx.restore();
 }
 
-/** Meio-fio: borda clara da calçada e a face escura virada para a pista. */
+/** Curb: light sidewalk edge and dark face facing the road. */
 function curb(ctx: Ctx, x: number, y: number, w: number, h: number, side: 'n' | 's' | 'w' | 'e'): void {
   const light = '#e2dfd6';
   const face = '#8d8a82';
@@ -75,34 +75,34 @@ function curb(ctx: Ctx, x: number, y: number, w: number, h: number, side: 'n' | 
   }
 }
 
-/** Pista: asfalto, faixa tracejada, faixas de pedestres, bueiros e tampas. */
+/** Roadway: asphalt, dashed line, crosswalks, storm drains, and manholes. */
 function paintStreets(art: ArtModule, ctx: Ctx, seed: number): void {
   const s = cellSurfaces();
   for (const r of [...s.streets, s.intersection]) safe(() => art.drawFloor(ctx, 'street', T(r.x), T(r.y), T(r.w), T(r.h), { seed: 13 }));
-  // bordas da pista escurecidas junto ao meio-fio (sarjeta)
+  // roadway edges darkened along curb (gutter)
   ctx.fillStyle = 'rgba(20,22,28,0.18)';
   const ow = T(s.sidewalkOuter.w);
   const oh = T(s.sidewalkOuter.h);
   ctx.fillRect(ow, 0, 3, oh);
   ctx.fillRect(0, oh, ow, 3);
-  // faixa central tracejada
+  // dashed center line
   ctx.fillStyle = 'rgba(255,226,140,0.85)';
   for (const [x0, y0, x1, y1] of s.laneMarks) {
     if (y0 === y1) for (let x = T(x0); x < T(x1) - 8; x += 24) ctx.fillRect(x, T(y0) - 1, 12, 2);
     else for (let y = T(y0); y < T(y1) - 8; y += 24) ctx.fillRect(T(x0) - 1, y, 2, 12);
   }
-  // faixas de pedestres (zebra): barras no sentido do trânsito, empilhadas na travessia
+  // crosswalks (zebra): stripes along traffic direction, stacked across crossing
   for (const cw of s.crosswalks) {
     const r = cw.rect;
     ctx.fillStyle = 'rgba(244,244,236,0.9)';
     if (cw.across === 'ns') for (let y = T(r.y) + 4; y < T(r.y + r.h) - 3; y += 6) ctx.fillRect(T(r.x) + 3, y, T(r.w) - 6, 3);
     else for (let x = T(r.x) + 4; x < T(r.x + r.w) - 3; x += 6) ctx.fillRect(x, T(r.y) + 3, 3, T(r.h) - 6);
   }
-  // linha de parada antes do cruzamento
+  // stop line before intersection
   ctx.fillStyle = 'rgba(244,244,236,0.75)';
   ctx.fillRect(ow - 2, oh + 2, 2, T(2) - 2);
   ctx.fillRect(ow + T(3), oh - 2, T(2) - 2, 2);
-  // bueiros e tampas de inspeção
+  // storm drains and manhole covers
   const rng = mulberry32(seed);
   for (let i = 0; i < 3; i++) {
     const x = T(4 + Math.floor(rng() * 36));
@@ -122,32 +122,32 @@ function paintStreets(art: ArtModule, ctx: Ctx, seed: number): void {
   ctx.fillRect(mx + 3, my + 6, 6, 1);
 }
 
-/** Calçada (anel em volta do quarteirão) com meio-fio, e a borda de pedra do gramado. */
+/** Sidewalk (ring around the block) with curb, and stone border of lawn. */
 function paintSidewalkRing(art: ArtModule, ctx: Ctx): void {
   const s = cellSurfaces();
   const o = s.sidewalkOuter;
   safe(() => art.drawFloor(ctx, 'sidewalk', T(o.x), T(o.y), T(o.w), T(o.h), { seed: 12 }));
-  // meio-fio nas quatro bordas externas
+  // curb along four outer edges
   curb(ctx, 0, 0, T(o.w), 2, 'n');
   curb(ctx, 0, T(o.h) - 3, T(o.w), 3, 's');
   curb(ctx, 0, 0, 2, T(o.h), 'w');
   curb(ctx, T(o.w) - 3, 0, 3, T(o.h), 'e');
-  // covas das árvores e drenos não: a decoração vem por cima
+  // no tree pits or drains: decoration is drawn on top
 }
 
-/** Gramado dos lotes, com mureta baixa de pedra em volta do quarteirão e a divisa sutil entre os lotes. */
+/** Lot lawn, with low stone wall around the block and subtle boundary between lots. */
 function paintLotsGround(art: ArtModule, ctx: Ctx): void {
   const s = cellSurfaces();
   const b = s.block;
   safe(() => art.drawFloor(ctx, 'grass', T(b.x), T(b.y), T(b.w), T(b.h), { seed: 11 }));
   desaturate(ctx, T(b.x), T(b.y), T(b.w), T(b.h));
-  // divisas (linha de grama mais escura)
+  // boundaries (darker grass line)
   ctx.fillStyle = 'rgba(40,70,40,0.18)';
   for (const r of s.lots) {
     ctx.fillRect(T(r.x + r.w) - 1, T(r.y), 1, T(r.h));
     ctx.fillRect(T(r.x), T(r.y + r.h) - 1, T(r.w), 1);
   }
-  // mureta de pedra baixa
+  // low stone wall
   const x = T(b.x);
   const y = T(b.y);
   const w = T(b.w);
@@ -162,7 +162,7 @@ function paintLotsGround(art: ArtModule, ctx: Ctx): void {
   ctx.fillRect(x, y + h - 2, w, 1);
   ctx.fillRect(x, y, 1, h);
   ctx.fillRect(x + w - 2, y, 1, h);
-  // portões dos lotes (abertura da mureta diante das portas)
+  // lot gates (wall opening in front of doors)
   for (const r of s.lots) {
     const north = r.y === b.y;
     const gx = T(r.x + DOOR.dx);
@@ -170,7 +170,7 @@ function paintLotsGround(art: ArtModule, ctx: Ctx): void {
   }
 }
 
-/** A célula de um quarteirão comum (todas iguais). */
+/** Standard block cell (all identical). */
 export function cellCanvas(art: ArtModule): HTMLCanvasElement {
   const s = cellSurfaces();
   const [c, ctx] = canvas(T(s.sidewalkOuter.w + s.streets[0]!.w), T(s.sidewalkOuter.h + s.streets[1]!.h));
@@ -180,7 +180,7 @@ export function cellCanvas(art: ArtModule): HTMLCanvasElement {
   return c;
 }
 
-/** A célula da praça: piso de pedra, anel de mármore em volta da fonte, canteiros nos cantos e caminhos. */
+/** Plaza cell: stone pavement, marble ring around fountain, corner flowerbeds, and paths. */
 export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
   const s = cellSurfaces();
   const [c, ctx] = canvas(T(s.sidewalkOuter.w + s.streets[0]!.w), T(s.sidewalkOuter.h + s.streets[1]!.h));
@@ -191,7 +191,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
   const by = T(b.y);
   const bw = T(b.w);
   const bh = T(b.h);
-  // piso de pedra (o da calçada, num tom mais quente), com uma faixa escura em volta e placas grandes no meio
+  // stone floor (sidewalk stone in warmer tone), with dark outer band and large slabs in middle
   safe(() => art.drawFloor(ctx, 'sidewalk', bx, by, bw, bh, { seed: 23 }));
   ctx.fillStyle = 'rgba(196,150,96,0.10)';
   ctx.fillRect(bx, by, bw, bh);
@@ -202,7 +202,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
   ctx.fillRect(bx + bw - T(1) - 3, by + T(1), 3, bh - T(2));
   ctx.fillStyle = 'rgba(255,248,232,0.5)';
   ctx.fillRect(bx + T(1), by + T(1), bw - T(2), 1);
-  // caminhos de pedra clara ligando as quatro calçadas ao anel da fonte
+  // light stone paths connecting the four sidewalks to fountain ring
   const fcx = bx + T(FOUNTAIN.x + FOUNTAIN.w / 2);
   const fcy = by + T(FOUNTAIN.y + FOUNTAIN.h / 2);
   ctx.fillStyle = 'rgba(236,226,206,0.55)';
@@ -213,7 +213,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
     ctx.fillRect(fcx + d * T(1.5) - (d > 0 ? 1 : 0), by + T(1) + 3, 1, bh - T(2) - 6);
     ctx.fillRect(bx + T(1) + 3, fcy + d * T(1.5) - (d > 0 ? 1 : 0), bw - T(2) - 6, 1);
   }
-  // canteiros de grama nos quatro cantos (cantos arredondados, borda de pedra)
+  // grass beds in four corners (rounded corners, stone border)
   const beds: [number, number, number, number][] = [
     [2, 2, 10, 6],
     [b.w - 12, 2, 10, 6],
@@ -230,7 +230,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
     safe(() => art.drawFloor(ctx, 'grass', px, py, T(w), T(h), { seed: 31 }));
     desaturate(ctx, px, py, T(w), T(h));
   }
-  // anel de mármore em volta da fonte e caminhos em cruz
+  // marble ring around fountain and cross paths
   const f = FOUNTAIN;
   const cx = bx + T(f.x + f.w / 2);
   const cy = by + T(f.y + f.h / 2);
@@ -245,7 +245,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
   ctx.beginPath();
   ctx.ellipse(cx, cy, T(7) - 1, T(5.2) - 1, 0, 0, Math.PI * 2);
   ctx.stroke();
-  // mosaico em volta da bacia
+  // mosaic around basin
   ctx.strokeStyle = 'rgba(63,127,216,0.35)';
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
@@ -258,7 +258,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
   ctx.beginPath();
   ctx.ellipse(cx, cy - 1, T(7) - 2, T(5.2) - 2, 0, Math.PI, Math.PI * 2);
   ctx.stroke();
-  // rosa dos ventos de pedra ao sul (onde se nasce)
+  // stone compass rose to the south (spawn point)
   const sx = bx + T(21) + 8;
   const sy = by + T(15) + 8;
   ctx.fillStyle = '#b9b2a4';
@@ -281,7 +281,7 @@ export function plazaCanvas(art: ArtModule): HTMLCanvasElement {
   return c;
 }
 
-/** Chão de um jardim (lote vazio), por cima do gramado: caminho do portão, lago, deck ou canteiros. */
+/** Garden ground (empty lot), on top of lawn: gate path, pond, deck, or beds. */
 export function gardenCanvas(art: ArtModule, kind: GardenKind, north: boolean, seed: number): HTMLCanvasElement {
   const [c, ctx] = canvas(T(LOT.w), T(LOT.h));
   const gx = T(DOOR.dx);
@@ -293,11 +293,11 @@ export function gardenCanvas(art: ArtModule, kind: GardenKind, north: boolean, s
   const midY = T(LOT.h / 2);
   switch (kind) {
     case 'park': {
-      // caminho do portão até o meio, e uma cruz
+      // path from gate to center, and a cross
       if (north) path(gx, 0, T(2), midY + 8);
       else path(gx, midY - 8, T(2), T(LOT.h) - midY + 8);
       path(T(2), midY - 8, T(10), T(1));
-      // canteiro redondo no centro
+      // round bed in center
       ctx.fillStyle = '#6a4b35';
       ctx.beginPath();
       ctx.ellipse(T(7), midY + 14, 18, 7, 0, 0, Math.PI * 2);
@@ -330,7 +330,7 @@ export function gardenCanvas(art: ArtModule, kind: GardenKind, north: boolean, s
         [cx + 12, cy + 6],
         [cx + 28, cy - 8],
       ]) ctx.fillRect(x!, y!, 5, 1);
-      // vitórias-régias
+      // water lilies
       ctx.fillStyle = '#4b8a45';
       for (const [x, y] of [
         [cx + 20, cy + 3],
@@ -352,7 +352,7 @@ export function gardenCanvas(art: ArtModule, kind: GardenKind, north: boolean, s
       break;
     }
     case 'cafe': {
-      // deck de madeira com borda de pedra e o caminho do portão
+      // wooden deck with stone edge and gate path
       ctx.fillStyle = '#8d8a82';
       ctx.fillRect(T(2) - 2, midY - T(2) - 2, T(10) + 4, T(4) + 4);
       safe(() => art.drawFloor(ctx, 'wood', T(2), midY - T(2), T(10), T(4), { seed: 8 }));
@@ -365,9 +365,9 @@ export function gardenCanvas(art: ArtModule, kind: GardenKind, north: boolean, s
 }
 
 /**
- * Fonte da praça (bloqueia 4 × 3 tiles; o desenho passa um pouco para os lados): bacia octogonal de pedra com a
- * mureta à mostra, água, e o chafariz de duas taças no meio. A água que pula e as ondinhas são desenhadas por quadro
- * (scene.ts), a partir de `water` (centro da bacia) e `jet` (topo da taça de cima).
+ * Plaza fountain (blocks 4 × 3 tiles; drawing extends slightly to sides): octagonal stone basin with exposed
+ * wall, water, and two-tiered fountain in center. Splashing water and ripples are drawn per frame
+ * (scene.ts), from `water` (basin center) and `jet` (top of upper tier).
  */
 export function fountainCanvas(): { canvas: HTMLCanvasElement; ax: number; ay: number; water: { x: number; y: number; rx: number; ry: number }; jet: { x: number; y: number } } {
   const w = T(6);
@@ -390,11 +390,11 @@ export function fountainCanvas(): { canvas: HTMLCanvasElement; ax: number; ay: n
     }
     ctx.closePath();
   };
-  // sombra no chão
+  // ground shadow
   ctx.fillStyle = 'rgba(28,36,52,0.22)';
   oct(cx + 4, cy + wall + 3, rx + 2, ry + 1);
   ctx.fill();
-  // mureta (face) e tampa
+  // wall (face) and cap
   ctx.fillStyle = '#6f6a62';
   oct(cx, cy + wall, rx, ry);
   ctx.fill();
@@ -409,7 +409,7 @@ export function fountainCanvas(): { canvas: HTMLCanvasElement; ax: number; ay: n
   ctx.fillStyle = '#e4dfd4';
   oct(cx, cy - 1, rx - 2, ry - 1.5);
   ctx.fill();
-  // água
+  // water
   ctx.fillStyle = '#2f75a8';
   oct(cx, cy + 1, rx - 6, ry - 5);
   ctx.fill();
@@ -420,7 +420,7 @@ export function fountainCanvas(): { canvas: HTMLCanvasElement; ax: number; ay: n
   ctx.beginPath();
   ctx.ellipse(cx - rx * 0.35, cy - ry * 0.3, rx * 0.32, ry * 0.18, 0, 0, Math.PI * 2);
   ctx.fill();
-  // pedestal, taça de baixo, coluna e taça de cima
+  // pedestal, lower bowl, column, and upper bowl
   const p1 = cy - 3;
   ctx.fillStyle = '#7d776d';
   ctx.fillRect(cx - 4, p1 - 10, 8, 12);
@@ -446,7 +446,7 @@ export function fountainCanvas(): { canvas: HTMLCanvasElement; ax: number; ay: n
   ctx.fillStyle = '#c9c3b6';
   ctx.fillRect(cx - 2, p1 - 24, 2, 13);
   bowl(p1 - 25, 8);
-  // pinha no topo
+  // finial on top
   ctx.fillStyle = '#d8d2c6';
   ctx.fillRect(cx - 1, p1 - 30, 3, 5);
   ctx.fillStyle = '#f2a33a';
@@ -454,7 +454,7 @@ export function fountainCanvas(): { canvas: HTMLCanvasElement; ax: number; ay: n
   return { canvas: c, ax: Math.round(cx), ay: base, water: { x: cx, y: cy, rx: rx - 8, ry: ry - 7 }, jet: { x: cx, y: p1 - 31 } };
 }
 
-/** Floreira de pedra com flores. */
+/** Stone planter with flowers. */
 export function planterCanvas(seed: number): { canvas: HTMLCanvasElement; ax: number; ay: number } {
   const [c, ctx] = canvas(24, 16);
   const rng = mulberry32(seed);
@@ -478,5 +478,5 @@ export function planterCanvas(seed: number): { canvas: HTMLCanvasElement; ax: nu
   return { canvas: c, ax: 12, ay: 14 };
 }
 
-/** Tamanho (px) da célula de quarteirão. */
+/** Block cell size (px). */
 export const CELL_PX = { w: T(BLOCK_TILES.w + 2 * SIDEWALK + 5), h: T(BLOCK_TILES.h + 2 * SIDEWALK + 5) };

@@ -1,13 +1,13 @@
-// Cartão "Seu prédio" (a janela do Habblaud World, conta aprovada) e a janela "Ver o que foi enviado".
+// "Your building" card (Habblaud World window, approved account) and the "See what was sent" window.
 //
-// O cartão mostra a conexão, a pausa, a parada pedida pelo servidor do mundo (com o motivo) e "Fora do mundo"; o botão
-// "Sair do mundo" pede confirmação em dois cliques, como o "Sair da conta", e explica a diferença para a pausa. Fase 6:
-// conta suspensa ou banida ganha "Recorrer por e-mail" (mailto com o id da conta no assunto, quando se sabe), o prédio
-// "não verificado" mostra o selo com "Contestar por e-mail", e a manutenção do mundo aparece no lugar do "Reconectando".
-// O cartão é atualizado no lugar a cada render (contagens e "última remessa" mudam a cada poucos segundos sem refazer a
-// tela inteira, que perderia o foco). A janela mostra a última remessa exatamente como o servidor local a guardou
-// (GET /api/world/last-uplink): o JSON, o horário, o tamanho em bytes e a resposta do mundo. As regras e os textos
-// estão em world-model.ts (buildingView, ackView).
+// The card shows connection, pause, stop requested by world server (with reason), and "Out of the world"; the
+// "Leave the world" button requires a two-click confirmation, like "Log out", and explains difference from pause. Phase 6:
+// suspended or banned account gets "Appeal by email" (mailto with account id in subject, when known), "unverified"
+// building shows tag with "Dispute by email", and world maintenance appears in place of "Reconnecting…".
+// The card is updated in place on each render (counts and "last upload" change every few seconds without re-rendering the
+// whole screen, which would lose focus). The window shows the last upload exactly as the local server stored it
+// (GET /api/world/last-uplink): the JSON, timestamp, byte size, and world response. Rules and texts
+// are in world-model.ts (buildingView, ackView).
 import { tr } from '../../../../shared/i18n';
 import type { WorldBuildingStatus, WorldClient, WorldLastUplink } from '../../net/world';
 import { copyText, h, iconButton, setAttr, setHidden, setText, setVariant } from '../dom';
@@ -19,19 +19,19 @@ import { ackView, appealMailto, buildingView, bytesText, leaveHint, prettyUplink
 
 export interface BuildingHost {
   readonly client: WorldClient | null;
-  /** O prédio segundo o último status (ou o snapshot, antes dele). */
+  /** The building according to latest status (or snapshot, before it). */
   building(): WorldBuildingStatus | undefined;
   hasPlayer(): boolean;
-  /** Relê o status (depois de pausar ou retomar). */
+  /** Re-reads status (after pausing or resuming). */
   refresh(): void;
-  /** Abre a janela "Ver o que foi enviado". */
+  /** Opens "See what was sent" window. */
   openSent(opener: HTMLElement): void;
-  /** "Ver como os outros veem": entra no próprio prédio pela cidade (null: a cena Mundo não está disponível aqui). */
+  /** "See it as others do": enters own building through the city (null: World scene unavailable here). */
   visitOwn?(): (() => void) | null;
   now(): number;
-  /** O id da conta no mundo, se o servidor local já sabe (vai no assunto do recurso). */
+  /** Account id in the world, if local server knows it (goes into appeal subject). */
   accountId?(): string | undefined;
-  /** O mundo está em manutenção (o último status veio com `maintenance`). */
+  /** World is in maintenance (latest status came with `maintenance`). */
   maintenance?(): boolean;
 }
 
@@ -54,35 +54,35 @@ export class BuildingCard {
   private readonly appealRow: HTMLElement;
   private readonly appealLink: HTMLAnchorElement;
   private readonly appealHint: HTMLElement;
-  /** Fase 5: o código do prédio e o "Enquanto você estava fora". */
+  /** Phase 5: building code and "While you were away". */
   private readonly social: BuildingSocial;
   private statsKey = '';
   private busy = false;
   private action: 'pause' | 'resume' | 'join' | null = null;
-  /** Primeiro clique em "Sair do mundo" dado: o segundo confirma. */
+  /** First click on "Leave the world" done: second confirms. */
   private confirmingLeave = false;
 
   constructor(private readonly host: BuildingHost) {
     const titleId = 'ui-world-building-title';
     this.badge = h('span', { class: 'ui-world__bstate' });
     this.desc = h('p', { class: 'ui-world__bdesc' });
-    this.stats = h('ul', { class: 'ui-world__bstats', attrs: { 'aria-label': tr('Seu prédio agora') } });
+    this.stats = h('ul', { class: 'ui-world__bstats', attrs: { 'aria-label': tr('Your building now') } });
     this.rejectedReason = h('span');
-    this.rejected = h('p', { class: 'ui-world__brejected', role: 'status', hidden: true }, h('strong', { text: tr('O mundo recusou a última remessa.') }), ' ', this.rejectedReason);
+    this.rejected = h('p', { class: 'ui-world__brejected', role: 'status', hidden: true }, h('strong', { text: tr('The world rejected the last upload.') }), ' ', this.rejectedReason);
     this.toggleBtn = h('button', { class: 'ui-btn', type: 'button', on: { click: () => void this.toggle() } });
-    this.sentBtn = h('button', { class: 'ui-btn', type: 'button', text: tr('Ver o que foi enviado'), attrs: { 'aria-haspopup': 'dialog' }, on: { click: () => host.openSent(this.sentBtn) } });
+    this.sentBtn = h('button', { class: 'ui-btn', type: 'button', text: tr('See what was sent'), attrs: { 'aria-haspopup': 'dialog' }, on: { click: () => host.openSent(this.sentBtn) } });
     this.visitBtn = h('button', {
       class: 'ui-btn',
       type: 'button',
-      text: `👁 ${tr('Ver como os outros veem')}`,
-      title: tr('Entrar no seu prédio pela cidade e ver o que quem visita vê (sem nada do escritório real)'),
+      text: `👁 ${tr('See it as others do')}`,
+      title: tr('Enter your building through the city and see what visitors see (nothing from your real office)'),
       hidden: true,
       on: { click: () => host.visitOwn?.()?.() },
     });
     this.actions = h('div', { class: 'ui-world__actions' }, this.toggleBtn, this.sentBtn, this.visitBtn);
     this.hint = h('p', { class: 'ui-set__hint' });
     this.error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
-    this.leaveBtn = h('button', { class: 'ui-btn', type: 'button', text: tr('Sair do mundo'), on: { click: () => void this.leave() } });
+    this.leaveBtn = h('button', { class: 'ui-btn', type: 'button', text: tr('Leave the world'), on: { click: () => void this.leave() } });
     this.leaveRow = h('div', { class: 'ui-world__leave' }, h('p', { class: 'ui-set__hint', text: leaveHint() }), h('div', { class: 'ui-world__actions' }, this.leaveBtn));
     this.unverified = h('p', { class: 'ui-world__unverified', role: 'status', hidden: true });
     this.appealLink = h('a', { class: 'ui-btn', attrs: { href: appealMailto() } });
@@ -96,7 +96,7 @@ export class BuildingCard {
         'div',
         { class: 'ui-world__bhead' },
         h('span', { class: 'ui-world__bart', attrs: { 'aria-hidden': 'true' } }),
-        h('div', { class: 'ui-world__btitle' }, h('h4', { text: tr('Seu prédio'), attrs: { id: titleId } }), this.badge),
+        h('div', { class: 'ui-world__btitle' }, h('h4', { text: tr('Your building'), attrs: { id: titleId } }), this.badge),
       ),
       this.desc,
       this.unverified,
@@ -112,7 +112,7 @@ export class BuildingCard {
     this.sync();
   }
 
-  /** Atualiza no lugar (barato: só mexe no que mudou). */
+  /** Updates in place (cheap: only touches what changed). */
   sync(): void {
     const v = buildingView(this.host.building(), this.host.hasPlayer(), this.host.now(), { maintenance: this.host.maintenance?.() });
     setVariant(this.el, 'is-', v.state);
@@ -126,7 +126,7 @@ export class BuildingCard {
     setHidden(this.stats, !v.stats.length);
     setHidden(this.rejected, !v.rejected);
     setText(this.rejectedReason, v.rejected ?? '');
-    // "Ver o que foi enviado" fica sempre (sem personagem, nada saiu: a janela diz isso); o botão de pausa, só quando há.
+    // "See what was sent" is always visible (without character, nothing left: window explains that); pause button only when available.
     setHidden(this.toggleBtn, !v.toggle);
     setHidden(this.hint, !v.toggle);
     if (v.toggle && !this.busy) {
@@ -134,7 +134,7 @@ export class BuildingCard {
       setText(this.toggleBtn, v.toggle.text);
       setText(this.hint, v.toggle.hint);
     }
-    // o próprio prédio, como os outros veem: com o prédio no mundo (aceso ou pausado) e a cena Mundo disponível
+    // Own building, as others see it: with building in the world (online or paused) and World scene available
     setHidden(this.visitBtn, !(v.state === 'connected' || v.state === 'paused' || v.state === 'reconnecting') || !this.host.visitOwn?.());
     setHidden(this.leaveRow, !v.leave);
     if (!v.leave && this.confirmingLeave) this.resetLeave();
@@ -151,17 +151,17 @@ export class BuildingCard {
 
   private resetLeave(): void {
     this.confirmingLeave = false;
-    setText(this.leaveBtn, tr('Sair do mundo'));
+    setText(this.leaveBtn, tr('Leave the world'));
     this.leaveBtn.classList.remove('is-danger');
   }
 
-  /** "Sair do mundo" em dois cliques: o primeiro pede confirmação, o segundo retira o prédio. */
+  /** "Leave the world" in two clicks: first asks for confirmation, second withdraws the building. */
   private async leave(): Promise<void> {
     const client = this.host.client;
     if (this.busy || !client) return;
     if (!this.confirmingLeave) {
       this.confirmingLeave = true;
-      setText(this.leaveBtn, tr('Confirmar: sair do mundo'));
+      setText(this.leaveBtn, tr('Confirm: leave the world'));
       this.leaveBtn.classList.add('is-danger');
       return;
     }
@@ -204,8 +204,8 @@ export class BuildingCard {
 }
 
 /**
- * Janela "Ver o que foi enviado". Fica dentro da janela do Habblaud World (um <dialog> dentro de outro): aberta como
- * modal, ela sobe para o topo da top layer sem fechar a do World, e Esc ou um clique fora fecham só ela.
+ * "See what was sent" window. Sits inside Habblaud World window (<dialog> inside another): opened as
+ * modal, it ascends to top layer without closing World window, and Esc or click outside closes only it.
  */
 export class SentDialog {
   readonly el: HTMLDialogElement;
@@ -219,14 +219,14 @@ export class SentDialog {
   ) {
     const titleId = 'ui-world-sent-title';
     this.body = h('div', { class: 'ui-world-sent__content' });
-    const close = iconButton(ICONS.close, tr('Fechar'), () => this.close(), 'ui-icon-btn--sm');
+    const close = iconButton(ICONS.close, tr('Close'), () => this.close(), 'ui-icon-btn--sm');
     this.el = h(
       'dialog',
       { class: 'ui-world-sent', attrs: { 'aria-labelledby': titleId } },
       h(
         'div',
         { class: 'ui-world-sent__body' },
-        h('div', { class: 'ui-world-sent__head' }, h('h2', { class: 'ui-world-sent__title', text: tr('O que foi enviado'), attrs: { id: titleId } }), close),
+        h('div', { class: 'ui-world-sent__head' }, h('h2', { class: 'ui-world-sent__title', text: tr('What was sent'), attrs: { id: titleId } }), close),
         this.body,
       ),
     ) as HTMLDialogElement;
@@ -264,11 +264,11 @@ export class SentDialog {
     const client = this.client();
     if (!client) return;
     const req = ++this.req;
-    this.body.replaceChildren(h('p', { class: 'ui-set__hint', text: tr('Carregando…') }));
+    this.body.replaceChildren(h('p', { class: 'ui-set__hint', text: tr('Loading…') }));
     const r = await client.lastUplink();
     if (req !== this.req) return;
     if (!r.ok) {
-      const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Tentar de novo'), on: { click: () => void this.load() } });
+      const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Try again'), on: { click: () => void this.load() } });
       this.body.replaceChildren(h('p', { class: 'ui-world__error', role: 'alert', text: worldErrorText(r.code, 'sent') }), h('div', { class: 'ui-world__actions' }, retry));
       return;
     }
@@ -277,21 +277,21 @@ export class SentDialog {
 
   private nothing(): Node[] {
     return [
-      h('p', { class: 'ui-world-sent__lead', text: tr('Nada saiu deste computador ainda: o prédio entra no mundo com a primeira remessa.') }),
-      h('p', { class: 'ui-set__hint' }, extLink(tr('O que pode sair e o que nunca sai'), WORLD_PRIVACY_URL)),
+      h('p', { class: 'ui-world-sent__lead', text: tr('Nothing has left this computer yet: the building joins the world with the first upload.') }),
+      h('p', { class: 'ui-set__hint' }, extLink(tr('What can leave and what never does'), WORLD_PRIVACY_URL)),
     ];
   }
 
   private sent(last: WorldLastUplink): Node[] {
     const json = prettyUplink(last.uplink);
     const ack = ackView(last.ack, last.bytes);
-    const copy = h('button', { class: 'ui-btn', type: 'button', text: tr('Copiar') });
+    const copy = h('button', { class: 'ui-btn', type: 'button', text: tr('Copy') });
     let timer: ReturnType<typeof setTimeout> | undefined;
     copy.addEventListener('click', async () => {
       const ok = await copyText(json);
-      setText(copy, ok ? tr('Copiado!') : tr('Não deu para copiar'));
+      setText(copy, ok ? tr('Copied!') : tr("Couldn't copy"));
       clearTimeout(timer);
-      timer = setTimeout(() => setText(copy, tr('Copiar')), 1600);
+      timer = setTimeout(() => setText(copy, tr('Copy')), 1600);
     });
     const ackEl = h(
       'p',
@@ -304,19 +304,19 @@ export class SentDialog {
       h(
         'ul',
         { class: 'ui-world-sent__meta' },
-        h('li', { text: tr('Enviada {0} ({1})', [relativeTime(last.at, this.now()), formatClock(last.at)]) }),
+        h('li', { text: tr('Sent {0} ({1})', [relativeTime(last.at, this.now()), formatClock(last.at)]) }),
         h('li', { text: bytesText(last.bytes) }),
       ),
       ackEl,
       h(
         'p',
         { class: 'ui-world-sent__lead' },
-        tr('Isto é tudo o que saiu do seu computador. Nenhum caminho, nome de projeto, texto ou horário do escritório.'),
+        tr('This is everything that left your computer. No paths, project names, text or office times.'),
         ' ',
-        extLink(tr('O que pode sair e o que nunca sai'), WORLD_PRIVACY_URL),
+        extLink(tr('What can leave and what never does'), WORLD_PRIVACY_URL),
       ),
-      h('pre', { class: 'ui-world-sent__json', tabIndex: 0, text: json, attrs: { 'aria-label': tr('Pacote enviado (JSON)') } }),
-      h('div', { class: 'ui-world__actions' }, copy, h('button', { class: 'ui-btn', type: 'button', text: tr('Fechar'), on: { click: () => this.close() } })),
+      h('pre', { class: 'ui-world-sent__json', tabIndex: 0, text: json, attrs: { 'aria-label': tr('Sent packet (JSON)') } }),
+      h('div', { class: 'ui-world__actions' }, copy, h('button', { class: 'ui-btn', type: 'button', text: tr('Close'), on: { click: () => this.close() } })),
     ];
   }
 }

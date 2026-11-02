@@ -1,11 +1,11 @@
-// Fonte de agentes do Claude Code (AgentSource 'claude', ver sources/source.ts).
-// Observa as sessões ABERTAS do Claude Code em todas as contas e alimenta o Office:
-// registro de sessões (status), transcript da sessão (atividades, tarefas, números) e
-// subagentes (arquivos em <sessão>/subagents/, inclusive os de workflows).
+// Claude Code agent source (AgentSource 'claude', see sources/source.ts).
+// Watches OPEN Claude Code sessions across all accounts and feeds the Office:
+// session registry (status), session transcript (activities, tasks, numbers) and
+// subagents (files in <session>/subagents/, including workflows).
 //
-// Desempenho: o polling de ~1 s toca só nos registros de sessão, nos transcripts das sessões
-// abertas e nas pastas subagents/ dessas sessões (nunca no acervo de transcripts antigos).
-// fs.watch é só um acelerador (no Docker com bind mount do macOS os eventos podem não chegar).
+// Performance: the ~1s polling touches only session registries, open session
+// transcripts and those sessions' subagents/ folders (never the archive of old transcripts).
+// fs.watch is only an accelerator (in Docker with macOS bind mounts events may not arrive).
 import { existsSync, readdirSync, readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { SPECIAL } from '../../shared/activity';
@@ -51,25 +51,27 @@ export interface WatcherOptions {
   inDocker: boolean;
   now?: () => number;
   pollMs?: number;
-  /** Quanto do fim de cada transcript é lido ao abrir a sessão (padrão 1 MB). */
+  /** How much of the end of each transcript is read when opening the session (default 1 MB). */
   tailBytes?: number;
   isAlive?: (pid: number) => boolean;
-  /** Desliga o fs.watch (testes). */
+  /** Disables fs.watch (tests). */
   watch?: boolean;
+  /** Sessions left to another part of the office (Claude workers' terminals, server/workers): not shown as sessions. */
+  ignore?: (accountId: string, pid: number) => boolean;
 }
 
-/** cwd -> nome da pasta em projects/ (todo caractere não alfanumérico vira "-"). */
+/** cwd -> folder name in projects/ (every non-alphanumeric character becomes "-"). */
 export function encodeCwd(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
-/** Sem status no registro (versões antigas): deduz pelo transcript. */
+/** No status in registry (older versions): inferred from transcript. */
 function statusFromTranscript(state: TranscriptState, now: number): AgentStatus {
   if (state.ended) return 'idle';
   return state.lastAt !== undefined && now - state.lastAt < 90_000 ? 'working' : 'idle';
 }
 
-/** Aplica um sinal ao rastreador de shells; devolve o término de um job, quando houver. */
+/** Applies a signal to the shell tracker; returns the completion of a job, if any. */
 function applyShellSignal(shells: ShellTracker, owner: string, sig: TranscriptSignal, at: number): ShellFinish | undefined {
   switch (sig.type) {
     case 'shellStart':
@@ -111,7 +113,7 @@ interface SessionTracker {
   state: TranscriptState;
   customTitleFile?: string;
   subs: Map<string, SubTracker>;
-  /** Arquivos de subagentes já vistos e fora do escritório: tamanho conhecido. */
+  /** Subagent files already seen and outside the office: known size. */
   known: Map<string, number>;
   spawns: Map<string, SpawnInfo & { owner: string }>;
   launched: Map<string, { agentId?: string; runId?: string }>;
@@ -121,31 +123,31 @@ interface SessionTracker {
   finishedAgents: Set<string>;
   finishedRuns: Set<string>;
   journals: Map<string, { size: number; agents: Map<string, JournalAgent> }>;
-  /** Shells (Bash/Monitor) que o principal e os subagentes desta sessão estão esperando. */
+  /** Shells (Bash/Monitor) that the main agent and subagents of this session are awaiting. */
   shells: ShellTracker;
   workflowAgents: number;
   lastSubScanAt: number;
-  /** A pasta de subagentes já foi varrida ao menos uma vez. */
+  /** The subagents folder has already been scanned at least once. */
   scanned: boolean;
   watchers: FSWatcher[];
-  /** fs.watch da pasta subagents/ já instalado (ela pode surgir depois do transcript). */
+  /** fs.watch of the subagents/ folder already installed (it may appear after the transcript). */
   watchingSubs: boolean;
-  /** Quando a sessão deixou de aparecer no registro. */
+  /** When the session stopped appearing in the registry. */
   missingSince?: number;
-  /** Desde quando o registro (de uma versão que grava "shell") diz "idle". */
+  /** Since when the registry (from a version that writes "shell") says "idle". */
   idleSince?: number;
 }
 
 const MAX_SET = 2_000;
-/** Texto da atividade "Recebeu resultado em segundo plano" (entrega de uma <task-notification>). */
+/** Text of the "Received background result" activity (delivery of a <task-notification>). */
 const BACKGROUND_RESULT_TEXT = SPECIAL.backgroundResult().text;
-/** Atividades recuperadas do começo do transcript do principal para a linha do tempo longa. */
+/** Activities recovered from the start of the main transcript for the long timeline. */
 const PREFIX_HISTORY = 120;
-/** Tempo que uma sessão precisa ficar fora do registro para ser dada como encerrada. */
+/** Time a session needs to stay out of the registry before being marked as closed. */
 const CLOSE_AFTER_MISSING_MS = 1_500;
 /**
- * Registro "idle" (de uma versão que grava "shell") por este tempo = nenhum shell em segundo plano rodando;
- * a folga cobre a notificação de término ainda a caminho do transcript.
+ * Registry "idle" (from a version that writes "shell") for this duration = no background shell running;
+ * the margin covers the completion notification still on its way to the transcript.
  */
 const IDLE_CLEARS_SHELLS_MS = 30_000;
 
@@ -154,12 +156,12 @@ function addBounded(set: Set<string>, v: string): void {
   if (set.size > MAX_SET) set.delete(set.values().next().value as string);
 }
 
-/** Uma linha que falha não descarta as demais já consumidas pelo tail. */
+/** A failing line does not discard the remaining lines already consumed by tail. */
 function parseWatchedLine(state: TranscriptState, line: string, ctx: ParseContext): LineResult {
   try {
     return parseLine(state, line, ctx);
   } catch (err) {
-    log.warnOnce(`line:${ctx.idPrefix}:${errMsg(err)}`, tr('Linha do transcript de {0} ignorada: {1}', [ctx.idPrefix, errMsg(err)]));
+    log.warnOnce(`line:${ctx.idPrefix}:${errMsg(err)}`, tr('Transcript line from {0} skipped: {1}', [ctx.idPrefix, errMsg(err)]));
     return { activities: [], signals: [], changed: false, at: ctx.now };
   }
 }
@@ -178,7 +180,7 @@ export class ClaudeWatcher implements AgentSource {
   private readonly tailBytes: number;
   private readonly useWatch: boolean;
   private stopped = false;
-  /** Menor versão do Claude Code vista gravando "shell" no registro (começa na conhecida). */
+  /** Lowest Claude Code version seen writing "shell" to registry (starts at known version). */
   private shellStatusVersion = SHELL_STATUS_VERSION;
 
   constructor(private readonly opts: WatcherOptions) {
@@ -187,14 +189,14 @@ export class ClaudeWatcher implements AgentSource {
     this.useWatch = opts.watch ?? true;
   }
 
-  /** Boot + polling periódico. */
+  /** Boot + periodic polling. */
   start(): void {
     this.boot();
     this.timer = setInterval(() => this.safePoll(), this.opts.pollMs ?? 1_000);
     this.timer.unref?.();
   }
 
-  /** Reconstrói as sessões abertas sem gerar avisos (o feed sai em ordem cronológica). Síncrono. */
+  /** Rebuilds open sessions without emitting notices (the feed outputs in chronological order). Synchronous. */
   boot(): void {
     this.opts.office.beginBoot();
     try {
@@ -222,9 +224,9 @@ export class ClaudeWatcher implements AgentSource {
   }
 
   /**
-   * Caminho do transcript de um agente presente (terminal): principal = "<conta>:<pid>"
-   * (depois de /clear ou /resume, o transcript novo); subagente = "<sessionId>:<agentId>". Undefined se o
-   * agente não é acompanhado (ou o transcript do principal ainda não foi achado).
+   * Transcript path of an active agent (terminal): main = "<account>:<pid>"
+   * (after /clear or /resume, the new transcript); subagent = "<sessionId>:<agentId>". Undefined if
+   * agent is not tracked (or the main transcript has not yet been found).
    */
   transcriptPathOf(agentId: string): string | undefined {
     const main = this.sessions.get(agentId);
@@ -236,7 +238,7 @@ export class ClaudeWatcher implements AgentSource {
     return undefined;
   }
 
-  /** Espera as leituras de prefixo pendentes (testes). */
+  /** Awaits pending prefix reads (tests). */
   idle(): Promise<void> {
     return this.prefixChain;
   }
@@ -247,11 +249,11 @@ export class ClaudeWatcher implements AgentSource {
     try {
       this.poll(false);
     } catch (err) {
-      log.warnOnce(`poll:${errMsg(err)}`, tr('Falha no ciclo de leitura: {0}', [errMsg(err)]));
+      log.warnOnce(`poll:${errMsg(err)}`, tr('Read cycle failed: {0}', [errMsg(err)]));
     }
   }
 
-  /** Acelerador: um evento do fs.watch antecipa o próximo ciclo. */
+  /** Accelerator: an fs.watch event triggers the next cycle sooner. */
   private schedule(): void {
     if (this.kick || this.stopped) return;
     const wait = Math.max(60, 150 - (this.now() - this.lastPollAt));
@@ -277,12 +279,13 @@ export class ClaudeWatcher implements AgentSource {
       if (res.error) info.error = res.error;
       this.sourceInfo.set(acc.dir, info);
       for (const entry of res.entries) {
+        if (this.opts.ignore?.(acc.id, entry.pid)) continue;
         const key = `${acc.id}:${entry.pid}`;
         seen.add(key);
         try {
           this.syncSession(key, acc.id, acc.dir, entry, boot);
         } catch (err) {
-          log.warnOnce(`session:${key}:${errMsg(err)}`, tr('Sessão {0}: {1}', [key, errMsg(err)]));
+          log.warnOnce(`session:${key}:${errMsg(err)}`, tr('Session {0}: {1}', [key, errMsg(err)]));
         }
       }
     }
@@ -292,7 +295,7 @@ export class ClaudeWatcher implements AgentSource {
         delete t.missingSince;
         continue;
       }
-      // Some do registro por um instante (arquivo sendo regravado)? Só fecha se continuar sumida.
+      // Disappeared from registry for an instant (file being rewritten)? Only closes if it remains gone.
       t.missingSince ??= now;
       if (!boot && now - t.missingSince < CLOSE_AFTER_MISSING_MS) continue;
       this.closeWatchers(t);
@@ -313,13 +316,13 @@ export class ClaudeWatcher implements AgentSource {
         account: accountId,
         sessionId: entry.sessionId,
         cwd: entry.cwd,
-        role: entry.agent ? tr('Agente {0}', [entry.agent]) : tr('Agente principal'),
+        role: entry.agent ? tr('Agent {0}', [entry.agent]) : tr('Main agent'),
         startedAt: entry.startedAt ?? this.now(),
         status: st.status ?? 'idle',
         waitingFor: st.waitingFor,
       });
     } else if (t.sessionId !== entry.sessionId) {
-      // /clear ou /resume no mesmo processo: mesmo personagem, transcript novo.
+      // /clear or /resume in the same process: same character, new transcript.
       for (const sub of t.subs.values()) office.completeSub(sub.id, { notify: false });
       this.closeWatchers(t);
       const fresh = this.newTracker(key, accountId, dir, entry);
@@ -333,19 +336,19 @@ export class ClaudeWatcher implements AgentSource {
     this.pumpSubs(t);
     const now = this.now();
     const st = registryStatus(entry);
-    // Shells morrem com o processo: o que começou antes dele (sessão retomada) não está rodando.
+    // Shells die with the process: what started before it (resumed session) is not running.
     t.shells.prune(now, entry.startedAt);
     t.shells.holdForeground(st.status === 'waiting', now);
     this.publishShells(t);
     let status = st.status ?? statusFromTranscript(t.state, now);
     const writesShell = this.writesShellStatus(entry);
     if (entry.status === 'idle' && writesShell) {
-      // Esta versão grava "shell": "idle" garante que não há Bash em segundo plano (o que sobrou perdeu o término).
+      // This version writes "shell": "idle" ensures no Bash is in background (leftovers missed their finish).
       t.idleSince ??= now;
       if (now - t.idleSince >= IDLE_CLEARS_SHELLS_MS && t.shells.dropBackgroundShells(now)) this.publishShells(t);
     } else {
       delete t.idleSince;
-      // CLIs antigas não gravam "shell": ocioso com Bash em segundo plano sem notificação = esperando o shell.
+      // Older CLIs do not write "shell": idle with background Bash without notification = waiting for shell.
       if (status === 'idle' && t.shells.hasBackgroundShell(now, SHELL_FALLBACK_MAX_AGE_MS)) status = 'shell';
     }
     office.setStatus(key, status, st.waitingFor);
@@ -353,7 +356,7 @@ export class ClaudeWatcher implements AgentSource {
     office.fillShellActivity(key);
   }
 
-  /** A versão desta sessão grava "shell" no registro? (aprende com as sessões que já gravaram) */
+  /** Does this session's version write "shell" to the registry? (learns from sessions that already wrote it) */
   private writesShellStatus(entry: RegistryEntry): boolean {
     if (!entry.version) return false;
     if (entry.status === 'shell' && compareVersions(entry.version, this.shellStatusVersion) < 0) this.shellStatusVersion = entry.version;
@@ -361,8 +364,8 @@ export class ClaudeWatcher implements AgentSource {
   }
 
   /**
-   * Publica os shells de cada agente da sessão. Um shell em segundo plano de um subagente que já saiu
-   * continua rodando: passa a aparecer no principal (o registro dele conta esses shells também).
+   * Publishes the shells of each agent in the session. A background shell of a subagent that already exited
+   * keeps running: it moves to the main agent (its registry counts these shells too).
    */
   private publishShells(t: SessionTracker): void {
     const office = this.opts.office;
@@ -381,7 +384,7 @@ export class ClaudeWatcher implements AgentSource {
     for (const sub of t.subs.values()) office.setShells(sub.id, byOwner.get(sub.id) ?? []);
   }
 
-  /** Um shell em segundo plano terminou: atividade 'ShellDone' no dono (ou no principal, se o dono já saiu). */
+  /** A background shell finished: 'ShellDone' activity on owner (or on main if owner already exited). */
   private reportShellDone(t: SessionTracker, fin: ShellFinish, live: boolean): void {
     const job = fin.job;
     if (job.kind !== 'shell' || !job.background) return;
@@ -389,7 +392,7 @@ export class ClaudeWatcher implements AgentSource {
     let owner = job.owner;
     if (!office.has(owner) || (owner !== t.key && office.isSubDone(owner))) owner = t.key;
     const exit = fin.summary ? /exit code (-?\d+)/i.exec(fin.summary)?.[1] : undefined;
-    const detail = [exit !== undefined ? tr('Código de saída {0}', [exit]) : undefined, job.command].filter(Boolean).join(' — ') || fin.summary;
+    const detail = [exit !== undefined ? tr('Exit code {0}', [exit]) : undefined, job.command].filter(Boolean).join(' — ') || fin.summary;
     const input: { id: string; label: string; startedAt: number; command?: string } = { id: job.taskId ?? job.toolUseId, label: job.label, startedAt: job.startedAt };
     if (job.command) input.command = job.command;
     office.shellDone(owner, input, fin.outcome, fin.at, detail ? { live, summary: detail } : { live });
@@ -423,7 +426,7 @@ export class ClaudeWatcher implements AgentSource {
     };
   }
 
-  // ---------------------------------------------------------------- transcript principal
+  // ---------------------------------------------------------------- main transcript
 
   private resolveTranscript(t: SessionTracker): string | undefined {
     const now = this.now();
@@ -433,14 +436,14 @@ export class ClaudeWatcher implements AgentSource {
     const projects = join(t.dir, 'projects');
     const expected = join(projects, encodeCwd(t.entry.cwd), name);
     if (existsSync(expected)) return expected;
-    // Caminhos longos podem ser abreviados pelo Claude Code: procura pelo sessionId.
+    // Long paths may be shortened by Claude Code: look up by sessionId.
     try {
       for (const d of readdirSync(projects)) {
         const p = join(projects, d, name);
         if (existsSync(p)) return p;
       }
     } catch {
-      // projects/ ainda não existe
+      // projects/ does not exist yet
     }
     return undefined;
   }
@@ -457,7 +460,7 @@ export class ClaudeWatcher implements AgentSource {
     for (let i = 0; i < 4; i++) {
       const r = t.tail.read();
       if (r.reset) {
-        log.warn(tr('Transcript da sessão {0} foi truncado/substituído; relendo.', [t.key]));
+        log.warn(tr('Transcript of session {0} was truncated/replaced; rereading.', [t.key]));
         this.loadMain(t, t.tail.path);
         return;
       }
@@ -467,7 +470,7 @@ export class ClaudeWatcher implements AgentSource {
     }
   }
 
-  /** Lê o fim do transcript (≈1 MB) e agenda a leitura do começo em segundo plano. */
+  /** Reads the end of the transcript (≈1 MB) and schedules reading the start in the background. */
   private loadMain(t: SessionTracker, path: string): void {
     const tail = new FileTail(path);
     const start = tail.seekTail(this.tailBytes);
@@ -493,7 +496,7 @@ export class ClaudeWatcher implements AgentSource {
           this.mergeOlderShells(t, t.key, shellEvents);
           if (t.customTitleFile) state.customTitle ??= t.customTitleFile;
           this.applyMainSummary(t);
-          // A janela do fim (≈1 MB) pode cobrir só minutos de uma sessão longa: completa a linha do tempo.
+          // The tail window (≈1 MB) may only cover minutes of a long session: completes the timeline.
           this.opts.office.mergeHistory(t.key, older);
         },
         { idPrefix: t.key, keepActivities: PREFIX_HISTORY },
@@ -502,9 +505,9 @@ export class ClaudeWatcher implements AgentSource {
   }
 
   /**
-   * Aplica um lote de linhas do principal. O Claude Code só grava a chamada de AskUserQuestion junto
-   * com a resposta: se a pergunta chega no lote já respondida, ela vira "Recebeu a sua resposta"
-   * (no lugar certo do feed) em vez de um "Fazendo uma pergunta" atrasado.
+   * Applies a batch of lines from the main agent. Claude Code only writes the AskUserQuestion call together
+   * with the answer: if the question arrives in the batch already answered, it becomes "Received your answer"
+   * (in the right place in the feed) instead of a delayed "Asking a question".
    */
   private applyMainLines(t: SessionTracker, lines: string[], live: boolean): void {
     const results = lines.map((line) => parseWatchedLine(t.state, line, { idPrefix: t.key, now: this.now() }));
@@ -527,6 +530,7 @@ export class ClaudeWatcher implements AgentSource {
     const title = titleOf(s);
     if (title) summary.title = title;
     if (s.model) summary.model = s.model;
+    if (s.effort) summary.effort = s.effort;
     if (s.gitBranch) summary.gitBranch = s.gitBranch;
     if (s.permissionMode) summary.permissionMode = s.permissionMode;
     if (s.lastAt !== undefined) summary.lastAt = s.lastAt;
@@ -548,12 +552,12 @@ export class ClaudeWatcher implements AgentSource {
         mergePrefix(state, prefix.state);
         done(prefix.signals, prefix.activities, prefix.shellEvents);
       })
-      .catch((err) => log.warnOnce(`prefix:${path}`, tr('Não foi possível ler o início de um transcript ({0}).', [errMsg(err)])));
+      .catch((err) => log.warnOnce(`prefix:${path}`, tr("Couldn't read the start of a transcript ({0}).", [errMsg(err)])));
   }
 
   /**
-   * Shells em segundo plano que ficaram abertos no começo do arquivo (lido depois da janela do fim):
-   * entram no rastreador, a não ser que a janela já tenha mostrado o término deles.
+   * Background shells that remained open at the start of the file (read after the tail window):
+   * added to the tracker, unless the tail window already showed their completion.
    */
   private mergeOlderShells(t: SessionTracker, owner: string, events: readonly ShellEvent[]): void {
     if (!events.length) return;
@@ -562,11 +566,11 @@ export class ClaudeWatcher implements AgentSource {
     if (t.shells.merge(older.openBackground())) t.shells.prune(this.now(), t.entry.startedAt);
   }
 
-  /** Aplica atividades e sinais de uma linha (do principal ou de um subagente). */
+  /** Applies activities and signals from a line (from main or a subagent). */
   private applyResult(t: SessionTracker, agentId: string, r: LineResult, live: boolean): void {
     const office = this.opts.office;
-    // A fila já informou o fim deste shell ('ShellDone'): a entrega da mesma notificação ao agente vai só
-    // para o histórico, sem tirar o 'ShellDone' do balão (o mundo comemora pela atividade atual).
+    // The queue already reported the end of this shell ('ShellDone'): delivering the same notification to
+    // the agent goes to history only, without removing 'ShellDone' from the bubble (world cheers current activity).
     const note = r.signals.find((sig) => sig.type === 'notification');
     const reported = note?.type === 'notification' && t.shells.reportedRecently(note, r.at);
     for (const a of r.activities) {
@@ -605,7 +609,7 @@ export class ClaudeWatcher implements AgentSource {
         return;
       }
       case 'github':
-        // Só o que chega ao vivo anima a sala; a carga inicial (boot, sessão retomada) vai para o histórico.
+        // Only live events animate the room; initial load (boot, resumed session) goes to history.
         this.opts.office.githubEvent(owner, sig.event, { key: sig.toolUseId, at, live });
         return;
       default:
@@ -620,7 +624,7 @@ export class ClaudeWatcher implements AgentSource {
     if (l?.runId) addBounded(t.finishedRuns, l.runId);
   }
 
-  // ---------------------------------------------------------------- subagentes
+  // ---------------------------------------------------------------- subagents
 
   private isFinished(t: SessionTracker, file: SubagentFile, meta: SubagentMeta | undefined): boolean {
     if (meta?.toolUseId && t.finishedTools.has(meta.toolUseId)) return true;
@@ -641,7 +645,7 @@ export class ClaudeWatcher implements AgentSource {
     try {
       size = statSync(path).size;
     } catch {
-      // workflow sem journal
+      // workflow without journal
     }
     const cached = t.journals.get(runId);
     if (cached && cached.size === size) return cached.agents;
@@ -650,7 +654,7 @@ export class ClaudeWatcher implements AgentSource {
       try {
         agents = parseJournal(readFileSync(path, 'utf8'));
       } catch {
-        // ilegível agora: tenta no próximo ciclo
+        // unreadable right now: retry on next cycle
       }
     }
     t.journals.set(runId, { size, agents });
@@ -670,8 +674,8 @@ export class ClaudeWatcher implements AgentSource {
       t.workflowAgents = workflowAgents;
       this.applyMainSummary(t);
     }
-    // Primeira varredura da sessão (boot ou sessão retomada): só entra quem foi escrito há pouco —
-    // ou quem ainda está no meio de uma ferramenta (ex.: comando longo, sem gravar nada há minutos).
+    // First scan of session (boot or resumed session): only include recently written files —
+    // or those still in the middle of a tool (e.g., long command, nothing written for minutes).
     const firstScan = !t.scanned;
     for (const file of files) {
       if (t.subs.has(file.agentId)) continue;
@@ -699,10 +703,10 @@ export class ClaudeWatcher implements AgentSource {
   }
 
   /**
-   * Subagente quieto há mais de BOOT_RECENT_MS na primeira varredura, mas que pode estar trabalhando:
-   * a última mensagem dele chamou uma ferramenta que ainda não respondeu (comando longo) ou o journal
-   * do workflow diz que começou e não terminou. A decisão final continua com openSub (isFinished e
-   * concludedByIdle, que espera até PENDING_TOOL_TIMEOUT_MS com ferramenta pendente).
+   * Subagent quiet for more than BOOT_RECENT_MS on first scan, but may still be running:
+   * its last message invoked a tool that has not yet replied (long command) or the workflow
+   * journal says it started and has not finished. Final decision remains with openSub (isFinished and
+   * concludedByIdle, which waits up to PENDING_TOOL_TIMEOUT_MS with pending tool).
    */
   private maybeStillRunning(t: SessionTracker, file: SubagentFile, quietMs: number): boolean {
     if (quietMs >= PENDING_TOOL_TIMEOUT_MS) return false;
@@ -714,20 +718,20 @@ export class ClaudeWatcher implements AgentSource {
   }
 
   /**
-   * Coloca um subagente no escritório. 'new' = arquivo surgiu agora (tudo é novidade);
-   * 'replay' = já existia ao abrir a sessão; 'regrown' = voltou a ser escrito depois de sair.
+   * Places a subagent in the office. 'new' = file just appeared (everything is new);
+   * 'replay' = already existed when opening the session; 'regrown' = written to again after leaving.
    */
   private openSub(t: SessionTracker, file: SubagentFile, mode: 'new' | 'replay' | 'regrown'): void {
     try {
       this.openSubUnsafe(t, file, mode);
     } catch (err) {
-      // Arquivo problemático: ignora até ele mudar de tamanho de novo.
+      // Problematic file: ignore until its size changes again.
       try {
         t.known.set(file.path, statSync(file.path).size);
       } catch {
         t.known.set(file.path, 0);
       }
-      log.warnOnce(`sub-open:${file.path}`, tr('Subagente {0} ignorado: {1}', [file.agentId, errMsg(err)]));
+      log.warnOnce(`sub-open:${file.path}`, tr('Subagent {0} skipped: {1}', [file.agentId, errMsg(err)]));
     }
   }
 
@@ -736,7 +740,7 @@ export class ClaudeWatcher implements AgentSource {
     const now = this.now();
     const meta = readSubagentMeta(file.metaPath);
     const tail = new FileTail(file.path);
-    // Arquivo novo e pequeno: seekTail devolve 0 e lê tudo; grande: só o fim.
+    // New and small file: seekTail returns 0 and reads everything; large: only the end.
     const start = tail.seekTail(this.tailBytes);
     const state = createTranscriptState({ trackPrefix: start > 0 });
     const id = `${t.sessionId}:${file.agentId}`;
@@ -785,6 +789,7 @@ export class ClaudeWatcher implements AgentSource {
     const summary: TranscriptSummary = { tasks: s.tasks, stats: { ...s.stats } };
     if (s.firstAt !== undefined) summary.firstAt = s.firstAt;
     if (s.model) summary.model = s.model;
+    if (s.effort) summary.effort = s.effort;
     if (s.gitBranch) summary.gitBranch = s.gitBranch;
     if (s.permissionMode) summary.permissionMode = s.permissionMode;
     if (s.lastAt !== undefined) summary.lastAt = s.lastAt;
@@ -796,7 +801,7 @@ export class ClaudeWatcher implements AgentSource {
     const now = this.now();
     for (const sub of [...t.subs.values()]) {
       if (!office.has(sub.id)) {
-        // Já saiu do escritório (período de graça encerrado).
+        // Already left the office (grace period elapsed).
         t.subs.delete(sub.agentId);
         t.known.set(sub.file.path, sub.tail.size);
         continue;
@@ -808,7 +813,7 @@ export class ClaudeWatcher implements AgentSource {
         try {
           r = sub.tail.read();
         } catch (err) {
-          log.warnOnce(`sub:${sub.id}`, tr('Subagente {0}: {1}', [sub.id, errMsg(err)]));
+          log.warnOnce(`sub:${sub.id}`, tr('Subagent {0}: {1}', [sub.id, errMsg(err)]));
           break;
         }
         for (const line of r.lines) {
@@ -831,13 +836,13 @@ export class ClaudeWatcher implements AgentSource {
         concludedByIdle({ now, lastWriteAt: sub.tail.mtimeMs, ended: sub.state.ended, pendingTool: sub.state.pendingTools.size > 0 });
       if (done) {
         office.completeSub(sub.id);
-        // Concluiu: nada dele roda em primeiro plano (o que estiver em segundo plano passa para o principal).
+        // Completed: nothing runs in foreground (background jobs transfer to main agent).
         t.shells.endForeground(sub.id, now);
       }
     }
   }
 
-  // ---------------------------------------------------------------- fs.watch (acelerador)
+  // ---------------------------------------------------------------- fs.watch (accelerator)
 
   private watchDir(dir: string): void {
     if (!this.useWatch || this.dirWatchers.has(dir)) return;
@@ -849,7 +854,7 @@ export class ClaudeWatcher implements AgentSource {
       });
       this.dirWatchers.set(dir, w);
     } catch {
-      // sem suporte/pasta inexistente: o polling cobre
+      // unsupported/non-existent folder: covered by polling
     }
   }
 
@@ -860,7 +865,7 @@ export class ClaudeWatcher implements AgentSource {
       t.watchers.push(w);
       return true;
     } catch {
-      return false; // sem suporte: o polling cobre
+      return false; // unsupported: covered by polling
     }
   }
 
@@ -883,10 +888,10 @@ export class ClaudeWatcher implements AgentSource {
   }
 }
 
-/** Fim do transcript lido para saber se há ferramenta sem resultado (sem montar atividades). */
+/** End of transcript read to check for tool without result (without constructing activities). */
 const PENDING_PROBE_BYTES = 256 * 1024;
 
-/** A última mensagem do transcript chamou uma ferramenta que ainda não teve resultado? */
+/** Did the last transcript message call a tool that has not yet had a result? */
 export function pendingToolAtEnd(path: string): boolean {
   try {
     const tail = new FileTail(path);
@@ -903,7 +908,7 @@ export function pendingToolAtEnd(path: string): boolean {
   }
 }
 
-/** <sessão>/custom-title.json {"customTitle": "..."} (título dado com /rename). */
+/** <session>/custom-title.json {"customTitle": "..."} (title given with /rename). */
 export function readCustomTitleFile(sessionDir: string): string | undefined {
   try {
     const j = JSON.parse(readFileSync(join(sessionDir, 'custom-title.json'), 'utf8')) as { customTitle?: unknown };

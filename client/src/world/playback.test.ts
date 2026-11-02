@@ -4,8 +4,8 @@ import { OfficeStore } from '../net/store';
 import { createWorld } from './index';
 import { animScale, rebaseSnapshot } from './playback';
 
-describe('timelapse no mundo', () => {
-  it('fator de animação: ~raiz da velocidade, entre 1 e 16 (0 = pausado)', () => {
+describe('timelapse in world', () => {
+  it('animation factor: ~square root of speed, between 1 and 16 (0 = paused)', () => {
     expect(animScale(60)).toBe(6);
     expect(animScale(180)).toBe(10);
     expect(animScale(600)).toBe(16);
@@ -15,7 +15,7 @@ describe('timelapse no mundo', () => {
     expect(animScale(Number.NaN)).toBe(0);
   });
 
-  it('desloca para o relógio do mundo só o que ele compara com o "agora"', () => {
+  it('shifts to world clock only what is compared against "now"', () => {
     const agent = {
       id: 'a',
       statusSince: 1_000,
@@ -29,7 +29,7 @@ describe('timelapse no mundo', () => {
     expect(out.serverTime).toBe(12_000);
     expect(out.agents[0].statusSince).toBe(11_000);
     expect(out.agents[0].shells![0].startedAt).toBe(10_800);
-    // Atividades e o snapshot original ficam como estão.
+    // Activities and original snapshot remain untouched.
     expect(out.agents[0].activity!.at).toBe(900);
     expect(out.agents[0].startedAt).toBe(500);
     expect(agent.statusSince).toBe(1_000);
@@ -38,8 +38,8 @@ describe('timelapse no mundo', () => {
   });
 });
 
-describe('descarte do mundo', () => {
-  it('destroy() remove o listener de fontes ao montar e desmontar repetidamente', () => {
+describe('world teardown', () => {
+  it('destroy() removes font listener on repeated mount and unmount', () => {
     const fonts = new EventTarget();
     const added = vi.spyOn(fonts, 'addEventListener');
     const removed = vi.spyOn(fonts, 'removeEventListener');

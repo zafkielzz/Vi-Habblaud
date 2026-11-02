@@ -1,6 +1,6 @@
-// Registro de sessões ABERTAS do Claude Code: <configDir>/sessions/<pid>.json.
-// O arquivo existe enquanto o processo vive. Fora do Docker também confirmamos o PID
-// (um arquivo pode sobrar se o processo morrer sem limpar); no Docker os PIDs são do host.
+// Registry of OPEN Claude Code sessions: <configDir>/sessions/<pid>.json.
+// The file exists while the process lives. Outside Docker we also confirm PID
+// (a file can remain if process dies without cleaning up); in Docker PIDs belong to host.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentStatus } from '../../shared/types';
@@ -16,10 +16,10 @@ export interface RegistryEntry {
   kind?: string;
   entrypoint?: string;
   name?: string;
-  /** 'busy' | 'idle' | 'waiting' | 'shell' (versões antigas não têm; 'shell' = ocioso com shell em segundo plano). */
+  /** 'busy' | 'idle' | 'waiting' | 'shell' (older versions lack this; 'shell' = idle with background shell). */
   status?: string;
   waitingFor?: string;
-  /** Agente customizado da sessão (`claude --agent frinus`). */
+  /** Session custom agent (`claude --agent frinus`). */
   agent?: string;
   updatedAt?: number;
   statusUpdatedAt?: number;
@@ -33,7 +33,7 @@ function num(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
-/** Valida o JSON de um registro. Campos essenciais ausentes -> undefined. */
+/** Validates registry JSON. Missing essential fields -> undefined. */
 export function parseRegistryEntry(raw: string): RegistryEntry | undefined {
   let j: Record<string, unknown>;
   try {
@@ -64,12 +64,12 @@ export function parseRegistryEntry(raw: string): RegistryEntry | undefined {
 }
 
 /**
- * Primeira versão do Claude Code sabidamente gravando "shell" no registro (ocioso com shell em segundo plano).
- * Dela em diante, "idle" é a palavra final sobre shells: nada em segundo plano rodando.
+ * First Claude Code version known to record "shell" in registry (idle with background shell).
+ * From this version onwards, "idle" is the final word on shells: nothing running in background.
  */
 export const SHELL_STATUS_VERSION = '2.1.292';
 
-/** Compara versões "x.y.z" (sufixos como "-beta" são ignorados). */
+/** Compares versions "x.y.z" (suffixes such as "-beta" are ignored). */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(/[.-]/).slice(0, 3).map((x) => Number.parseInt(x, 10) || 0);
   const pb = b.split(/[.-]/).slice(0, 3).map((x) => Number.parseInt(x, 10) || 0);
@@ -77,14 +77,14 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Status do registro -> status do personagem (undefined = desconhecido; o transcript decide). */
+/** Registry status -> character status (undefined = unknown; transcript decides). */
 export function registryStatus(e: RegistryEntry): { status?: AgentStatus; waitingFor?: string } {
   switch (e.status) {
     case 'busy':
       return { status: 'working' };
     case 'idle':
       return { status: 'idle' };
-    // Ocioso, mas com shell(s) em segundo plano rodando (monitores não contam): esperando o shell.
+    // Idle, but with running background shell(s) (monitors do not count): waiting for shell.
     case 'shell':
       return { status: 'shell' };
     case 'waiting':
@@ -99,7 +99,7 @@ export function pidAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    // EPERM: o processo existe, só não é nosso.
+    // EPERM: process exists, it just isn't ours.
     return (err as NodeJS.ErrnoException).code !== 'ESRCH';
   }
 }
@@ -136,7 +136,7 @@ export class RegistryReader {
     } catch (err) {
       this.cache.clear();
       const code = (err as NodeJS.ErrnoException).code;
-      return { entries: [], ok: false, error: code === 'ENOENT' ? tr('pasta sessions/ não encontrada') : tr('sessions/ ilegível ({0})', [code ?? tr('erro')]) };
+      return { entries: [], ok: false, error: code === 'ENOENT' ? tr('sessions/ folder not found') : tr('sessions/ unreadable ({0})', [code ?? tr('error')]) };
     }
     const seen = new Set<string>();
     const entries: RegistryEntry[] = [];
@@ -159,7 +159,7 @@ export class RegistryReader {
           entry = undefined;
         }
         if (entry) cached = { mtimeMs: st.mtimeMs, size: st.size, entry };
-        // JSON inválido (arquivo sendo gravado): mantém a última versão boa e tenta de novo no próximo ciclo.
+        // Invalid JSON (file being written): keep last good version and retry on next cycle.
         else cached = cached ? { ...cached } : { mtimeMs: 0, size: -1, entry: undefined };
         this.cache.set(file, cached);
       }

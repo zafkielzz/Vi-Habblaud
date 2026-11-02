@@ -1,54 +1,54 @@
-// O social leve no escritório (Fase 5): o "Enquanto você estava fora" (contagens, carimbos, a frase), as batidas novas
-// sem avisar o que já tinha acontecido, o "❤️ N hoje" do chip, a leitura do status (bloqueados, resumo, código) e o
-// FakeWorldApi (resumo visto, desbloquear sem conexão, batidas com o opt-in).
+// Lightweight office social (Phase 5): "While you were away" (counts, stamps, sentence), new knocks
+// without re-notifying past events, the chip's "❤️ N today", reading status (blocked, summary, code) and
+// FakeWorldApi (dismissed summary, unblocking without connection, knocks with opt-in).
 import { describe, expect, it } from 'vitest';
 import { FakeWorldApi, FAKE_SUMMARY, parseBuildingMeta, parseWorldStatus } from '../../net/world';
 import { awaySummaryView, dayLabel, likesTodayChip, newKnocks, summaryKey } from './away-summary';
 import { DEFAULT_VISIBILITY, VISIBILITY_SWITCHES } from './world-model';
 
-describe('Enquanto você estava fora', () => {
-  it('as três contagens, os carimbos (mais recebidos primeiro) e a frase', () => {
+describe('While you were away', () => {
+  it('the three counts, stamps (most received first), and sentence', () => {
     const v = awaySummaryView({ since: '2026-10-14', visits: 1, likes: 12, stamps: [{ stampId: 'coffee', count: 1 }, { stampId: 'star', count: 3 }] });
     expect(v.stats.map((s) => [s.key, s.value, s.label])).toEqual([
-      ['visits', '1', 'visita'],
+      ['visits', '1', 'visit'],
       ['likes', '12', 'likes'],
-      ['stamps', '4', 'carimbos'],
+      ['stamps', '4', 'stamps'],
     ]);
     expect(v.stamps.map((s) => [s.id, s.icon, s.count])).toEqual([
       ['star', '⭐', 3],
       ['coffee', '☕', 1],
     ]);
-    expect(v.sentence).toBe('Enquanto você estava fora: 1 visita, 12 likes e 4 carimbos.');
-    expect(v.since).toMatch(/^desde 14/);
+    expect(v.sentence).toBe('While you were away: 1 visit, 12 likes and 4 stamps.');
+    expect(v.since).toMatch(/^since /);
   });
 
-  it('dia UTC do calendário (sem fuso), e o que não é dia fica vazio', () => {
+  it('calendar UTC day (no timezone), and invalid date yields empty string', () => {
     expect(dayLabel('2026-10-14')).toMatch(/14/);
     expect(dayLabel('ontem')).toBe('');
   });
 
-  it('chave do resumo: muda com qualquer contagem', () => {
+  it('summary key: changes with any count', () => {
     expect(summaryKey(undefined)).toBe('');
     expect(summaryKey(FAKE_SUMMARY)).not.toBe(summaryKey({ ...FAKE_SUMMARY, likes: 13 }));
   });
 
-  it('batidas: a primeira leitura só marca; depois, as novas; contagem que volta (reinício) marca de novo', () => {
+  it('knocks: first reading only benchmarks; then fresh ones; count reset benchmarks again', () => {
     expect(newKnocks(null, 4)).toEqual({ last: 4, fresh: 0 });
     expect(newKnocks(4, 6)).toEqual({ last: 6, fresh: 2 });
     expect(newKnocks(6, undefined)).toEqual({ last: 0, fresh: 0 });
     expect(newKnocks(0, 1)).toEqual({ last: 1, fresh: 1 });
   });
 
-  it('"❤️ N hoje" só com o prédio aceso e algum like', () => {
-    expect(likesTodayChip('live', 3)).toEqual({ text: '❤️ 3 hoje', title: 'Seu prédio ganhou 3 likes hoje.' });
-    expect(likesTodayChip('live', 1)?.title).toBe('Seu prédio ganhou 1 like hoje.');
+  it('"❤️ N today" only when building is active with likes', () => {
+    expect(likesTodayChip('live', 3)).toEqual({ text: '❤️ 3 today', title: 'Your building got 3 likes today.' });
+    expect(likesTodayChip('live', 1)?.title).toBe('Your building got 1 like today.');
     expect(likesTodayChip('live', 0)).toBeNull();
     expect(likesTodayChip('paused', 5)).toBeNull();
   });
 });
 
-describe('status e meta do prédio (Fase 5)', () => {
-  it('parseWorldStatus: bloqueados, resumo com novidade e código no formato; o resto fica de fora', () => {
+describe('building status and meta (Phase 5)', () => {
+  it('parseWorldStatus: blocked list, summary with news, and formatted code; excludes the rest', () => {
     const st = parseWorldStatus({
       state: 'approved',
       configured: true,
@@ -62,19 +62,19 @@ describe('status e meta do prédio (Fase 5)', () => {
     expect(empty?.building).not.toHaveProperty('code');
   });
 
-  it('parseBuildingMeta: likes do dia, batidas e o sim/não do resumo (nunca o resumo)', () => {
+  it('parseBuildingMeta: daily likes, knocks, and summary boolean flag (never the summary)', () => {
     expect(parseBuildingMeta({ connected: true, likesToday: 0, knocks: 3, awaySummary: true })).toMatchObject({ likesToday: 0, knocks: 3, awaySummary: true });
     expect(parseBuildingMeta({ connected: true, likesToday: -1, knocks: 0, awaySummary: 'sim' })).toEqual({ connected: true, paused: false, floors: 0, agents: 0 });
   });
 
-  it('"Avisar quando baterem na porta": desligado por padrão e na lista de interruptores', () => {
+  it('"Notify on door knock": disabled by default and in switch list', () => {
     expect(DEFAULT_VISIBILITY.knocks).toBe(false);
     expect(VISIBILITY_SWITCHES).toContain('knocks');
   });
 });
 
-describe('FakeWorldApi: o social do modo demonstração', () => {
-  it('resumo até "Ok, vi"; meta só com o sim/não; código e bloqueados no status', async () => {
+describe('FakeWorldApi: demo mode social features', () => {
+  it('summary until acknowledged; meta only with boolean flag; code and blocked in status', async () => {
     let t = 1_000_000;
     const api = new FakeWorldApi({ state: 'approved', delayMs: 0, now: () => t });
     expect(api.meta().building).toMatchObject({ likesToday: 3, awaySummary: true });
@@ -88,7 +88,7 @@ describe('FakeWorldApi: o social do modo demonstração', () => {
     expect(api.meta().building?.likesToday).toBe(5);
   });
 
-  it('desbloquear: some da lista; pausado (sem conexão), not_connected', async () => {
+  it('unblock: disappears from list; paused (no connection) returns not_connected', async () => {
     const api = new FakeWorldApi({ state: 'approved', delayMs: 0 });
     expect((await api.unblock('p_spam')).ok).toBe(true);
     const st = await api.status();
@@ -97,7 +97,7 @@ describe('FakeWorldApi: o social do modo demonstração', () => {
     expect(await api.unblock('p_troll')).toMatchObject({ ok: false, code: 'not_connected' });
   });
 
-  it('batidas só com o opt-in: a primeira 8 s depois de ligar, e uma a cada 45 s', async () => {
+  it('knocks only with opt-in: first after 8 s, then one every 45 s', async () => {
     let t = 1_000_000;
     const api = new FakeWorldApi({ state: 'approved', delayMs: 0, now: () => t });
     t += 60_000;

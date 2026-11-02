@@ -1,16 +1,15 @@
-// O conteúdo da janela "Habblaud World" (world-dialog.ts, o botão próprio da barra do topo): conta (cadastro com
-// aceite dos termos e o resumo de privacidade, código do e-mail, login, esqueci a senha), lista de espera, personagem
-// (o editor de aparência da gaveta do agente, mais nome, traços e frase de apresentação), o cartão "Seu prédio" com
-// Pausar/Retomar e "Ver o que foi enviado" (building.ts), visibilidade do prédio, dispositivos e sair. Também a dica
-// do tema em Configurações › Aparência, quando a escolha vai para o prédio. Fase 6: "Conta e dados" (o aviso de
-// inatividade, "Baixar meus dados" e "Excluir conta" em três etapas: o que some e quando, a confirmação e o código do
-// e-mail), o aviso da manutenção do mundo e o da conta excluída. Fala com as rotas locais /api/world/* (net/world.ts);
-// as regras puras estão em world-model.ts.
+// Habblaud World modal content (world-dialog.ts, dedicated top bar button): account (signup with terms acceptance and
+// privacy summary, email code, login, forgot password), waitlist, character (agent drawer appearance editor plus name,
+// traits, and intro phrase), "Your building" card with Pause/Resume and "See what was sent" (building.ts), building
+// visibility, devices, and sign out. Also theme tip in Settings › Appearance when the choice goes to the building.
+// Phase 6: "Account and data" (inactivity notice, "Download my data", and "Delete account" in three steps: what is
+// removed and when, confirmation, and email code), world maintenance notice, and deleted account notice. Talks to local
+// /api/world/* routes (net/world.ts); pure rules reside in world-model.ts.
 //
-// A janela chama render() a cada quadro sujo: o miolo só é refeito quando a tela muda (senão o que foi digitado e o
-// foco se perderiam); o status é buscado ao abrir a janela, depois de cada ação e quando o meta.world do snapshot
-// muda, nunca dentro do render.
-import { getLocale, intlLocale, tr } from '../../../../shared/i18n';
+// The dialog calls render() on every dirty frame: the inner content is only rebuilt when the screen changes (otherwise
+// typed input and focus would be lost); status is fetched when opening the dialog, after each action, and when snapshot
+// meta.world changes, never inside render.
+import { intlLocale, tr } from '../../../../shared/i18n';
 import type { Appearance } from '../../art/api';
 import { access } from '../../net/access';
 import {
@@ -73,14 +72,14 @@ import { extLink, WORLD_PRIVACY_URL, WORLD_TERMS_URL } from './links';
 
 export { extLink, WORLD_PRIVACY_URL, WORLD_TERMS_URL } from './links';
 
-/** Depois de reenviar o código, o botão espera este tempo (o servidor também limita: 3 por hora). */
+/** After resending the code, the button waits this long (the server also limits: 3 per hour). */
 const RESEND_COOLDOWN_MS = 30_000;
 
-// ------------------------------------------------------------------ pedaços de DOM
+// ------------------------------------------------------------------ DOM snippets
 
 /**
- * Frase traduzida com elementos no meio: as lacunas {0}, {1}... de `text` (já passado por tr(), sem argumentos) viram
- * os nós de `nodes`. Assim a tradução decide onde o link entra na frase.
+ * Translated phrase with elements in the middle: {0}, {1}... placeholders in `text` (already passed through tr(),
+ * without arguments) become nodes from `nodes`. This lets the translation decide where the link fits into the phrase.
  */
 export function rich(text: string, nodes: readonly Node[]): (Node | string)[] {
   return text.split(/(\{\d+\})/).map((part) => {
@@ -94,7 +93,7 @@ function para(cls: string, ...children: (Node | string)[]): HTMLParagraphElement
 }
 
 function backButton(onClick: () => void): HTMLButtonElement {
-  return h('button', { class: 'ui-link-btn ui-world__back', type: 'button', text: tr('← Voltar'), on: { click: onClick } });
+  return h('button', { class: 'ui-link-btn ui-world__back', type: 'button', text: tr('← Back'), on: { click: onClick } });
 }
 
 function screenHead(title: string, onBack: () => void): HTMLElement {
@@ -121,15 +120,15 @@ function textInput(type: string, autocomplete: string, extra: Record<string, str
   return h('input', { class: 'ui-world__input', type, attrs: { autocomplete, spellcheck: 'false', autocapitalize: 'off', ...extra } });
 }
 
-/** Senha com "Mostrar senha" (a senha longa é a regra: dá vontade de conferir o que digitou). */
+/** Password with "Show password" (long passwords are the rule: people want to check what they typed). */
 function passwordField(labelText: string, autocomplete: 'new-password' | 'current-password', hint?: string): FieldRefs {
   const input = textInput('password', autocomplete, { maxlength: 256 });
   const f = field(labelText, input, hint);
-  const toggle = h('button', { class: 'ui-link-btn ui-world__peek', type: 'button', text: tr('Mostrar senha') });
+  const toggle = h('button', { class: 'ui-link-btn ui-world__peek', type: 'button', text: tr('Show password') });
   toggle.addEventListener('click', () => {
     const show = input.type === 'password';
     input.type = show ? 'text' : 'password';
-    setText(toggle, show ? tr('Esconder senha') : tr('Mostrar senha'));
+    setText(toggle, show ? tr('Hide password') : tr('Show password'));
     setAttr(toggle, 'aria-pressed', String(show));
   });
   setAttr(toggle, 'aria-pressed', 'false');
@@ -138,7 +137,7 @@ function passwordField(labelText: string, autocomplete: 'new-password' | 'curren
 }
 
 function emailField(): FieldRefs {
-  return field(tr('E-mail'), textInput('email', 'email', { inputmode: 'email', maxlength: 254 }));
+  return field(tr('Email'), textInput('email', 'email', { inputmode: 'email', maxlength: 254 }));
 }
 
 function codeField(): FieldRefs {
@@ -148,10 +147,10 @@ function codeField(): FieldRefs {
     const v = normalizeCode(input.value);
     if (v !== input.value && /^\d*$/.test(v)) input.value = v;
   });
-  return field(tr('Código de 6 dígitos'), input);
+  return field(tr('6-digit code'), input);
 }
 
-/** Formulário de uma tela: botão principal com estado de "enviando" e a linha de erro. */
+/** Screen form: primary button with "sending" state and the error line. */
 class Form {
   readonly el: HTMLFormElement;
   readonly error: HTMLElement;
@@ -191,13 +190,13 @@ function toMillis(v: number | string | undefined): number | null {
   return null;
 }
 
-/** "Dispositivo 2" chega em português do servidor: aqui vira o texto do idioma da interface. */
+/** "Dispositivo 2" arrives in Portuguese from the server: converted here to the UI language text. */
 export function deviceLabel(label: string): string {
   const m = /^Dispositivo (\d+)$/.exec(label);
-  return m ? tr('Dispositivo {0}', [m[1]]) : label;
+  return m ? tr('Device {0}', [m[1]]) : label;
 }
 
-/** Nome do país no idioma da interface ("BR" → "Brasil"). */
+/** Country name in the UI language ("BR" → "Brazil"). */
 function countryName(code: string): string {
   try {
     return new Intl.DisplayNames([intlLocale()], { type: 'region' }).of(code.toUpperCase()) ?? code;
@@ -215,59 +214,59 @@ function flashText(f: WorldFlash): string {
     case 'code_sent':
       return '';
     case 'code_resent':
-      return tr('Mandamos outro código.');
+      return tr('We sent another code.');
     case 'password_changed':
-      return tr('Senha trocada. Entre com a senha nova.');
+      return tr('Password changed. Sign in with the new password.');
     case 'signed_out':
-      return tr('Você saiu da conta do Habblaud World neste computador.');
+      return tr('You signed out of Habblaud World on this computer.');
     case 'character_saved':
-      return tr('Personagem salvo.');
+      return tr('Character saved.');
     case 'device_revoked':
-      return tr('Dispositivo revogado.');
+      return tr('Device revoked.');
   }
 }
 
 function visibilityText(key: VisibilitySwitch): { label: string; hint: string } {
   switch (key) {
     case 'closed':
-      return { label: tr('Fechado a visitas'), hint: tr('Dá para ver o prédio por fora, mas ninguém entra.') };
+      return { label: tr('Closed to visitors'), hint: tr('People can see the building from outside, but nobody can come in.') };
     case 'hideCountry':
-      return { label: tr('Esconder o país'), hint: tr('No lugar da bandeira do país (visto pelo IP da conexão) aparece uma bandeira neutra.') };
+      return { label: tr('Hide country'), hint: tr("A neutral flag shows instead of your country's flag (taken from the connection's IP).") };
     case 'tokensVisible':
-      return { label: tr('Mostrar o consumo de tokens'), hint: tr('Total do dia e da semana do prédio inteiro, só em faixas (até 100 mil, 1 milhão…). Nunca o custo.') };
+      return { label: tr('Show token usage'), hint: tr('Daily and weekly total for the whole building, only in ranges (up to 100k, 1 million…). Never the cost.') };
     case 'leaderboard':
-      return { label: tr('Entrar no placar'), hint: tr('O prédio pode aparecer nos placares de tokens da cidade.') };
+      return { label: tr('Join the leaderboard'), hint: tr("Your building can show up on the city's token leaderboards.") };
     case 'compactions':
-      return { label: tr('Mostrar as compactações'), hint: tr('Quando um agente compacta o contexto, a lixeira da sala enche. Sai só o fato, nada do conteúdo.') };
+      return { label: tr('Show compactions'), hint: tr("When an agent compacts its context, the room's trash can fills up. Only the fact is sent, nothing of the content.") };
     case 'knocks':
-      return { label: tr('Avisar quando baterem na porta'), hint: tr('Quem estiver na porta do seu prédio pode bater; o aviso chega aqui no Habblaud, sem o nome de quem bateu.') };
+      return { label: tr('Let me know when someone knocks'), hint: tr("Whoever is at your building's door can knock; the notice shows up here in Habblaud, without the name of who knocked.") };
   }
 }
 
-/** As travas da seção nesta página (celular, endereço local, trava do terminal, modo demonstração). */
+/** Section gates on this page (mobile, local address, terminal lock, demo mode). */
 export function worldGate(ctx: UiContext, src: WorldSource): WorldGate {
   const a = access();
   return { remote: a.remote, local: a.local, terminal: !!ctx.store.liveSnapshot?.meta.terminal, fake: src.fake };
 }
 
-/** Tela montada: o elemento e, se precisar, o que atualizar sem refazer (texto, estado dos botões). */
+/** Mounted view: the element and, if needed, what to update without rebuilding (text, button state). */
 interface View {
   el: HTMLElement;
   sync?(): void;
 }
 
-// ------------------------------------------------------------------ a seção
+// ------------------------------------------------------------------ section
 
 export class WorldSettingsGroup {
   readonly el: HTMLElement;
-  /** O estado da conta ("Sem conta", "Na lista de espera", "Liberado"), no cabeçalho da janela. */
+  /** Account state ("No account", "On the waitlist", "Approved") in the dialog header. */
   readonly chip: HTMLElement;
   private readonly flashEl: HTMLElement;
   private readonly body: HTMLElement;
   private ui: WorldUi = initialWorldUi();
   private mode: WorldSectionMode = 'hidden';
   private status: WorldStatus | null = null;
-  /** Sobe quando o status muda de fato: as telas que mostram dados da conta se refazem. */
+  /** Incremented when status actually changes: screens showing account data rebuild. */
   private statusRev = 0;
   private statusSig = '';
   private statusError: WorldErrorCode | null = null;
@@ -278,23 +277,23 @@ export class WorldSettingsGroup {
   private wasOpen = false;
   private builtKey = '';
   private view: View | null = null;
-  /** Sobe a cada tela montada: a resposta de um pedido feito em outra tela não mexe na atual. */
+  /** Incremented on each mounted view: response to a request made from another screen won't affect current. */
   private epoch = 0;
   private lastFlash: WorldFlash | null = null;
   private resendUntil = 0;
-  /** `meta.world.building` da última vez: quando muda (remessa nova, pausa), o status é relido com a seção aberta. */
+  /** Last `meta.world.building`: when it changes (new upload, pause), status is refetched with section open. */
   private metaBuildingSig = '';
   private readonly sent: SentDialog;
-  /** Dica em Aparência › Tema do escritório (só quando a escolha também vai para o prédio). */
+  /** Note in Appearance › Office theme (only when choice also applies to the building). */
   readonly themeNote: HTMLElement;
   private readonly themeError: HTMLElement;
   private themeLinked = false;
   private themeReq = 0;
-  /** Um PUT do tema a caminho (o status que chegar no meio não decide o tema). */
+  /** A theme PUT in flight (status arriving in-between won't override theme). */
   private themeInflight = 0;
-  /** Quando a última escolha de tema foi feita aqui (um status pedido antes dela não a desfaz). */
+  /** When the last theme choice was made here (status requested earlier won't revert it). */
   private themePickedAt = 0;
-  /** Relógio lógico das escolhas de tema e dos pedidos de status (qual veio antes). */
+  /** Logical clock of theme choices and status requests (which came first). */
   private themeClock = 0;
 
   constructor(
@@ -307,7 +306,7 @@ export class WorldSettingsGroup {
     this.sent = new SentDialog(() => this.client, () => this.ctx.now());
     this.el = h('div', { class: 'ui-world', hidden: true, attrs: { id: 'ui-world' } }, this.flashEl, this.body, this.sent.el);
     this.themeError = h('span', { class: 'ui-world__error', role: 'alert', hidden: true });
-    this.themeNote = h('span', { class: 'ui-set__hint ui-world-theme', hidden: true }, h('span', { text: tr('O tema também vale para o seu prédio no Habblaud World.') }), this.themeError);
+    this.themeNote = h('span', { class: 'ui-set__hint ui-world-theme', hidden: true }, h('span', { text: tr('The theme also applies to your building in Habblaud World.') }), this.themeError);
     src.onChange?.(() => {
       this.stale = true;
       ctx.invalidate();
@@ -318,7 +317,7 @@ export class WorldSettingsGroup {
     return this.src.client;
   }
 
-  /** A cada render da janela, aberta ou não (barato: só refaz o miolo quando a tela muda). */
+  /** On each dialog render, open or not (cheap: only rebuilds inner content when screen changes). */
   render(open: boolean): void {
     const meta = this.src.meta();
     const gate = worldGate(this.ctx, this.src);
@@ -330,7 +329,7 @@ export class WorldSettingsGroup {
       if (meta.state !== this.metaState) {
         this.metaState = meta.state;
         this.stale = true;
-        // Antes do primeiro status, a tela segue o snapshot.
+        // Before first status, screen follows the snapshot.
         if (!this.status) this.ui = worldReduce(this.ui, { type: 'server', state: meta.state });
       }
       const buildingSig = JSON.stringify(meta.building ?? null);
@@ -345,15 +344,15 @@ export class WorldSettingsGroup {
     this.paint();
   }
 
-  /** Vai para uma tela (os popups de lançamento pedem o cadastro ou o personagem; o chip do topo, o prédio). */
+  /** Navigates to a screen (launch popups request registration or character; top chip requests building). */
   show(screen?: WorldScreen): void {
     if (screen) this.ui = worldReduce(this.ui, { type: 'go', screen });
     this.ctx.invalidate();
   }
 
   /**
-   * A escolha de Aparência › Tema do escritório também vai para o prédio (PUT /api/world/theme), quando o World está
-   * ligado e a conta aprovada. Se não der, a dica do tema mostra o erro (o escritório troca de tema do mesmo jeito).
+   * Appearance › Office theme choice also applies to the building (PUT /api/world/theme) when World is enabled
+   * and account is approved. If it fails, theme note shows the error (office switches theme anyway).
    */
   async onThemePicked(theme: WorldThemeChoice): Promise<void> {
     const client = this.client;
@@ -363,15 +362,15 @@ export class WorldSettingsGroup {
     this.themeInflight++;
     const r = await client.setTheme(theme).finally(() => this.themeInflight--);
     if (req !== this.themeReq) return;
-    setText(this.themeError, r.ok ? '' : ` ${tr('Não deu para mandar o tema para o prédio: {0}', [worldErrorText(r.code, 'theme')])}`);
+    setText(this.themeError, r.ok ? '' : ` ${tr("Couldn't send the theme to the building: {0}", [worldErrorText(r.code, 'theme')])}`);
     setHidden(this.themeError, r.ok);
   }
 
   /**
-   * O tema do escritório e o do prédio ficam iguais (o status traz o do prédio, guardado em world.json): uma escolha
-   * guardada neste computador (`theme` presente) vale também para o escritório desta página; sem escolha guardada (o
-   * automático, padrão), a escolha desta página vai para o prédio. Nada disso com um PUT do tema a caminho, nem com um
-   * status pedido antes da última escolha feita aqui.
+   * Office and building themes stay in sync (status returns the building theme, stored in world.json): a choice saved
+   * on this computer (`theme` present) also applies to this page's office; without saved choice (automatic, default),
+   * this page's choice goes to the building. Neither applies with an in-flight theme PUT or status requested before
+   * the last local choice.
    */
   private syncTheme(st: WorldStatus, askedAt: number): void {
     if (!this.themeLinked || st.state !== 'approved' || this.themeInflight > 0 || askedAt < this.themePickedAt) return;
@@ -380,7 +379,7 @@ export class WorldSettingsGroup {
     else if (!st.theme && pref !== 'auto') void this.onThemePicked(pref);
   }
 
-  /** Volta ao topo do corpo rolável da janela (a cada tela nova, o começo dela é o que importa). */
+  /** Scrolls back to the top of scrollable dialog body (for each new screen, its beginning matters most). */
   private scrollToTop(): void {
     const host = this.el.parentElement;
     if (host) host.scrollTop = 0;
@@ -408,7 +407,7 @@ export class WorldSettingsGroup {
     if (r.ok) {
       this.status = r.data;
       this.syncTheme(r.data, askedAt);
-      // O prédio muda a cada remessa: o cartão se atualiza sozinho (BuildingCard.sync), sem refazer a tela.
+      // Building changes with each upload: card updates itself (BuildingCard.sync), without rebuilding screen.
       const { building: _building, ...rest } = r.data;
       const sig = JSON.stringify(rest);
       if (sig !== this.statusSig) {
@@ -424,8 +423,8 @@ export class WorldSettingsGroup {
   }
 
   /**
-   * Roda uma ação da tela: trava o botão, mostra o erro traduzido. Devolve o resultado, ou null quando a tela mudou
-   * no meio (a resposta não vale mais para o que está na frente).
+   * Runs a screen action: disables button, shows translated error. Returns result, or null if screen changed
+   * in the meantime (response is no longer valid for the visible screen).
    */
   private async run<T>(form: Form, action: WorldAction, call: (c: WorldClient) => Promise<WorldResult<T>>, focus?: HTMLElement): Promise<WorldResult<T> | null> {
     const client = this.client;
@@ -440,7 +439,7 @@ export class WorldSettingsGroup {
     return r;
   }
 
-  // ---------------------------------------------------------------- montagem
+  // ---------------------------------------------------------------- mounting
 
   private viewKey(): string {
     if (this.mode !== 'active') return this.mode;
@@ -472,24 +471,24 @@ export class WorldSettingsGroup {
   }
 
   private chipText(): string {
-    if (this.mode === 'local_only') return tr('Só pelo computador');
+    if (this.mode === 'local_only') return tr('Computer only');
     switch (this.ui.server) {
       case 'logged_out':
-        return tr('Sem conta');
+        return tr('No account');
       case 'waiting':
-        return tr('Na lista de espera');
+        return tr('On the waitlist');
       case 'approved':
-        return tr('Liberado');
+        return tr('Approved');
       default:
         return '';
     }
   }
 
   private build(): View {
-    if (this.mode === 'local_only') return { el: para('ui-set__hint', tr('A conta do Habblaud World só pode ser mexida no próprio computador, com o Habblaud em acesso local (bind 127.0.0.1) e aberto por http://localhost.')) };
+    if (this.mode === 'local_only') return { el: para('ui-set__hint', tr('The Habblaud World account can only be managed on the computer itself, with Habblaud on local access (bind 127.0.0.1) and opened via http://localhost.')) };
     if (this.mode !== 'active') return { el: h('div') };
     const key = this.builtKey;
-    if (key === 'loading') return { el: para('ui-set__hint', tr('Carregando…')) };
+    if (key === 'loading') return { el: para('ui-set__hint', tr('Loading…')) };
     if (key.startsWith('error:')) return this.buildStatusError();
     switch (this.ui.screen) {
       case 'welcome':
@@ -520,90 +519,90 @@ export class WorldSettingsGroup {
   }
 
   private buildStatusError(): View {
-    const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Tentar de novo'), on: { click: () => void this.refresh() } });
+    const retry = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Try again'), on: { click: () => void this.refresh() } });
     return {
       el: h('div', { class: 'ui-world__stack' }, para('ui-world__error', worldErrorText(this.statusError ?? 'unknown', 'status')), h('div', { class: 'ui-world__actions' }, retry)),
     };
   }
 
-  /** Frase de privacidade do cartão e das boas-vindas (2.1 do plano), com o link para a lista. */
+  /** Privacy sentence for card and welcome screen (plan 2.1), with link to the list. */
   private privacyLine(): HTMLElement {
     return para(
       'ui-world__privacy',
-      tr('Nada do seu trabalho sai do computador: só o tema, quantos andares e se cada personagem está ocupado ou à toa.'),
+      tr('Nothing about your work leaves your computer: only the theme, how many floors, and whether each character is busy or idle.'),
       ' ',
-      extLink(tr('Ver a lista'), WORLD_PRIVACY_URL),
+      extLink(tr('See the list'), WORLD_PRIVACY_URL),
     );
   }
 
   private buildWelcome(): View {
-    const create = h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Criar conta'), on: { click: () => this.go('register') } });
-    const login = h('button', { class: 'ui-btn', type: 'button', text: tr('Já tenho conta'), on: { click: () => this.go('login') } });
-    // A conta acabou de ser excluída (aqui ou em outro computador): o aviso fica até entrar de novo.
+    const create = h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Create account'), on: { click: () => this.go('register') } });
+    const login = h('button', { class: 'ui-btn', type: 'button', text: tr('I already have an account'), on: { click: () => this.go('login') } });
+    // Account was just deleted (here or on another computer): notice remains until signed in again.
     const deleted = this.status?.lastError === 'account_deleted' ? para('ui-world__notice', worldErrorText('account_deleted', 'status')) : null;
     return {
       el: h(
         'div',
         { class: 'ui-world__stack' },
         deleted,
-        para('ui-world__lead', tr('Leve o seu escritório para uma cidade em pixel art: um prédio seu, aceso enquanto os agentes trabalham, e um personagem para passear e visitar os prédios de outras pessoas.')),
+        para('ui-world__lead', tr("Take your office to a pixel-art city: a building of your own, lit up while your agents work, and a character to stroll around and visit other people's buildings.")),
         this.privacyLine(),
-        para('ui-set__hint', tr('O acesso é liberado aos poucos: quem cria a conta entra numa lista de espera.')),
+        para('ui-set__hint', tr('Access opens gradually: new accounts join a waitlist.')),
         h('div', { class: 'ui-world__actions' }, create, login),
       ),
     };
   }
 
-  /** Resumo da seção 3 do plano (o que sai e o que nunca sai), na tela do aceite. */
+  /** Summary of plan section 3 (what leaves and what never leaves), on terms acceptance screen. */
   private privacySummary(): HTMLElement {
     return h(
       'section',
-      { class: 'ui-world__summary', attrs: { 'aria-label': tr('O que sai do seu computador') } },
-      h('h4', { class: 'ui-world__summary-title', text: tr('O que sai do seu computador') }),
+      { class: 'ui-world__summary', attrs: { 'aria-label': tr('What leaves your computer') } },
+      h('h4', { class: 'ui-world__summary-title', text: tr('What leaves your computer') }),
       para(
         'ui-world__official',
-        tr('Quem visita o mundo vê, ao vivo, quantos projetos e agentes você está rodando e o que cada personagem está fazendo (trabalhando, esperando, à toa). Ninguém vê quais projetos são, o que os agentes fazem, nem quem você é: só o nickname e o avatar que você escolheu.'),
+        tr('People visiting the world see, live, how many projects and agents you are running and what each character is doing (working, waiting, idle). Nobody sees which projects they are, what the agents are doing, or who you are: only the nickname and the avatar you chose.'),
       ),
       h(
         'ul',
         { class: 'ui-world__list' },
-        h('li', {}, h('strong', { text: tr('Sai:') }), ' ', tr('o tema do escritório; um andar por sala aberta, com um código aleatório que muda todo dia; de cada agente, se é principal ou subagente, a ferramenta, o status, a aparência, um nome sorteado e a faixa de tarefas concluídas no dia; os tokens do prédio arredondados em faixas (dá para desligar); se você ligar, o fato de um agente ter compactado o contexto; a versão e o commit do Habblaud, com a marca de cópia modificada; e o idioma da interface, só para os e-mails.')),
-        h('li', {}, h('strong', { text: tr('Nunca sai:') }), ' ', tr('caminhos e nomes de projetos, títulos de sessão, comandos, mensagens, código, custo, a sua conta do Claude, o seu e-mail e o nome do computador.')),
+        h('li', {}, h('strong', { text: tr('Sent:') }), ' ', tr("the office theme; one floor per open room, with a random code that changes every day; for each agent, whether it's a main agent or a subagent, its tool, status, appearance, a name drawn at random and the range of tasks completed that day; the building's tokens rounded into ranges (can be turned off); if you turn it on, the fact that an agent compacted its context; the Habblaud version and build commit, with the modified-copy flag; and the interface language, only for emails.")),
+        h('li', {}, h('strong', { text: tr('Never sent:') }), ' ', tr("project paths and names, session titles, commands, messages, code, cost, your Claude account, your email and the computer's name.")),
       ),
-      para('ui-world__key', tr('Com os dados que saem não dá para saber quem você é nem em que trabalha.')),
-      para('ui-set__hint', tr('Os agentes trabalham sem você: prédio aceso não quer dizer que você está no computador. Se preferir, use o modo discreto ou feche o prédio a visitas.')),
-      extLink(tr('Ver a lista completa'), WORLD_PRIVACY_URL),
+      para('ui-world__key', tr('From the data that is sent, nobody can tell who you are or what you work on.')),
+      para('ui-set__hint', tr("Agents work without you: a lit building doesn't mean you're at the computer. If you prefer, use discreet mode or close the building to visitors.")),
+      extLink(tr('See the full list'), WORLD_PRIVACY_URL),
     );
   }
 
   private buildRegister(): View {
     const email = emailField();
     email.input.value = this.ui.email;
-    // O nome de jogador (nickname) é escolhido no cadastro: fica reservado para a conta na lista de espera e vira o
-    // nome do personagem. Conferido aqui pelas mesmas regras do personagem; o servidor do mundo decide (e diz se já
-    // está em uso).
+    // Player name (nickname) is chosen at registration: stays reserved for the account on the waitlist and becomes
+    // the character's name. Checked here using the same character rules; world server decides (and says if already
+    // in use).
     const name = field(
-      tr('Nome de jogador'),
+      tr('Player name'),
       textInput('text', 'nickname', { maxlength: PLAYER_NAME_LIMITS.max * 2 }),
-      tr('3 a 20 caracteres; é o nome do seu personagem e fica reservado para você, mesmo na lista de espera. Único no mundo.'),
+      tr("3 to 20 characters; it's your character's name and stays reserved for you, even on the waitlist. Unique in the world."),
     );
     name.input.value = this.ui.name;
-    const password = passwordField(tr('Senha'), 'new-password', tr('Pelo menos 12 caracteres. Uma frase longa vale mais do que símbolos; senhas que já vazaram são recusadas.'));
+    const password = passwordField(tr('Password'), 'new-password', tr('At least 12 characters. A long phrase beats symbols; passwords that have leaked are rejected.'));
     const accept = h('input', { class: 'ui-world__checkbox', type: 'checkbox' });
-    const form = new Form(tr('Criar conta'), () => void submit(), tr('Criando a conta…'));
+    const form = new Form(tr('Create account'), () => void submit(), tr('Creating account…'));
     const submit = async () => {
       const mail = normalizeEmail(email.input.value);
-      if (!emailLooksValid(mail)) return form.setError(tr('Digite um e-mail válido.'), email.input);
+      if (!emailLooksValid(mail)) return form.setError(tr('Enter a valid email.'), email.input);
       const parsed = parsePlayerName(name.input.value);
       if (!parsed.ok) return form.setError(nameProblemText(parsed.problem), name.input);
       const problem = passwordProblem(password.input.value, mail);
       if (problem) return form.setError(passwordProblemText(problem), password.input);
-      if (!accept.checked) return form.setError(tr('Para criar a conta, aceite os Termos de Uso e a Política de Privacidade.'), accept);
-      const r = await this.run(form, 'register', (c) => c.register({ email: mail, password: password.input.value.normalize('NFC'), name: parsed.name, locale: getLocale() }), email.input);
+      if (!accept.checked) return form.setError(tr('To create the account, accept the Terms of Use and the Privacy Policy.'), accept);
+      const r = await this.run(form, 'register', (c) => c.register({ email: mail, password: password.input.value.normalize('NFC'), name: parsed.name, locale: 'en' }), email.input);
       if (!r) return;
       if (r.ok) return this.dispatch({ type: 'code_sent', email: mail, name: parsed.name });
-      // Os erros do nome vão para o campo do nome (o `run` já mostrou o texto genérico do código).
-      if (r.code === 'name_taken') form.setError(tr('Esse nome já está em uso. Escolha outro.'), name.input);
+      // Name errors go to the name field (`run` already showed generic error text for the code).
+      if (r.code === 'name_taken') form.setError(tr('That name is already taken. Pick another one.'), name.input);
       else if (r.code === 'name_invalid' || r.code === 'name_blocked') form.setError(worldErrorText(r.code, 'register'), name.input);
     };
     form.el.append(
@@ -611,41 +610,41 @@ export class WorldSettingsGroup {
       name.label,
       password.label,
       this.privacySummary(),
-      para('ui-world__truth', tr('O World só funciona se os prédios forem verdadeiros. Mandar dados inventados quebra os termos e bane a conta.')),
+      para('ui-world__truth', tr('World only works if the buildings are real. Sending made-up data breaks the terms and gets the account banned.')),
       h(
         'label',
         { class: 'ui-world__accept' },
         accept,
-        h('span', {}, ...rich(tr('Li e aceito os {0} e a {1} do Habblaud World.'), [extLink(tr('Termos de Uso'), WORLD_TERMS_URL), extLink(tr('Política de Privacidade'), WORLD_PRIVACY_URL)])),
+        h('span', {}, ...rich(tr('I have read and accept the {0} and the {1} of Habblaud World.'), [extLink(tr('Terms of Use'), WORLD_TERMS_URL), extLink(tr('Privacy Policy'), WORLD_PRIVACY_URL)])),
       ),
       form.error,
-      h('div', { class: 'ui-world__actions' }, form.submit, h('button', { class: 'ui-btn', type: 'button', text: tr('Já tenho conta'), on: { click: () => this.go('login') } })),
+      h('div', { class: 'ui-world__actions' }, form.submit, h('button', { class: 'ui-btn', type: 'button', text: tr('I already have an account'), on: { click: () => this.go('login') } })),
     );
-    return { el: h('div', { class: 'ui-world__stack' }, screenHead(tr('Criar conta'), () => this.go('welcome')), form.el) };
+    return { el: h('div', { class: 'ui-world__stack' }, screenHead(tr('Create account'), () => this.go('welcome')), form.el) };
   }
 
   private buildLogin(): View {
     const email = emailField();
     email.input.value = this.ui.email;
-    const password = passwordField(tr('Senha'), 'current-password');
-    const form = new Form(tr('Entrar'), () => void submit(), tr('Entrando…'));
+    const password = passwordField(tr('Password'), 'current-password');
+    const form = new Form(tr('Sign in'), () => void submit(), tr('Signing in…'));
     const submit = async () => {
       const mail = normalizeEmail(email.input.value);
-      if (!emailLooksValid(mail)) return form.setError(tr('Digite um e-mail válido.'), email.input);
-      if (!password.input.value) return form.setError(tr('Digite a senha.'), password.input);
+      if (!emailLooksValid(mail)) return form.setError(tr('Enter a valid email.'), email.input);
+      if (!password.input.value) return form.setError(tr('Enter your password.'), password.input);
       const r = await this.run(form, 'login', (c) => c.login({ email: mail, password: password.input.value.normalize('NFC') }), password.input);
       if (!r) return;
       if (r.ok) {
         this.dispatch({ type: 'signed_in' });
         return void this.refresh();
       }
-      // O servidor reenviou o código: segue para a confirmação do e-mail.
+      // Server resent the code: proceeds to email verification.
       if (r.code === 'email_not_verified') this.dispatch({ type: 'code_sent', email: mail });
     };
     const forgot = h('button', {
       class: 'ui-link-btn',
       type: 'button',
-      text: tr('Esqueci a senha'),
+      text: tr('Forgot password'),
       on: {
         click: () => {
           this.ui = { ...this.ui, email: normalizeEmail(email.input.value) };
@@ -658,21 +657,21 @@ export class WorldSettingsGroup {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Entrar na conta'), () => this.go('welcome')),
+        screenHead(tr('Sign in to your account'), () => this.go('welcome')),
         form.el,
-        para('ui-set__hint', tr('Ainda não tem conta?'), ' ', h('button', { class: 'ui-link-btn', type: 'button', text: tr('Criar conta'), on: { click: () => this.go('register') } })),
+        para('ui-set__hint', tr("Don't have an account yet?"), ' ', h('button', { class: 'ui-link-btn', type: 'button', text: tr('Create account'), on: { click: () => this.go('register') } })),
       ),
     };
   }
 
-  /** "Demonstração: o código é 123456" (só com o FakeWorldApi). */
+  /** "Demo: the code is 123456" (only with FakeWorldApi). */
   private demoCodeHint(): HTMLElement | null {
-    return this.src.fake ? para('ui-world__demo', tr('Demonstração: o código é {0}.', [FAKE_CODE])) : null;
+    return this.src.fake ? para('ui-world__demo', tr('Demo: the code is {0}.', [FAKE_CODE])) : null;
   }
 
-  /** Botão "Reenviar código", que espera um pouco depois de usado. */
+  /** "Resend code" button, which waits briefly after use. */
   private resendButton(form: Form, send: (c: WorldClient) => Promise<WorldResult>): { el: HTMLButtonElement; sync(): void } {
-    const btn = h('button', { class: 'ui-btn', type: 'button', text: tr('Reenviar código') });
+    const btn = h('button', { class: 'ui-btn', type: 'button', text: tr('Resend code') });
     const sync = () => {
       btn.disabled = Date.now() < this.resendUntil;
     };
@@ -698,9 +697,9 @@ export class WorldSettingsGroup {
   private buildVerify(): View {
     const email = this.ui.email;
     const code = codeField();
-    const form = new Form(tr('Confirmar e-mail'), () => void submit(), tr('Conferindo…'));
+    const form = new Form(tr('Confirm email'), () => void submit(), tr('Checking…'));
     const submit = async () => {
-      if (!codeLooksValid(code.input.value)) return form.setError(tr('Digite os 6 dígitos do código.'), code.input);
+      if (!codeLooksValid(code.input.value)) return form.setError(tr('Enter the 6 digits of the code.'), code.input);
       const r = await this.run(form, 'verify', (c) => c.verify({ email, code: normalizeCode(code.input.value) }), code.input);
       if (!r?.ok) return;
       this.dispatch({ type: 'signed_in' });
@@ -712,12 +711,12 @@ export class WorldSettingsGroup {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Confirmar o e-mail'), () => this.go('welcome')),
-        para('ui-world__lead', ...rich(tr('Mandamos um código de 6 dígitos para {0}. Ele vale por 10 minutos.'), [h('strong', { class: 'ui-world__email', text: email })])),
-        para('ui-set__hint', tr('Não chegou? Confira o spam ou peça outro. Se este e-mail já tinha conta, a mensagem avisa: aí é só entrar com a senha.')),
+        screenHead(tr('Confirm your email'), () => this.go('welcome')),
+        para('ui-world__lead', ...rich(tr("We sent a 6-digit code to {0}. It's valid for 10 minutes."), [h('strong', { class: 'ui-world__email', text: email })])),
+        para('ui-set__hint', tr("Didn't get it? Check your spam folder or ask for another one. If this email already had an account, the message says so: just sign in with your password.")),
         this.demoCodeHint(),
         form.el,
-        h('button', { class: 'ui-link-btn', type: 'button', text: tr('Usar outro e-mail'), on: { click: () => this.go('register') } }),
+        h('button', { class: 'ui-link-btn', type: 'button', text: tr('Use another email'), on: { click: () => this.go('register') } }),
       ),
       sync: resend.sync,
     };
@@ -726,10 +725,10 @@ export class WorldSettingsGroup {
   private buildForgot(): View {
     const email = emailField();
     email.input.value = this.ui.email;
-    const form = new Form(tr('Mandar código'), () => void submit(), tr('Mandando…'));
+    const form = new Form(tr('Send code'), () => void submit(), tr('Sending…'));
     const submit = async () => {
       const mail = normalizeEmail(email.input.value);
-      if (!emailLooksValid(mail)) return form.setError(tr('Digite um e-mail válido.'), email.input);
+      if (!emailLooksValid(mail)) return form.setError(tr('Enter a valid email.'), email.input);
       const r = await this.run(form, 'forgot', (c) => c.forgotPassword({ email: mail }), email.input);
       if (r?.ok) this.dispatch({ type: 'reset_code_sent', email: mail });
     };
@@ -738,8 +737,8 @@ export class WorldSettingsGroup {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Esqueci a senha'), () => this.go('login')),
-        para('ui-set__hint', tr('Digite o e-mail da conta. Se ele estiver cadastrado, chega um código para criar uma senha nova.')),
+        screenHead(tr('Forgot password'), () => this.go('login')),
+        para('ui-set__hint', tr("Enter the account's email. If it is registered, you'll get a code to create a new password.")),
         form.el,
       ),
     };
@@ -748,10 +747,10 @@ export class WorldSettingsGroup {
   private buildReset(): View {
     const email = this.ui.email;
     const code = codeField();
-    const password = passwordField(tr('Senha nova'), 'new-password', tr('Pelo menos 12 caracteres. Uma frase longa vale mais do que símbolos; senhas que já vazaram são recusadas.'));
-    const form = new Form(tr('Trocar a senha'), () => void submit(), tr('Trocando…'));
+    const password = passwordField(tr('New password'), 'new-password', tr('At least 12 characters. A long phrase beats symbols; passwords that have leaked are rejected.'));
+    const form = new Form(tr('Change password'), () => void submit(), tr('Changing…'));
     const submit = async () => {
-      if (!codeLooksValid(code.input.value)) return form.setError(tr('Digite os 6 dígitos do código.'), code.input);
+      if (!codeLooksValid(code.input.value)) return form.setError(tr('Enter the 6 digits of the code.'), code.input);
       const problem = passwordProblem(password.input.value, email);
       if (problem) return form.setError(passwordProblemText(problem), password.input);
       const r = await this.run(form, 'reset', (c) => c.resetPassword({ email, code: normalizeCode(code.input.value), password: password.input.value.normalize('NFC') }), code.input);
@@ -760,13 +759,13 @@ export class WorldSettingsGroup {
       void this.refresh();
     };
     const resend = this.resendButton(form, (c) => c.forgotPassword({ email }));
-    form.el.append(code.label, password.label, para('ui-set__hint', tr('Trocar a senha desconecta todos os dispositivos da conta.')), form.error, h('div', { class: 'ui-world__actions' }, form.submit, resend.el));
+    form.el.append(code.label, password.label, para('ui-set__hint', tr('Changing the password signs out every device on the account.')), form.error, h('div', { class: 'ui-world__actions' }, form.submit, resend.el));
     return {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Senha nova'), () => this.go('login')),
-        para('ui-world__lead', ...rich(tr('Se {0} tiver conta, chegou um código de 6 dígitos. Digite o código e a senha nova.'), [h('strong', { class: 'ui-world__email', text: email })])),
+        screenHead(tr('New password'), () => this.go('login')),
+        para('ui-world__lead', ...rich(tr('If {0} has an account, a 6-digit code is on its way. Enter the code and the new password.'), [h('strong', { class: 'ui-world__email', text: email })])),
         this.demoCodeHint(),
         form.el,
       ),
@@ -774,7 +773,7 @@ export class WorldSettingsGroup {
     };
   }
 
-  // ---------------------------------------------------------------- com conta
+  // ---------------------------------------------------------------- with account
 
   private buildHome(): View {
     const wrap = h('div', { class: 'ui-world__stack' });
@@ -792,8 +791,8 @@ export class WorldSettingsGroup {
       accountId: () => this.status?.account?.id,
       maintenance: () => this.status?.lastError === 'maintenance',
     });
-    // "Avisar quando alguém visitar" (o aviso do primeiro visitante de cada conexão; ui/world/world-chip.ts)
-    const notify = switchRow(tr('Avisar quando alguém visitar'), tr('Um aviso quando o primeiro visitante entra no seu prédio. Você vê só quantos estão lá dentro, nunca quem.'), () =>
+    // "Notify me when someone visits" (alert for first visitor of each connection; ui/world/world-chip.ts)
+    const notify = switchRow(tr('Notify me when someone visits'), tr('A notice when the first visitor enters your building. You only see how many are inside, never who.'), () =>
       this.ctx.updatePrefs({ worldVisitNotify: !this.ctx.prefs.worldVisitNotify }),
     );
     let rev = -1;
@@ -816,14 +815,15 @@ export class WorldSettingsGroup {
     out.push(
       para(
         'ui-world__notice',
-        approved ? tr('Acesso liberado!') : tr('Você está na lista de espera. Estamos liberando o acesso aos poucos e avisamos por e-mail quando chegar a sua vez.'),
+        approved ? tr('Access granted!') : tr("You're on the waitlist. We're opening access gradually and will let you know by email when it's your turn."),
       ),
     );
-    // O mundo em manutenção (503 `maintenance`): o prédio tenta de novo sozinho, com espera. Com o cartão "Seu prédio",
-    // é ele que diz (no lugar do "Reconectando"); sem ele (lista de espera), um aviso próprio.
+    // World under maintenance (503 `maintenance`): building retries on its own, with backoff.
+    // With "Your building" card, it displays the notice (instead of "Reconnecting"); without it
+    // (waitlist), dedicated notice is shown.
     const maintenance = s?.lastError === 'maintenance';
     if (maintenance && !approved) out.push(para('ui-world__maint', worldErrorText('maintenance', 'status')));
-    // Aprovado: o cartão "Seu prédio" (conexão, contagens, pausar, o que foi enviado). Na espera, o lote vazio.
+    // Approved: "Your building" card (connection, counts, pause, what was sent). On waitlist, empty lot.
     if (approved) out.push(card.el);
     else
       out.push(
@@ -831,17 +831,17 @@ export class WorldSettingsGroup {
           'div',
           { class: 'ui-world__lot' },
           h('span', { class: 'ui-world__lot-art', attrs: { 'aria-hidden': 'true' } }),
-          h('span', { class: 'ui-world__lot-text', text: tr('Seu prédio vai aparecer aqui') }),
+          h('span', { class: 'ui-world__lot-text', text: tr('Your building will show up here') }),
         ),
       );
 
     const player = s?.player;
     if (player?.mustRename) {
-      out.push(para('ui-world__warn', tr('Escolha um nome novo: a moderação trocou o seu nome de jogador. O nome novo entra na hora, sem esperar os 30 dias.')));
+      out.push(para('ui-world__warn', tr('Choose a new name: the moderators changed your player name. The new name applies right away, without waiting 30 days.')));
     }
     if (player) {
       const traits = h('span', { class: 'ui-world__traits' }, ...player.traits.filter((t) => TRAITS[t]).map((t) => h('span', { class: 'ui-world__trait', text: `${TRAITS[t].emoji} ${TRAITS[t].label}` })));
-      const country = player.country ? countryName(player.country) : player.visibility.hideCountry ? tr('país escondido') : '';
+      const country = player.country ? countryName(player.country) : player.visibility.hideCountry ? tr('country hidden') : '';
       out.push(
         h(
           'div',
@@ -860,38 +860,38 @@ export class WorldSettingsGroup {
           'div',
           { class: 'ui-world__actions' },
           player.mustRename
-            ? h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Escolher nome novo'), on: { click: () => this.go('character') } })
-            : h('button', { class: 'ui-btn', type: 'button', text: tr('Editar personagem'), on: { click: () => this.go('character') } }),
+            ? h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Choose new name'), on: { click: () => this.go('character') } })
+            : h('button', { class: 'ui-btn', type: 'button', text: tr('Edit character'), on: { click: () => this.go('character') } }),
         ),
       );
     } else {
-      // O nome de jogador escolhido no cadastro, reservado enquanto o personagem não existe.
+      // Player name chosen at registration, reserved while character does not exist.
       const reserved = s?.account?.reservedName;
-      if (reserved) out.push(para('ui-world__reserved', ...rich(tr('Seu nome de jogador: {0} (reservado)'), [h('strong', { class: 'ui-world__player-name', text: reserved })])));
+      if (reserved) out.push(para('ui-world__reserved', ...rich(tr('Your player name: {0} (reserved)'), [h('strong', { class: 'ui-world__player-name', text: reserved })])));
       out.push(
-        para('ui-set__hint', approved ? tr('Crie o seu personagem para entrar no mundo.') : tr('Enquanto espera, já dá para criar o seu personagem.')),
-        h('div', { class: 'ui-world__actions' }, h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Criar meu personagem'), attrs: { 'data-world': 'create-character' }, on: { click: () => this.go('character') } })),
+        para('ui-set__hint', approved ? tr('Create your character to enter the world.') : tr('While you wait, you can already create your character.')),
+        h('div', { class: 'ui-world__actions' }, h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Create my character'), attrs: { 'data-world': 'create-character' }, on: { click: () => this.go('character') } })),
       );
     }
 
     const nav = h('div', { class: 'ui-world__nav' });
     if (player) {
       const v = player.visibility;
-      const summary = [v.mode === 'discreet' ? tr('Discreto') : tr('Ao vivo'), v.closed ? tr('fechado a visitas') : null].filter(Boolean).join(' · ');
-      nav.append(this.navRow(tr('Visibilidade do prédio'), summary, () => this.go('visibility')));
+      const summary = [v.mode === 'discreet' ? tr('Discreet') : tr('Live'), v.closed ? tr('closed to visitors') : null].filter(Boolean).join(' · ');
+      nav.append(this.navRow(tr('Building visibility'), summary, () => this.go('visibility')));
     }
     const devices = s?.devices?.length;
-    nav.append(this.navRow(tr('Dispositivos'), devices ? tr('{0} de 3', [devices]) : '', () => this.go('devices')));
-    if (player && approved) nav.append(this.navRow(tr('Bloqueados'), s?.blocked?.length ? String(s.blocked.length) : '', () => this.go('blocked')));
-    nav.append(this.navRow(tr('Conta e dados'), '', () => this.go('account')));
+    nav.append(this.navRow(tr('Devices'), devices ? tr('{0} of 3', [devices]) : '', () => this.go('devices')));
+    if (player && approved) nav.append(this.navRow(tr('Blocked'), s?.blocked?.length ? String(s.blocked.length) : '', () => this.go('blocked')));
+    nav.append(this.navRow(tr('Account and data'), '', () => this.go('account')));
     out.push(nav);
     if (approved && player) out.push(notifyRow);
 
-    if (s?.lastError && !maintenance) out.push(para('ui-world__warn', tr('Último problema com o mundo: {0}', [worldErrorText(s.lastError, 'status')])));
+    if (s?.lastError && !maintenance) out.push(para('ui-world__warn', tr('Last problem with the world: {0}', [worldErrorText(s.lastError, 'status')])));
 
     out.push(this.signOutRow());
-    if (s?.account) out.push(para('ui-set__hint ui-world__email', tr('Conta: {0}', [s.account.emailMasked])));
-    out.push(h('p', { class: 'ui-world__links' }, extLink(tr('Termos de Uso'), WORLD_TERMS_URL), extLink(tr('Política de Privacidade'), WORLD_PRIVACY_URL)));
+    if (s?.account) out.push(para('ui-set__hint ui-world__email', tr('Account: {0}', [s.account.emailMasked])));
+    out.push(h('p', { class: 'ui-world__links' }, extLink(tr('Terms of Use'), WORLD_TERMS_URL), extLink(tr('Privacy Policy'), WORLD_PRIVACY_URL)));
     return out;
   }
 
@@ -905,16 +905,16 @@ export class WorldSettingsGroup {
     );
   }
 
-  /** "Sair da conta" em dois cliques (o segundo confirma). */
+  /** "Sign out" in two clicks (second click confirms). */
   private signOutRow(): HTMLElement {
     let confirming = false;
-    const btn = h('button', { class: 'ui-btn', type: 'button', text: tr('Sair da conta') });
-    const hint = h('span', { class: 'ui-set__hint', text: tr('Este computador deixa de entrar no mundo; a conta e o personagem continuam.') });
+    const btn = h('button', { class: 'ui-btn', type: 'button', text: tr('Sign out') });
+    const hint = h('span', { class: 'ui-set__hint', text: tr('This computer stops joining the world; your account and character stay.') });
     const error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
     btn.addEventListener('click', async () => {
       if (!confirming) {
         confirming = true;
-        setText(btn, tr('Confirmar: sair da conta'));
+        setText(btn, tr('Confirm: sign out'));
         btn.classList.add('is-danger');
         return;
       }
@@ -946,10 +946,10 @@ export class WorldSettingsGroup {
     fields.set(player ? draftAppearance(look, player.parts) : draftAppearance(look, undefined, randomSeed()));
 
     const name = h('input', { class: 'ui-char__name', type: 'text', attrs: { maxlength: PLAYER_NAME_LIMITS.max * 2, autocomplete: 'nickname', spellcheck: 'false', 'aria-describedby': 'ui-world-name-hint' } });
-    // Nome trocado à força pela moderação ("???"): o campo começa vazio e recebe o foco.
+    // Name forcibly changed by moderation ("???"): field starts empty and receives focus.
     const rename = player?.mustRename === true;
-    // Criando com o nome reservado no cadastro: o campo mostra a reserva e não se edita (o pedido vai sem `name`; o
-    // servidor do mundo usa a reserva). Conta antiga, sem reserva, escolhe o nome aqui, como antes.
+    // Creating with name reserved at registration: field shows reserved name and is read-only (request sent without
+    // `name`; world server uses reservation). Legacy account without reservation chooses name here, as before.
     const reserved = !player ? this.status?.account?.reservedName : undefined;
     name.value = rename ? '' : (player?.name ?? reserved ?? '');
     if (reserved) {
@@ -960,16 +960,16 @@ export class WorldSettingsGroup {
     const roll = h('button', {
       class: 'ui-btn ui-btn--sm',
       type: 'button',
-      text: tr('Sortear'),
-      title: tr('Sortear outra aparência (desfaz as peças escolhidas)'),
+      text: tr('Randomize'),
+      title: tr('Randomize another look (undoes the pieces you chose)'),
       on: { click: () => fields.set(draftAppearance(look, undefined, randomSeed())) },
     });
 
     const lookSeg = segmented<'f' | 'm'>(
-      tr('Dica visual'),
+      tr('Visual hint'),
       [
-        ['f', tr('Feminina')],
-        ['m', tr('Masculina')],
+        ['f', tr('Feminine')],
+        ['m', tr('Masculine')],
       ],
       (v) => {
         look = v;
@@ -979,19 +979,19 @@ export class WorldSettingsGroup {
       },
     );
     lookSeg.set(look);
-    lookSeg.row.append(h('span', { class: 'ui-set__hint', text: tr('Muda detalhes do rosto e o sorteio de cabelo e roupa; tudo dá para trocar nas peças abaixo.') }));
+    lookSeg.row.append(h('span', { class: 'ui-set__hint', text: tr('Changes face details and the random pick of hair and clothes; you can change everything in the pieces below.') }));
 
-    // Traços: 2 ou 3; os que não combinam com os escolhidos (e todos, com 3 escolhidos) ficam desabilitados.
+    // Traits: 2 or 3; those clashing with chosen ones (and all, once 3 are chosen) become disabled.
     const count = h('span', { class: 'ui-world__count' });
     const chips = new Map<TraitId, HTMLButtonElement>();
     const syncTraits = () => {
-      setText(count, tr('{0} de 3', [traits.length]));
+      setText(count, tr('{0} of 3', [traits.length]));
       for (const [t, b] of chips) {
         const on = traits.includes(t);
         const block = traitBlock(traits, t);
         setAttr(b, 'aria-pressed', String(on));
         setAttr(b, 'aria-disabled', block ? 'true' : null);
-        b.title = block ? (block.reason === 'full' ? tr('Já são 3 traços: desmarque um para trocar.') : tr('Não combina com {0}.', [TRAITS[block.with].label])) : TRAITS[t].desc;
+        b.title = block ? (block.reason === 'full' ? tr("That's 3 traits already: unselect one to swap.") : tr("Doesn't go with {0}.", [TRAITS[block.with].label])) : TRAITS[t].desc;
       }
     };
     for (const t of TRAIT_IDS) {
@@ -1006,21 +1006,21 @@ export class WorldSettingsGroup {
     }
     syncTraits();
 
-    const intro = h('select', { class: 'ui-world__select', attrs: { 'aria-label': tr('Frase de apresentação') } });
-    intro.append(h('option', { text: tr('Escolha uma frase…'), attrs: { value: '' } }));
+    const intro = h('select', { class: 'ui-world__select', attrs: { 'aria-label': tr('Intro phrase') } });
+    intro.append(h('option', { text: tr('Pick a phrase…'), attrs: { value: '' } }));
     for (const id of INTRO_IDS) intro.append(h('option', { text: introLabel(id), attrs: { value: id } }));
     intro.value = player?.intro ?? '';
 
-    const form = new Form(tr('Salvar personagem'), () => void submit(), tr('Salvando…'));
-    const traitsBox = h('div', { class: 'ui-world__traitopts', role: 'group', attrs: { 'aria-label': tr('Personalidade') } }, ...chips.values());
+    const form = new Form(tr('Save character'), () => void submit(), tr('Saving…'));
+    const traitsBox = h('div', { class: 'ui-world__traitopts', role: 'group', attrs: { 'aria-label': tr('Personality') } }, ...chips.values());
     const submit = async () => {
       const a = fields.value;
       if (!a) return;
       const chosen = isIntroId(intro.value) ? (intro.value as IntroId) : null;
       const problem = characterProblem({ name: reserved ?? name.value, traits, intro: chosen });
       if (problem?.field === 'name') return form.setError(nameProblemText(problem.problem), name);
-      if (problem?.field === 'traits') return form.setError(tr('Escolha 2 ou 3 traços de personalidade.'), chips.get(TRAIT_IDS[0]));
-      if (problem || !chosen) return form.setError(tr('Escolha uma frase de apresentação.'), intro);
+      if (problem?.field === 'traits') return form.setError(tr('Pick 2 or 3 personality traits.'), chips.get(TRAIT_IDS[0]));
+      if (problem || !chosen) return form.setError(tr('Pick an intro phrase.'), intro);
       const parsed = parsePlayerName(name.value);
       const body = { ...(reserved ? {} : { name: parsed.ok ? parsed.name : name.value }), look, parts: fullParts(a), traits: [...traits], intro: chosen };
       const r = await this.run(form, 'character', (c) => c.saveCharacter(body), name);
@@ -1030,39 +1030,39 @@ export class WorldSettingsGroup {
       void this.refresh();
     };
     form.el.append(
-      rename ? para('ui-world__warn', tr('Escolha um nome novo')) : '',
+      rename ? para('ui-world__warn', tr('Choose a new name')) : '',
       h(
         'div',
         { class: 'ui-char__top' },
         fields.preview,
-        h('div', { class: 'ui-char__head' }, h('label', { class: 'ui-char__label' }, h('span', { text: tr('Nome de jogador') }), name), roll),
+        h('div', { class: 'ui-char__head' }, h('label', { class: 'ui-char__label' }, h('span', { text: tr('Player name') }), name), roll),
       ),
       reserved
-        ? para('ui-set__hint', h('span', { attrs: { id: 'ui-world-name-hint' } }, tr('Escolhido no cadastro. Dá para trocar depois, uma vez a cada 30 dias.')))
+        ? para('ui-set__hint', h('span', { attrs: { id: 'ui-world-name-hint' } }, tr('Chosen at sign-up. You can change it later, once every 30 days.')))
         : para(
             'ui-set__hint',
-            h('span', { attrs: { id: 'ui-world-name-hint' } }, tr('De 3 a 20 caracteres: letras de um só alfabeto, números, espaço, _ - e . É o seu nome no mundo e não pode repetir o de ninguém.')),
-            rename ? ` ${tr('Desta vez o nome novo entra na hora, sem esperar os 30 dias.')}` : player ? ` ${tr('Dá para trocar uma vez a cada 30 dias.')}` : '',
+            h('span', { attrs: { id: 'ui-world-name-hint' } }, tr("3 to 20 characters: letters from a single alphabet, numbers, space, _ - and . It's your name in the world and can't match anyone else's.")),
+            rename ? ` ${tr('This time the new name applies right away, without waiting 30 days.')}` : player ? ` ${tr('It can be changed once every 30 days.')}` : '',
           ),
       lookSeg.row,
       fields.groups,
       h(
         'fieldset',
         { class: 'ui-char__group ui-world__traitset' },
-        h('legend', {}, tr('Personalidade'), ' ', count),
-        para('ui-set__hint', tr('Escolha 2 ou 3 traços. Os que não combinam com os já escolhidos ficam apagados.')),
+        h('legend', {}, tr('Personality'), ' ', count),
+        para('ui-set__hint', tr("Pick 2 or 3 traits. The ones that don't go with those already picked are dimmed.")),
         traitsBox,
       ),
-      h('label', { class: 'ui-world__field' }, h('span', { class: 'ui-world__label', text: tr('Frase de apresentação') }), intro, h('span', { class: 'ui-set__hint', text: tr('Aparece no seu perfil, traduzida para quem lê. No mundo não há texto livre além do nome.') })),
+      h('label', { class: 'ui-world__field' }, h('span', { class: 'ui-world__label', text: tr('Intro phrase') }), intro, h('span', { class: 'ui-set__hint', text: tr("Shows on your profile, translated for whoever reads it. Besides your name, there's no free text in the world.") })),
       form.error,
-      h('div', { class: 'ui-world__actions' }, form.submit, h('button', { class: 'ui-btn', type: 'button', text: tr('Cancelar'), on: { click: () => this.go('home') } })),
+      h('div', { class: 'ui-world__actions' }, form.submit, h('button', { class: 'ui-btn', type: 'button', text: tr('Cancel'), on: { click: () => this.go('home') } })),
     );
-    return { el: h('div', { class: 'ui-world__stack ui-world__character' }, screenHead(player ? tr('Editar personagem') : tr('Criar personagem'), () => this.go('home')), form.el) };
+    return { el: h('div', { class: 'ui-world__stack ui-world__character' }, screenHead(player ? tr('Edit character') : tr('Create character'), () => this.go('home')), form.el) };
   }
 
   private buildVisibility(): View {
     const player = this.status?.player;
-    if (!player) return { el: h('div', { class: 'ui-world__stack' }, screenHead(tr('Visibilidade do prédio'), () => this.go('home')), para('ui-set__hint', tr('Disponível depois de criar o personagem.'))) };
+    if (!player) return { el: h('div', { class: 'ui-world__stack' }, screenHead(tr('Building visibility'), () => this.go('home')), para('ui-set__hint', tr('Available after you create your character.'))) };
     let vis: WorldVisibility = { ...DEFAULT_VISIBILITY, ...player.visibility };
     let saving = false;
     const error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
@@ -1087,14 +1087,14 @@ export class WorldSettingsGroup {
       sync();
     };
     const mode = segmented<WorldVisibility['mode']>(
-      tr('Modo do prédio'),
+      tr('Building mode'),
       [
-        ['live', tr('Ao vivo')],
-        ['discreet', tr('Discreto')],
+        ['live', tr('Live')],
+        ['discreet', tr('Discreet')],
       ],
       (v) => void save({ ...vis, mode: v }),
     );
-    mode.row.append(h('span', { class: 'ui-set__hint', text: tr('Ao vivo: andares, contadores e o que cada personagem está fazendo, em tempo real. Discreto: só aceso ou apagado e o número de andares.') }));
+    mode.row.append(h('span', { class: 'ui-set__hint', text: tr('Live: floors, counters and what each character is doing, in real time. Discreet: only lit or dark and the number of floors.') }));
     const rows = VISIBILITY_SWITCHES.map((key) => {
       const t = visibilityText(key);
       const r = switchRow(t.label, t.hint, () => void save({ ...vis, [key]: !vis[key] }));
@@ -1109,27 +1109,27 @@ export class WorldSettingsGroup {
         btn.disabled = saving;
       }
       const code = this.status?.player?.country;
-      setText(country, vis.hideCountry ? tr('País: escondido (aparece uma bandeira neutra).') : code ? tr('País visto na última conexão: {0}.', [countryName(code)]) : tr('País: aparece depois da primeira conexão com o mundo.'));
+      setText(country, vis.hideCountry ? tr('Country: hidden (a neutral flag shows).') : code ? tr('Country seen on the last connection: {0}.', [countryName(code)]) : tr('Country: shows after the first connection to the world.'));
     };
     sync();
     return {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Visibilidade do prédio'), () => this.go('home')),
+        screenHead(tr('Building visibility'), () => this.go('home')),
         mode.row,
         ...rows,
         country,
         error,
-        para('ui-set__hint', tr('As mudanças valem na hora.')),
+        para('ui-set__hint', tr('Changes apply right away.')),
       ),
     };
   }
 
-  /** Fase 5: quem a conta bloqueou, com Desbloquear (blocked.ts). A lista é relida do /v1/me ao abrir. */
+  /** Phase 5: blocked accounts, with Unblock (blocked.ts). List is refetched from /v1/me on open. */
   private buildBlocked(): View {
     const epoch = this.epoch;
-    return buildBlocked(screenHead(tr('Bloqueados'), () => this.go('home')), {
+    return buildBlocked(screenHead(tr('Blocked'), () => this.go('home')), {
       client: this.client,
       list: () => this.status?.blocked,
       refresh: () => this.refresh(true),
@@ -1140,7 +1140,7 @@ export class WorldSettingsGroup {
 
   private buildDevices(): View {
     const list = h('ul', { class: 'ui-world__devices' });
-    const note = h('p', { class: 'ui-set__hint', text: tr('Carregando…') });
+    const note = h('p', { class: 'ui-set__hint', text: tr('Loading…') });
     const error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
     let devices: WorldDevice[] | null = this.status?.devices ?? null;
     const draw = () => {
@@ -1173,8 +1173,8 @@ export class WorldSettingsGroup {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Dispositivos'), () => this.go('home')),
-        para('ui-set__hint', tr('Até 3 por conta. Revogar desconecta o dispositivo na hora; para voltar, ele entra de novo com a senha.')),
+        screenHead(tr('Devices'), () => this.go('home')),
+        para('ui-set__hint', tr('Up to 3 per account. Revoking signs the device out right away; to come back, it signs in again with the password.')),
         note,
         list,
         error,
@@ -1186,16 +1186,16 @@ export class WorldSettingsGroup {
     const now = Date.now();
     const created = toMillis(d.createdAt);
     const seen = toMillis(d.lastSeenAt);
-    const meta = [created ? tr('entrou em {0}', [formatDateTime(created)]) : null, !d.current && seen ? tr('último acesso {0}', [relativeTime(seen, now)]) : null].filter(Boolean).join(' · ');
-    const head = h('span', { class: 'ui-world__device-name' }, deviceLabel(d.label), d.current ? h('span', { class: 'ui-world__tag', text: tr('este computador') }) : null);
+    const meta = [created ? tr('signed in on {0}', [formatDateTime(created)]) : null, !d.current && seen ? tr('last seen {0}', [relativeTime(seen, now)]) : null].filter(Boolean).join(' · ');
+    const head = h('span', { class: 'ui-world__device-name' }, deviceLabel(d.label), d.current ? h('span', { class: 'ui-world__tag', text: tr('this computer') }) : null);
     const text = h('div', { class: 'ui-set__text' }, head, meta ? h('span', { class: 'ui-set__hint', text: meta }) : null);
     if (d.current) return h('li', { class: 'ui-set ui-world__device' }, text);
     let confirming = false;
-    const btn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Revogar'), attrs: { 'aria-label': tr('Revogar {0}', [deviceLabel(d.label)]) } });
+    const btn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Revoke'), attrs: { 'aria-label': tr('Revoke {0}', [deviceLabel(d.label)]) } });
     btn.addEventListener('click', async () => {
       if (!confirming) {
         confirming = true;
-        setText(btn, tr('Confirmar'));
+        setText(btn, tr('Confirm'));
         btn.classList.add('is-danger');
         return;
       }
@@ -1220,12 +1220,12 @@ export class WorldSettingsGroup {
     return h('li', { class: 'ui-set ui-world__device' }, text, btn);
   }
 
-  // ---------------------------------------------------------------- conta e dados (Fase 6)
+  // ---------------------------------------------------------------- account and data (Phase 6)
 
   /**
-   * "Conta e dados": o aviso de inatividade (com o personagem: vai na visibilidade), "Baixar meus dados" (o JSON da
-   * conta, uma vez por dia) e "Excluir conta" em três etapas. A tela é montada uma vez: o status relido no meio não apaga
-   * o código digitado; `sync` só acompanha o interruptor.
+   * "Account and data": inactivity warning (with character: goes into visibility), "Download my data" (account JSON,
+   * once per day), and "Delete account" in three steps. View mounted once: refetched status mid-way won't erase
+   * entered code; `sync` only updates the switch.
    */
   private buildAccount(): View {
     const inactivity = this.inactivitySection();
@@ -1235,26 +1235,26 @@ export class WorldSettingsGroup {
       el: h(
         'div',
         { class: 'ui-world__stack' },
-        screenHead(tr('Conta e dados'), () => this.go('home')),
+        screenHead(tr('Account and data'), () => this.go('home')),
         inactivity.el,
         exportBox,
         deletion,
-        para('ui-set__hint', tr('Dúvidas ou pedidos sobre os seus dados: {0}.', [APPEAL_EMAIL])),
+        para('ui-set__hint', tr('Questions or requests about your data: {0}.', [APPEAL_EMAIL])),
       ),
       sync: inactivity.sync,
     };
   }
 
-  /** O interruptor do aviso por e-mail antes de retirar o prédio por inatividade. */
+  /** Switch for email warning before building is removed for inactivity. */
   private inactivitySection(): { el: HTMLElement; sync(): void } {
     let pending: boolean | null = null;
     const error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
     const sw = switchRow(
-      tr('Avisar por e-mail antes de retirar meu prédio por inatividade'),
-      tr('Sem notícias deste Habblaud por 7 dias, o prédio some do mapa e, 30 dias depois, é retirado. O e-mail chega 3 dias antes da retirada.'),
+      tr('E-mail me before my building is removed for inactivity'),
+      tr('With no word from this Habblaud for 7 days, the building disappears from the map and, 30 days later, is removed. The e-mail arrives 3 days before the removal.'),
       () => void toggle(),
     );
-    const noPlayer = para('ui-set__hint', tr('O aviso de inatividade fica disponível depois de criar o personagem.'));
+    const noPlayer = para('ui-set__hint', tr('The inactivity warning becomes available after you create the character.'));
     const sync = () => {
       const player = this.status?.player;
       setHidden(sw.row, !player);
@@ -1278,7 +1278,7 @@ export class WorldSettingsGroup {
         setText(error, worldErrorText(r.code, 'inactivity'));
         setHidden(error, false);
       } else {
-        // Até o status chegar, o interruptor fica no que foi salvo.
+        // Until status arrives, switch reflects what was saved.
         const p = this.status?.player;
         if (p) p.visibility = { ...p.visibility, notifyInactivity: next };
         void this.refresh();
@@ -1286,12 +1286,12 @@ export class WorldSettingsGroup {
       sync();
     };
     sync();
-    return { el: h('section', { class: 'ui-world__acct' }, h('h4', { class: 'ui-world__acct-title', text: tr('Avisos') }), sw.row, noPlayer, error), sync };
+    return { el: h('section', { class: 'ui-world__acct' }, h('h4', { class: 'ui-world__acct-title', text: tr('Alerts') }), sw.row, noPlayer, error), sync };
   }
 
-  /** "Baixar meus dados": pede o JSON ao servidor local e salva como habblaud-world-dados.json. */
+  /** "Download my data": requests JSON from local server and saves as habblaud-world-dados.json. */
   private exportSection(): HTMLElement {
-    const btn = h('button', { class: 'ui-btn', type: 'button', text: tr('Baixar meus dados') });
+    const btn = h('button', { class: 'ui-btn', type: 'button', text: tr('Download my data') });
     const note = h('p', { class: 'ui-set__hint', role: 'status', hidden: true });
     const error = h('p', { class: 'ui-world__error', role: 'alert', hidden: true });
     btn.addEventListener('click', async () => {
@@ -1312,16 +1312,16 @@ export class WorldSettingsGroup {
         return;
       }
       saveFile(this.el, r.data, EXPORT_FILENAME);
-      setText(note, tr('Pronto: o arquivo {0} foi para a pasta de downloads.', [EXPORT_FILENAME]));
+      setText(note, tr('Done: the file {0} went to your downloads folder.', [EXPORT_FILENAME]));
       setHidden(note, false);
     });
     return h(
       'section',
       { class: 'ui-world__acct' },
-      h('h4', { class: 'ui-world__acct-title', text: tr('Seus dados') }),
+      h('h4', { class: 'ui-world__acct-title', text: tr('Your data') }),
       para(
         'ui-set__hint',
-        tr('Um arquivo JSON com o que o Habblaud World guarda da sua conta: e-mail, datas, personagem, visibilidade, dispositivos, prédio, likes dados, bloqueios e denúncias feitas. Dá para baixar uma vez por dia.'),
+        tr('A JSON file with what Habblaud World keeps about your account: e-mail, dates, character, visibility, devices, building, likes given, blocks and reports you made. You can download it once a day.'),
       ),
       h('div', { class: 'ui-world__actions' }, btn),
       note,
@@ -1329,46 +1329,46 @@ export class WorldSettingsGroup {
     );
   }
 
-  /** "Excluir conta" em três etapas: o que some e quando; a confirmação (manda o código); o código do e-mail. */
+  /** "Delete account" in three steps: what is removed and when; confirmation (sends code); email code. */
   private deletionSection(): HTMLElement {
     const box = h('div', { class: 'ui-world__stack' });
     const email = () => this.status?.account?.emailMasked ?? '';
     const explain = () => {
-      const next = h('button', { class: 'ui-btn', type: 'button', text: tr('Excluir conta…'), on: { click: () => show(confirm()) } });
+      const next = h('button', { class: 'ui-btn', type: 'button', text: tr('Delete account…'), on: { click: () => show(confirm()) } });
       return [
-        para('ui-set__hint', tr('Excluir a conta tira você do Habblaud World:')),
+        para('ui-set__hint', tr('Deleting the account takes you out of Habblaud World:')),
         h(
           'ul',
           { class: 'ui-world__list' },
-          h('li', {}, h('strong', { text: tr('Na hora:') }), ' ', tr('o prédio e o perfil somem do mundo, e este computador sai da conta.')),
-          h('li', {}, h('strong', { text: tr('Em 7 dias:') }), ' ', tr('a conta, o personagem, os likes dados e recebidos, os bloqueios, as denúncias feitas e os dispositivos são apagados do banco.')),
-          h('li', {}, h('strong', { text: tr('Em até 30 dias:') }), ' ', tr('somem também dos backups.')),
+          h('li', {}, h('strong', { text: tr('Right away:') }), ' ', tr('the building and the profile disappear from the world, and this computer signs out of the account.')),
+          h('li', {}, h('strong', { text: tr('Within 7 days:') }), ' ', tr('the account, the character, the likes given and received, the blocks, the reports you made and the devices are deleted from the database.')),
+          h('li', {}, h('strong', { text: tr('Within 30 days:') }), ' ', tr('they also disappear from the backups.')),
         ),
-        para('ui-set__hint', tr('Se quiser guardar uma cópia, baixe os seus dados antes.')),
+        para('ui-set__hint', tr('If you want to keep a copy, download your data first.')),
         h('div', { class: 'ui-world__actions' }, next),
       ];
     };
     const confirm = () => {
-      const form = new Form(tr('Mandar o código'), () => void send(), tr('Mandando…'));
+      const form = new Form(tr('Send the code'), () => void send(), tr('Sending…'));
       form.submit.classList.add('is-danger');
       const send = async () => {
         const r = await this.run(form, 'delete', (c) => c.requestAccountDeletion());
         if (r?.ok) show(code());
       };
       form.el.append(
-        para('ui-world__warn', tr('Tem certeza? O prédio e o perfil saem do mundo assim que você digitar o código.')),
-        para('ui-set__hint', ...rich(tr('Para confirmar, mandamos um código de 6 dígitos para o e-mail da conta ({0}).'), [h('strong', { class: 'ui-world__email', text: email() })])),
+        para('ui-world__warn', tr('Are you sure? The building and the profile leave the world as soon as you enter the code.')),
+        para('ui-set__hint', ...rich(tr("To confirm, we send a 6-digit code to the account's e-mail ({0})."), [h('strong', { class: 'ui-world__email', text: email() })])),
         form.error,
-        h('div', { class: 'ui-world__actions' }, form.submit, h('button', { class: 'ui-btn', type: 'button', text: tr('Cancelar'), on: { click: () => show(explain()) } })),
+        h('div', { class: 'ui-world__actions' }, form.submit, h('button', { class: 'ui-btn', type: 'button', text: tr('Cancel'), on: { click: () => show(explain()) } })),
       );
       return [form.el];
     };
     const code = () => {
       const field = codeField();
-      const form = new Form(tr('Excluir a conta'), () => void submit(), tr('Excluindo…'));
+      const form = new Form(tr('Delete the account'), () => void submit(), tr('Deleting…'));
       form.submit.classList.add('is-danger');
       const submit = async () => {
-        if (!codeLooksValid(field.input.value)) return form.setError(tr('Digite os 6 dígitos do código.'), field.input);
+        if (!codeLooksValid(field.input.value)) return form.setError(tr('Enter the 6 digits of the code.'), field.input);
         const r = await this.run(form, 'delete', (c) => c.confirmAccountDeletion({ code: normalizeCode(field.input.value) }), field.input);
         if (!r?.ok) return;
         this.ctx.announce(worldErrorText('account_deleted', 'status'));
@@ -1376,22 +1376,22 @@ export class WorldSettingsGroup {
       };
       const resend = this.resendButton(form, (c) => c.requestAccountDeletion());
       form.el.append(
-        para('ui-world__lead', ...rich(tr('Mandamos um código de 6 dígitos para {0}. Digite o código para excluir a conta.'), [h('strong', { class: 'ui-world__email', text: email() })])),
+        para('ui-world__lead', ...rich(tr('We sent a 6-digit code to {0}. Enter the code to delete the account.'), [h('strong', { class: 'ui-world__email', text: email() })])),
         this.demoCodeHint() ?? '',
         field.label,
         form.error,
-        h('div', { class: 'ui-world__actions' }, form.submit, resend.el, h('button', { class: 'ui-btn', type: 'button', text: tr('Cancelar'), on: { click: () => show(explain()) } })),
+        h('div', { class: 'ui-world__actions' }, form.submit, resend.el, h('button', { class: 'ui-btn', type: 'button', text: tr('Cancel'), on: { click: () => show(explain()) } })),
       );
       requestAnimationFrame(() => field.input.isConnected && field.input.focus());
       return [form.el];
     };
     const show = (nodes: (Node | string)[]) => box.replaceChildren(...nodes);
     show(explain());
-    return h('section', { class: 'ui-world__acct ui-world__acct--danger' }, h('h4', { class: 'ui-world__acct-title', text: tr('Excluir conta') }), box);
+    return h('section', { class: 'ui-world__acct ui-world__acct--danger' }, h('h4', { class: 'ui-world__acct-title', text: tr('Delete account') }), box);
   }
 }
 
-/** Salva um texto como arquivo (o link temporário fica dentro da seção, para nada fora dela receber o clique). */
+/** Saves text as a file (temporary link stays inside section so nothing outside receives the click). */
 function saveFile(host: HTMLElement, text: string, filename: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   const a = h('a', { hidden: true, attrs: { href: url, download: filename } });

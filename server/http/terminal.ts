@@ -1,15 +1,15 @@
-// Terminal (Server-Sent Events) em GET /api/agents/:id/terminal: a conversa da sessão
-// (prompts, respostas, ferramentas e resultados) reconstruída do transcript JSONL por sources/terminal.ts.
-// Eventos nomeados: init | append (o `data` é o de TerminalMessage em shared/types.ts). A rota
-// (http/app.ts) já conferiu que o recurso está ligado e que o acesso é local.
+// Terminal (Server-Sent Events) on GET /api/agents/:id/terminal: the session conversation
+// (prompts, responses, tools, and results) reconstructed from the JSONL transcript by sources/terminal.ts.
+// Named events: init | append (`data` matches TerminalMessage in shared/types.ts). The route
+// (http/app.ts) already verified that the feature is enabled and that access is local.
 //
-// Cada conexão tem o próprio FileTail e o próprio parser (o da ferramenta do agente: SourceSet.parserFor; o do
-// Claude Code por padrão): ao conectar, lê o fim do transcript (≈4 MB, últimas 500 entradas) e manda `init`;
-// depois, polling de ~400 ms manda `append` com o que for novo.
-// Transcript truncado/substituído (ou trocado por /clear no mesmo processo) = parser novo e `init` de
-// novo. Agentes do demo não têm transcript: a conversa fictícia sai de demoTerminalEntries a cada ~500 ms.
-// Sessões do histórico (GET /api/sessions/:conta/:sessionId/terminal, http/sessions.ts) usam o mesmo
-// leitor sobre o transcript já validado pela rota, com polling mais espaçado (~2 s).
+// Each connection has its own FileTail and its own parser (the agent tool's parser: SourceSet.parserFor; Claude
+// Code's by default): on connect, reads the end of the transcript (≈4 MB, last 500 entries) and sends `init`;
+// then, ~400 ms polling sends `append` with any new entries.
+// Truncated/replaced transcript (or replaced via /clear in the same process) = new parser and `init` again.
+// Demo agents have no transcript: mock conversation comes from demoTerminalEntries every ~500 ms.
+// History sessions (GET /api/sessions/:conta/:sessionId/terminal, http/sessions.ts) use the same
+// reader on the transcript already validated by the route, with more spaced polling (~2 s).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { demoTerminalEntries } from '../../shared/demo/terminal';
 import type { Activity, AgentInfo, TerminalEntry, TerminalInit } from '../../shared/types';
@@ -21,37 +21,37 @@ import { sendJson } from './app';
 import { frame } from './sse';
 import { tr } from '../../shared/i18n';
 
-/** Terminais abertos ao mesmo tempo (cada um lê o transcript por conta própria). */
+/** Open terminals at the same time (each reads the transcript on its own). */
 export const MAX_STREAMS = 8;
-/** Quanto do fim do transcript é lido para o `init`. */
+/** How much of the end of the transcript is read for `init`. */
 export const INIT_TAIL_BYTES = 4 * 1024 * 1024;
-/** Entradas mandadas no `init` (as mais recentes). */
+/** Entries sent in `init` (the most recent ones). */
 export const INIT_ENTRIES = 500;
 export const POLL_MS = 400;
 export const DEMO_POLL_MS = 500;
-/** Sessão do histórico: quase sempre encerrada (o polling só pega uma retomada com /resume). */
+/** History session: almost always closed (polling only catches a resume with /resume). */
 export const SESSION_POLL_MS = 2_000;
 const PING_MS = 15_000;
-/** Cliente lento demais (buffer acumulado acima disto) é desconectado; o EventSource reconecta. */
+/** Client too slow (buffered data above this limit) is disconnected; EventSource reconnects. */
 const MAX_BUFFERED = 8 * 1024 * 1024;
-/** Leituras (de até 8 MB cada) por ciclo de polling: o resto fica para o próximo. */
+/** Reads (up to 8 MB each) per polling cycle: the rest is left for the next one. */
 const READS_PER_POLL = 4;
 const MAX_INIT_READS = 64;
-/** Prefixo dos ids dos agentes de demonstração (ver Office.setDemo). */
+/** Prefix for demo agent ids (see Office.setDemo). */
 const DEMO_PREFIX = 'demo:';
 
 export interface TerminalOptions {
   office: Office;
-  /** Caminho do transcript de um agente real (SourceSet.transcriptPathOf). */
+  /** Transcript path of a real agent (SourceSet.transcriptPathOf). */
   transcriptPathOf: (agentId: string) => string | undefined;
   /**
-   * Parser da conversa de um agente real (SourceSet.parserFor): um NOVO a cada chamada. Ausente, ou undefined,
+   * Conversation parser of a real agent (SourceSet.parserFor): a NEW one on each call. Absent, or undefined,
    * = createParser.
    */
   parserFor?: (agentId: string) => TerminalParser | undefined;
-  /** Fábrica do parser padrão (testes); padrão: createTerminalParser (o do Claude Code). */
+  /** Default parser factory (tests); default: createTerminalParser (Claude Code's). */
   createParser?: () => TerminalParser;
-  /** Conversa fictícia dos agentes do demo (testes); padrão: demoTerminalEntries. */
+  /** Mock conversation of demo agents (tests); default: demoTerminalEntries. */
   demoEntries?: (agent: AgentInfo, history: Activity[]) => TerminalEntry[];
   maxStreams?: number;
   initTailBytes?: number;
@@ -62,29 +62,29 @@ export interface TerminalOptions {
   pingMs?: number;
 }
 
-/** O que mudou desde o último ciclo: `init` substitui tudo; `stop` = não há mais o que acompanhar. */
+/** What changed since the last cycle: `init` replaces everything; `stop` = nothing more to follow. */
 interface PollResult {
   init?: TerminalInit;
   append?: TerminalEntry[];
   stop?: boolean;
 }
 
-/** De onde vem a conversa de uma conexão. */
+/** Where the conversation for a connection comes from. */
 interface ConversationSource {
   readonly intervalMs: number;
-  /** Conversa recente, para o `init`. */
+  /** Recent conversation, for `init`. */
   load(): TerminalInit;
   poll(): PollResult;
 }
 
-/** Passa as linhas pelo parser; uma linha que o faça falhar é pulada sem perder o resto do lote. */
+/** Passes lines through parser; a line causing it to fail is skipped without losing the rest of the batch. */
 function parseInto(parser: TerminalParser, lines: readonly string[], out: TerminalEntry[]): void {
   for (const line of lines) {
     let entries: TerminalEntry[];
     try {
       entries = parser.push(line);
     } catch (err) {
-      log.warnOnce(`terminal-parse:${errMsg(err)}`, tr('Terminal: linha do transcript ignorada ({0}).', [errMsg(err)]));
+      log.warnOnce(`terminal-parse:${errMsg(err)}`, tr('Terminal: transcript line ignored ({0}).', [errMsg(err)]));
       continue;
     }
     for (const e of entries) out.push(e);
@@ -92,12 +92,12 @@ function parseInto(parser: TerminalParser, lines: readonly string[], out: Termin
 }
 
 /**
- * Agente real (ou sessão do histórico): lê o transcript JSONL com um FileTail próprio. `transcriptPathOf`
- * informa a troca de transcript do principal (/clear); numa sessão do histórico ele nunca muda.
+ * Real agent (or history session): reads the JSONL transcript with its own FileTail. `transcriptPathOf`
+ * notifies transcript change of the main agent (/clear); in a history session it never changes.
  */
 class TranscriptSource implements ConversationSource {
   private tail: FileTail;
-  /** Criado em load(), que sempre roda antes do primeiro poll(). */
+  /** Created in load(), which always runs before the first poll(). */
   private parser!: TerminalParser;
 
   constructor(
@@ -118,7 +118,7 @@ class TranscriptSource implements ConversationSource {
     for (let i = 0; i < MAX_INIT_READS; i++) {
       const r = this.tail.read();
       parseInto(this.parser, r.lines, entries);
-      // Descarta o excesso pelo caminho (transcript com muitas entradas pequenas).
+      // Discards excess along the way (transcript with many small entries).
       if (entries.length > keep * 2) {
         entries = entries.slice(-keep);
         dropped = true;
@@ -133,7 +133,7 @@ class TranscriptSource implements ConversationSource {
   }
 
   poll(): PollResult {
-    // /clear ou /resume no mesmo processo: o principal continua o mesmo, o transcript é outro.
+    // /clear or /resume in the same process: main agent remains the same, transcript is different.
     const path = this.o.transcriptPathOf(this.agentId);
     if (path && path !== this.tail.path) {
       this.tail = new FileTail(path);
@@ -141,7 +141,7 @@ class TranscriptSource implements ConversationSource {
     }
     const fresh: TerminalEntry[] = [];
     for (let i = 0; i < READS_PER_POLL; i++) {
-      // Arquivo sumido: `missing`, sem linhas; continua tentando nos próximos ciclos.
+      // Missing file: `missing`, no lines; keeps trying in next cycles.
       const r = this.tail.read();
       if (r.reset) return { init: this.load() };
       parseInto(this.parser, r.lines, fresh);
@@ -151,9 +151,9 @@ class TranscriptSource implements ConversationSource {
   }
 }
 
-/** Agente do demo: conversa fictícia montada do título e das atividades simuladas. */
+/** Demo agent: mock conversation assembled from the title and simulated activities. */
 class DemoSource implements ConversationSource {
-  /** Ids da última lista gerada (o que o cliente já tem). */
+  /** Ids from the last generated list (what the client already has). */
   private sent = new Set<string>();
 
   constructor(
@@ -225,9 +225,9 @@ export class TerminalStreams {
   }
 
   /**
-   * Abre o terminal de um agente: `init` com a conversa recente, depois `append` com as novidades.
-   * Antes do stream, erros respondem JSON `{error}`: 404 (agente ou transcript desconhecido),
-   * 429 (terminais abertos demais) ou 500 (transcript ilegível).
+   * Opens the terminal of an agent: `init` with recent conversation, then `append` with updates.
+   * Before the stream, errors respond with JSON `{error}`: 404 (unknown agent or transcript),
+   * 429 (too many open terminals), or 500 (unreadable transcript).
    */
   attach(req: IncomingMessage, res: ServerResponse, agentId: string): void {
     const source = this.sourceFor(agentId);
@@ -236,26 +236,26 @@ export class TerminalStreams {
   }
 
   /**
-   * Abre a conversa de uma sessão do histórico pelo transcript `path` (a rota já validou conta, id e caminho).
-   * `streamId` vai no `init` (ex.: "session:<conta>:<sessionId>"); `createParser` é o da ferramenta da sessão
-   * (HistorySession.createParser; padrão: o do Claude Code). Mesmos erros de attach (429/500).
+   * Opens the conversation of a history session by transcript `path` (route already validated account, id, and path).
+   * `streamId` goes in `init` (e.g. "session:<conta>:<sessionId>"); `createParser` is the session tool's parser
+   * (HistorySession.createParser; default: Claude Code's). Same errors as attach (429/500).
    */
   attachSession(req: IncomingMessage, res: ServerResponse, streamId: string, path: string, createParser?: () => TerminalParser): void {
     const o = { transcriptPathOf: () => undefined, createParser: createParser ?? this.createParser, initTailBytes: this.initTailBytes, initEntries: this.initEntries };
     this.serve(req, res, streamId, new TranscriptSource(streamId, path, o, this.sessionPollMs));
   }
 
-  /** Limite de terminais, `init` e o stream SSE de uma fonte já escolhida. */
+  /** Terminal limit, `init`, and the SSE stream of an already selected source. */
   private serve(req: IncomingMessage, res: ServerResponse, id: string, source: ConversationSource): void {
     if (this.streams.size >= this.maxStreams) {
-      return sendJson(res, 429, { error: tr('terminais abertos demais (máximo de {0}); feche algum e tente de novo', [this.maxStreams]) });
+      return sendJson(res, 429, { error: tr('too many open terminals (max {0}); close one and try again', [this.maxStreams]) });
     }
     let init: TerminalInit;
     try {
       init = source.load();
     } catch (err) {
-      log.warnOnce(`terminal-load:${id}:${errMsg(err)}`, tr('Terminal de {0}: não foi possível ler o transcript ({1}).', [id, errMsg(err)]));
-      return sendJson(res, 500, { error: tr('não foi possível ler o transcript') });
+      log.warnOnce(`terminal-load:${id}:${errMsg(err)}`, tr("Terminal for {0}: couldn't read the transcript ({1}).", [id, errMsg(err)]));
+      return sendJson(res, 500, { error: tr("couldn't read the transcript") });
     }
     req.socket.setTimeout(0);
     req.socket.setNoDelay(true);
@@ -283,22 +283,22 @@ export class TerminalStreams {
     }
   }
 
-  /** Fonte da conversa do agente, ou a mensagem do 404. */
+  /** Conversation source of the agent, or the 404 message. */
   private sourceFor(agentId: string): ConversationSource | string {
     const office = this.opts.office;
     if (office.has(agentId)) {
       const path = this.opts.transcriptPathOf(agentId);
-      if (!path) return tr('transcript do agente não encontrado');
+      if (!path) return tr('agent transcript not found');
       const parserFor = this.opts.parserFor;
       const createParser = parserFor ? () => parserFor(agentId) ?? this.createParser() : this.createParser;
       const o = { transcriptPathOf: this.opts.transcriptPathOf, createParser, initTailBytes: this.initTailBytes, initEntries: this.initEntries };
       return new TranscriptSource(agentId, path, o, this.pollMs);
     }
-    // Os agentes do demo não estão entre os reais do Office, mas office.detail os encontra.
+    // Demo agents are not among Office real agents, but office.detail finds them.
     if (agentId.startsWith(DEMO_PREFIX) && office.detail(agentId)) {
       return new DemoSource(agentId, { office, demoEntries: this.demoEntries, initEntries: this.initEntries }, this.demoPollMs);
     }
-    return tr('agente não encontrado');
+    return tr('agent not found');
   }
 
   private pump(s: Stream, source: ConversationSource, agentId: string): void {
@@ -306,13 +306,13 @@ export class TerminalStreams {
     try {
       r = source.poll();
     } catch (err) {
-      // Ex.: transcript sem permissão de leitura. Tenta de novo no próximo ciclo.
-      log.warnOnce(`terminal:${agentId}:${errMsg(err)}`, tr('Terminal de {0}: {1}', [agentId, errMsg(err)]));
+      // E.g.: transcript without read permission. Tries again in the next cycle.
+      log.warnOnce(`terminal:${agentId}:${errMsg(err)}`, tr('Terminal for {0}: {1}', [agentId, errMsg(err)]));
       return;
     }
     if (r.init) this.write(s, frame('init', r.init));
     if (r.append?.length) this.write(s, frame('append', r.append));
-    // O agente sumiu (demo desligado ou sessão simulada encerrada): o stream fica aberto só com pings.
+    // Agent disappeared (demo turned off or simulated session ended): stream stays open with pings only.
     if (r.stop && s.timer) {
       clearInterval(s.timer);
       s.timer = null;

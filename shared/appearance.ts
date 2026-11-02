@@ -1,6 +1,6 @@
-// Peças da aparência que dá para escolher no editor do personagem: as listas dos estilos, a validação do que chega
-// pela API e uma assinatura estável. As paletas e as regras de combinação ficam na arte
-// (client/src/art/character/appearance.ts, editorOptions); aqui fica só o formato. Puro: sem Node nem DOM.
+// Appearance parts selectable in the character editor: style lists, validation of API inputs, and a stable
+// signature. Palettes and combination rules live in art (client/src/art/character/appearance.ts, editorOptions);
+// only the format is here. Pure: no Node or DOM.
 
 export const HAIR_STYLES = [
   'short', 'buzz', 'spiky', 'side_part', 'curly', 'afro', 'bob', 'long', 'ponytail', 'bun', 'pigtails', 'mohawk', 'bald', 'wavy',
@@ -10,7 +10,7 @@ export const ACCESSORIES = ['none', 'glasses', 'sunglasses', 'headphones', 'cap'
 export const FACIAL_HAIR = ['none', 'stubble', 'beard', 'mustache', 'goatee'] as const;
 export const BOTTOM_STYLES = ['pants', 'shorts', 'skirt'] as const;
 
-/** Peças escolhidas no editor, aplicadas por cima da aparência sorteada pela `seed`. Cores em `#rrggbb`. */
+/** Parts chosen in the editor, applied on top of the appearance drawn from `seed`. Colors in `#rrggbb`. */
 export interface AppearanceParts {
   skin?: string;
   hair?: string;
@@ -28,8 +28,8 @@ export interface AppearanceParts {
 }
 
 /**
- * Ordem fixa das peças: a mesma em parseAppearanceParts, partsKey e no editor (changedParts). O timelapse compara
- * por JSON, então a ordem precisa ser estável.
+ * Fixed order of parts: same in parseAppearanceParts, partsKey, and editor (changedParts). Timelapse compares
+ * by JSON, so order must be stable.
  */
 export const PART_KEYS = [
   'skin', 'hair', 'hairStyle', 'eyes', 'top', 'topAccent', 'topStyle', 'bottom', 'bottomStyle', 'shoes', 'accessory',
@@ -45,13 +45,13 @@ const STYLE_VALUES: Partial<Record<PartKey, readonly string[]>> = {
   facialHair: FACIAL_HAIR,
 };
 const COLOR = /^#[0-9a-f]{6}$/i;
-// Controle (C0/C1), separadores de linha e parágrafo (U+2028/2029) e marcas de direção do texto (U+200E/200F,
-// U+202A–202E, U+2066–2069): dá para disfarçar um nome com elas.
+// Control (C0/C1), line/paragraph separators (U+2028/2029), and text direction marks (U+200E/200F, U+202A–202E,
+// U+2066–2069): names could be disguised with them.
 const CONTROL = /[\p{Cc}\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
 export const NAME_MAX = 24;
 
-/** Peças válidas na ordem de PART_KEYS (cores em minúsculas), ou null se houver algo fora do formato. */
+/** Valid parts in PART_KEYS order (colors in lowercase), or null if anything is out of format. */
 export function parseAppearanceParts(raw: unknown): AppearanceParts | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const src = raw as Record<string, unknown>;
@@ -68,7 +68,7 @@ export function parseAppearanceParts(raw: unknown): AppearanceParts | null {
   return out as AppearanceParts;
 }
 
-/** Nome do personagem: NFC, sem espaços sobrando, de 1 a NAME_MAX caracteres e sem caracteres de controle. */
+/** Character name: NFC, no extra whitespace, 1 to NAME_MAX characters, and no control characters. */
 export function parseCharacterName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const name = raw.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -76,17 +76,17 @@ export function parseCharacterName(raw: unknown): string | null {
   return name;
 }
 
-/** Semente da aparência: inteiro de 32 bits sem sinal. */
+/** Appearance seed: 32-bit unsigned integer. */
 export function parseSeed(raw: unknown): number | null {
   return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 0xffffffff ? raw : null;
 }
 
-/** Chave para comparar nomes: "ana" e "Ana" (ou "Júlia" em NFD e em NFC) são o mesmo nome. */
+/** Key to compare names: "ana" and "Ana" (or "Júlia" in NFD and NFC) are the same name. */
 export function nameKey(name: string): string {
   return name.normalize('NFC').toLocaleLowerCase('pt-BR');
 }
 
-/** Assinatura estável de `parts` (cache de avatares e detecção de mudança). */
+/** Stable signature of `parts` (avatar caching and change detection). */
 export function partsKey(parts: AppearanceParts | undefined): string {
   return parts ? PART_KEYS.map((k) => parts[k] ?? '').join(',') : '';
 }

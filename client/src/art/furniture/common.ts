@@ -1,15 +1,15 @@
-// Copa, lounge, banheiro e recepção. Coordenadas de desenho = footprint (base em y = h*TILE).
+// Kitchenette, lounge, bathroom, and reception. Drawing coordinates = footprint (base at y = h*TILE).
 import { mix, ramp, shade, type Ramp } from '../core/color';
 import type { PixelBuf } from '../core/pixbuf';
 import { floorSheet, rectAt, type BufFurniture } from '../core/sprite';
 import { M, contact, foliage, frontFace, glass, monitorBack, mug, papers, pick, pot, rngOf, topFace, underRect, woodGrain } from './kit';
 
-// ------------------------------------------------------------------ copa
+// ------------------------------------------------------------------ kitchenette
 
 const CAB = ramp('#d8b98f', 0.06);
 const TOP = ramp('#eceae5', 0.04);
 
-/** Remove o contorno lateral (x = -1 e x = 16) para módulos que se encaixam lado a lado. */
+/** Removes side outline (x = -1 and x = 16) for modules that fit side by side. */
 function seamless(b: PixelBuf, w = 16): void {
   for (let y = -b.oy; y < b.h - b.oy; y++) {
     b.clear(-1, y);
@@ -17,9 +17,9 @@ function seamless(b: PixelBuf, w = 16): void {
   }
 }
 
-/** Bancada encostada na parede norte: tampo claro e gabinete de madeira. */
+/** Counter against north wall: light top and wooden cabinet. */
 function counterBase(b: PixelBuf, kind: 'plain' | 'drawers' | 'doors'): void {
-  // Gabinete.
+  // Cabinet.
   frontFace(b, 0, 5, 16, 11, CAB);
   b.vline(0, 5, 15, CAB.lt);
   b.vline(15, 5, 13, CAB.dd);
@@ -40,7 +40,7 @@ function counterBase(b: PixelBuf, kind: 'plain' | 'drawers' | 'doors'): void {
     b.rect(12, 8, 1, 3, '#8b939f');
     b.hline(1, 14, 6, CAB.lt);
   }
-  // Tampo de pedra clara com borda.
+  // Light stone countertop with edge.
   topFace(b, 0, -3, 16, 7, TOP);
   b.hline(0, 15, 4, TOP.dk);
   b.hline(0, 15, 3, TOP.hi);
@@ -60,13 +60,13 @@ export function counterSink(): BufFurniture {
   const s = floorSheet(1, 1, 10);
   const b = s.buf;
   counterBase(b, 'doors');
-  // Cuba inox embutida.
+  // Built-in stainless sink basin.
   b.rect(3, -1, 10, 4, '#aeb6c2');
   b.rect(4, 0, 8, 3, '#7d8592');
   b.hline(4, 11, 0, '#5d6573');
   b.set(8, 2, '#3d4350');
   b.hline(3, 12, -1, '#d3d8df');
-  // Torneira (pescoço de ganso).
+  // Faucet (gooseneck).
   b.rect(7, -6, 2, 5, '#c3cad4');
   b.hline(7, 10, -7, '#e3e7ec');
   b.set(10, -6, '#c3cad4');
@@ -85,21 +85,21 @@ export function coffeeMachine(state: number): BufFurniture {
   const on = state >= 1;
   const body = ramp('#3a3f4b', 0.06);
   const steel = ramp('#c3cad4', 0.06);
-  // Corpo da máquina de espresso.
+  // Espresso machine body.
   topFace(b, 2, -15, 12, 3, steel);
   b.rect(2, -12, 12, 13, body.base);
   b.vline(2, -12, 0, body.lt);
   b.vline(13, -12, 0, body.dd);
-  // Painel e luzes.
+  // Panel and lights.
   b.rect(3, -11, 10, 2, '#22262f');
   b.set(4, -10, on ? '#5fd07a' : '#3b4a3f');
   b.set(6, -10, on ? '#f2c14e' : '#4a4535');
   b.rect(9, -11, 3, 2, on ? '#7fd0ff' : '#2a3a52');
-  // Grupo e bico.
+  // Group head and spout.
   b.rect(5, -7, 6, 2, steel.base);
   b.hline(5, 10, -7, steel.hi);
   b.rect(7, -5, 2, 1, steel.dk);
-  // Xícara e bandeja.
+  // Cup and drip tray.
   b.rect(4, 0, 8, 1, steel.dk);
   b.hline(4, 11, -1, steel.base);
   b.rect(6, -3, 4, 3, '#f4f2ee');
@@ -109,14 +109,14 @@ export function coffeeMachine(state: number): BufFurniture {
     b.vline(7, -4, -3, '#7a4a2a');
     b.set(8, -4, '#9a6a3e');
   }
-  // Grãos no topo.
+  // Beans at the top.
   b.rect(10, -18, 3, 3, 'rgba(120,80,50,0.9)');
   b.hline(10, 12, -18, 'rgba(240,240,240,0.8)');
   b.outline();
   seamless(b);
   contact(b, 0, 14, 16, 3, 0.2);
   if (on) {
-    // Vapor depois do contorno (não recebe borda).
+    // Steam after outline (receives no border).
     for (const [x, y, a] of [[12, -17, 0.55], [13, -18, 0.45], [12, -19, 0.35]] as const) b.set(x, y, `rgba(255,255,255,${a})`);
   }
   return { base: s };
@@ -153,15 +153,15 @@ export function fridge(): BufFurniture {
   frontFace(b, 0, -20, 16, 34, m);
   b.vline(0, -20, 13, m.hi);
   b.rect(1, 14, 14, 2, '#4a505c');
-  // Divisão congelador / geladeira.
+  // Freezer / refrigerator split.
   b.hline(0, 15, -9, m.dd);
   b.hline(0, 15, -8, m.lt);
-  // Puxadores.
+  // Handles.
   b.rect(12, -17, 2, 6, '#9aa2ae');
   b.vline(12, -17, -12, '#c3cad4');
   b.rect(12, -5, 2, 9, '#9aa2ae');
   b.vline(12, -5, 3, '#c3cad4');
-  // Ímãs e bilhete.
+  // Magnets and note.
   b.rect(3, -4, 4, 5, '#fbf4c0');
   b.hline(4, 6, -2, '#c9b77a');
   b.hline(4, 5, 0, '#c9b77a');
@@ -182,7 +182,7 @@ export function vendingMachine(): BufFurniture {
   topFace(b, 0, -23, 16, 3, m);
   frontFace(b, 0, -20, 16, 36, m);
   b.vline(0, -20, 15, m.lt);
-  // Vitrine iluminada com fileiras de snacks.
+  // Lit display with snack rows.
   const gx = 2;
   const gy = -18;
   const gw = 9;
@@ -200,12 +200,12 @@ export function vendingMachine(): BufFurniture {
     b.hline(gx, gx + gw - 1, y + 3, '#c9b98a');
   }
   glass(b, gx, gy, gw, gh, { alpha: 0.18 });
-  // Painel de moedas e botões.
+  // Coin and button panel.
   b.rect(12, -16, 3, 12, '#2f333d');
   b.rect(13, -15, 1, 2, '#7fd0ff');
   for (let i = 0; i < 4; i++) b.set(13, -11 + i * 2, '#d9dde3');
   b.rect(12, -2, 3, 2, '#22262f');
-  // Saída de produtos.
+  // Product dispenser.
   b.rect(2, 7, 9, 4, '#22262f');
   b.hline(2, 10, 7, '#3a3f4b');
   b.outline();
@@ -225,7 +225,7 @@ export function cafeTable(): BufFurniture {
   b.ellipse(8, 4.8, 7, 3.2, t.lt);
   b.set(4, 3, t.hi);
   b.set(5, 3, t.hi);
-  // Vasinho com flor.
+  // Small vase with flower.
   b.rect(7, 2, 2, 2, '#8fc8f0');
   b.set(7, 1, '#4cae6a');
   b.set(8, 0, '#f26d8a');
@@ -277,7 +277,7 @@ export function cafeChair(variant: string | undefined): BufFurniture {
     f.outline();
     return { base: s, front };
   }
-  // left/right: encosto lateral (do lado oposto ao olhar).
+  // left/right: side backrest (on the side opposite to the gaze).
   seat();
   const bx = v === 'left' ? 11 : 3;
   b.vline(bx + 1, 0, 8, legs);
@@ -300,7 +300,7 @@ function pillow(b: PixelBuf, x: number, y: number): void {
   b.set(x + 2, y + 2, PILLOW.dk);
 }
 
-/** Almofada estofada (retângulo com cantos arredondados, topo iluminado e base sombreada). */
+/** Upholstered cushion (rounded rectangle, lit top, shaded bottom). */
 function cushion(b: PixelBuf, x: number, y: number, w: number, h: number, m: Ramp, top = 1): void {
   b.rect(x, y, w, h, m.base);
   b.rect(x, y, w, top, m.lt);
@@ -313,7 +313,7 @@ function cushion(b: PixelBuf, x: number, y: number, w: number, h: number, m: Ram
   b.set(x, y + h - 1, m.dk);
 }
 
-/** Braço enrolado do sofa/poltrona (topo arredondado + face frontal). */
+/** Rolled armrest for sofa/armchair (rounded top + front face). */
 function rollArm(b: PixelBuf, x: number, top: number, w: number, bottom: number): void {
   b.rect(x, top + 2, w, bottom - top - 2, SOFA.base);
   b.rect(x, top, w, 3, SOFA.lt);
@@ -338,14 +338,14 @@ export function sofa(variant: string | undefined): BufFurniture {
   const s = floorSheet(3, 1, 14);
   const b = s.buf;
   if (!up) {
-    // Encosto com 3 almofadas (de frente para a câmera).
+    // Backrest with 3 cushions (facing the camera).
     b.rect(5, -11, 38, 13, SOFA.dk);
     b.hline(6, 41, -11, SOFA.base);
     for (let i = 0; i < 3; i++) cushion(b, 6 + i * 12, -10, 12, 11, SOFA, 2);
     b.hline(6, 41, 1, SOFA.dd);
-    // Assento com 3 almofadas e borda frontal clara.
+    // Seat with 3 cushions and light front edge.
     for (let i = 0; i < 3; i++) cushion(b, 6 + i * 12, 2, 12, 7, ramp(SOFA.lt, 0.06), 4);
-    // Base frontal e pés.
+    // Front base and feet.
     b.rect(5, 9, 38, 5, SOFA.dk);
     b.hline(5, 42, 9, SOFA.base);
     b.hline(5, 42, 13, SOFA.dd);
@@ -359,8 +359,8 @@ export function sofa(variant: string | undefined): BufFurniture {
     contact(b, -1, 13, 50, 4, 0.24);
     return { base: s };
   }
-  // De costas (quem senta olha para o norte): base = braços altos + faixa do assento + só o topo
-  // das almofadas; front = traseira do encosto (painel contínuo, sem divisões de assento).
+  // Back view (sitter faces north): base = high arms + seat strip + cushion tops only;
+  // front = back of the backrest (continuous panel, no seat divisions).
   backSeat(b, 5, 42);
   pillowTop(b, 8, -3);
   pillowTop(b, 34, -3);
@@ -376,7 +376,7 @@ export function sofa(variant: string | undefined): BufFurniture {
   return { base: s, front };
 }
 
-/** Faixa do assento vista por trás do encosto (topo claro, borda de trás mais escura). */
+/** Seat strip seen behind the backrest (light top, darker back edge). */
 function backSeat(b: PixelBuf, x0: number, x1: number): void {
   const seat = ramp(SOFA.lt, 0.06);
   b.rect(x0, -3, x1 - x0 + 1, 5, seat.base);
@@ -384,7 +384,7 @@ function backSeat(b: PixelBuf, x0: number, x1: number): void {
   b.hline(x0, x1, -2, seat.lt);
 }
 
-/** Só a parte de cima da almofada, aparecendo acima do encosto. */
+/** Cushion top only, peeking above the backrest. */
 function pillowTop(b: PixelBuf, x: number, y: number): void {
   b.rect(x, y, 6, 4, PILLOW.base);
   b.hline(x + 1, x + 4, y, PILLOW.hi);
@@ -395,34 +395,34 @@ function pillowTop(b: PixelBuf, x: number, y: number): void {
 }
 
 /**
- * Traseira do encosto (vista de trás): painel contínuo em 2 tons mais escuros que o assento, com
- * borda superior arredondada (rolo claro + vivo escuro), laterais sombreadas e base mais escura.
- * Ocupa y = 1..13 do footprint (cobre o tronco de quem senta; a cabeça fica à mostra).
+ * Back of the backrest (rear view): continuous panel 2 shades darker than the seat, with
+ * rounded top edge (light roll + dark welt), shaded sides, and darker base.
+ * Spans y = 1..13 of footprint (covers the sitter's torso; head remains visible).
  */
 function backPanel(f: PixelBuf, x0: number, x1: number): void {
   const back = SOFA.dk;
   const deep = SOFA.dd;
-  // Rolo superior arredondado.
+  // Rounded top roll.
   f.hline(x0 + 3, x1 - 3, 1, SOFA.lt);
   f.hline(x0 + 1, x1 - 1, 2, SOFA.base);
   f.hline(x0 + 4, x0 + 9, 2, SOFA.lt);
   f.hline(x0, x1, 3, SOFA.base);
   f.set(x0 + 2, 1, SOFA.base);
   f.set(x1 - 2, 1, SOFA.base);
-  // Vivo sob o rolo e face traseira lisa.
+  // Welt under roll and smooth back face.
   f.hline(x0, x1, 4, deep);
   f.rect(x0, 5, x1 - x0 + 1, 7, back);
-  // Leve curvatura: a parte de cima da face pega um pouco mais de luz.
+  // Slight curvature: upper face catches slightly more light.
   f.hline(x0, x1, 5, mix(back, SOFA.base, 0.45));
   f.hline(x0, x1, 6, mix(back, SOFA.base, 0.2));
   f.vline(x0, 4, 12, SOFA.base);
   f.vline(x1, 3, 12, deep);
-  // Base mais escura (sombra embaixo do estofado).
+  // Darker base (shadow beneath upholstery).
   f.hline(x0, x1, 12, deep);
   f.hline(x0, x1, 13, shade(deep, -0.05));
 }
 
-/** Pés escuros (vistos por trás). */
+/** Dark legs (rear view). */
 function darkLegs(b: PixelBuf, xs: readonly number[], y: number): void {
   for (const x of xs) {
     b.rect(x, y, 2, 2, '#3b2d24');
@@ -448,7 +448,7 @@ export function armchair(variant: string | undefined): BufFurniture {
       contact(b, -1, 13, 18, 4, 0.24);
       return { base: s };
     }
-    // De costas: mesma leitura do sofá (braços altos, assento atrás do encosto, encosto contínuo).
+    // Back view: same treatment as sofa (high arms, seat behind backrest, continuous backrest).
     backSeat(b, 3, 12);
     rollArm(b, 0, -6, 4, 13);
     rollArm(b, 12, -6, 4, 13);
@@ -461,7 +461,7 @@ export function armchair(variant: string | undefined): BufFurniture {
     f.outline();
     return { base: s, front };
   }
-  // Lateral: encosto do lado oposto ao olhar, braço baixo na frente.
+  // Side view: backrest opposite the gaze, low armrest in front.
   const left = v === 'left';
   const bx = left ? 11 : 0;
   cushion(b, 1, 2, 14, 8, ramp(SOFA.lt, 0.06), 5);
@@ -492,14 +492,14 @@ export function coffeeTable(seed: number): BufFurniture {
   woodGrain(b, 2, 2, 28, 6, w, seed);
   b.hline(1, 30, 9, w.base);
   b.hline(1, 30, 10, w.dk);
-  // Fruteira.
+  // Fruit bowl.
   b.ellipse(11, 4, 4, 2, '#f4f2ee');
   b.ellipse(11, 4.6, 3, 1.3, '#d6d2c8');
   for (const [x, y, c] of [[9, 2, '#ee8d3e'], [11, 2, '#e05a5a'], [13, 3, '#ee8d3e'], [10, 3, '#7cc45a']] as const) {
     b.rect(x, y, 2, 2, c);
     b.set(x, y, shade(c, 0.2));
   }
-  // Revistas.
+  // Magazines.
   b.rect(19, 3, 8, 5, '#3f7fd8');
   b.rect(20, 2, 7, 5, '#f4f2ee');
   b.rect(21, 3, 4, 2, '#e05a5a');
@@ -514,24 +514,24 @@ export function pingpongTable(): BufFurniture {
   const s = floorSheet(3, 2, 8);
   const b = s.buf;
   const t = ramp('#2f72b8', 0.07);
-  // Pernas.
+  // Legs.
   for (const x of [4, 42]) {
     b.rect(x, 22, 2, 9, '#3a3f4b');
     b.vline(x, 22, 30, '#5a6070');
   }
   b.rect(22, 22, 4, 7, '#3a3f4b');
-  // Tampo.
+  // Tabletop.
   b.rect(0, -4, 48, 25, t.lt);
   b.hline(0, 47, 20, t.dk);
   b.hline(0, 47, 21, t.dd);
   b.rect(0, 22, 48, 1, '#2a2e38');
-  // Linhas brancas: borda e linha central (ao longo do comprimento).
+  // White lines: border and center line (along the length).
   b.hline(0, 47, -4, '#f4f6f8');
   b.hline(0, 47, 19, '#f4f6f8');
   b.vline(0, -4, 19, '#f4f6f8');
   b.vline(47, -4, 19, '#f4f6f8');
   b.hline(1, 46, 7, 'rgba(244,246,248,0.8)');
-  // Rede (corre norte-sul no meio), com altura.
+  // Net (runs north-south along the middle), with height.
   for (let y = -8; y <= 18; y++) {
     b.set(23, y, y % 2 ? 'rgba(240,244,248,0.55)' : 'rgba(40,46,60,0.45)');
     b.set(24, y, 'rgba(40,46,60,0.35)');
@@ -569,29 +569,29 @@ export function arcade(): BufFurniture {
   const m = ramp('#5b3f9a', 0.07);
   frontFace(b, 1, -20, 14, 36, m);
   b.vline(1, -20, 15, m.lt);
-  // Letreiro aceso.
+  // Lit marquee.
   b.rect(1, -22, 14, 4, '#f2c14e');
   b.hline(1, 14, -22, '#fff2b0');
   for (const x of [3, 5, 8, 10, 12]) b.set(x, -20, '#e05a5a');
-  // Tela.
+  // Screen.
   b.rect(2, -17, 12, 9, '#1a1f2e');
   const screen = { x: 3, y: -16, w: 10, h: 7 };
   b.rect(screen.x, screen.y, screen.w, screen.h, '#14213d');
   b.rect(5, -13, 2, 2, '#7be08a');
   b.rect(9, -15, 2, 1, '#ff79c6');
   b.set(8, -11, '#f2c14e');
-  // Painel de controle inclinado.
+  // Angled control panel.
   b.rect(1, -7, 14, 4, m.hi);
   b.hline(1, 14, -4, m.dk);
   b.rect(4, -7, 2, 2, '#e05a5a');
   b.set(4, -7, '#ff9a9a');
   b.vline(5, -5, -4, '#2a2e38');
   for (const [x, c] of [[9, '#3f7fd8'], [11, '#f2c14e'], [13, '#4cae6a']] as const) b.set(x, -6, c);
-  // Porta de fichas.
+  // Coin door.
   b.rect(5, 2, 6, 6, m.dd);
   b.set(6, 4, '#f2a03d');
   b.set(9, 4, '#f2a03d');
-  // Arte lateral.
+  // Side art.
   b.line(2, 13, 6, 9, '#e47aa8');
   b.line(3, 13, 7, 9, '#36b0b0');
   b.outline();
@@ -600,7 +600,7 @@ export function arcade(): BufFurniture {
   return { base: s };
 }
 
-// ------------------------------------------------------------------ banheiro
+// ------------------------------------------------------------------ bathroom
 
 export function toiletStall(state: number): BufFurniture {
   const occupied = state >= 1;
@@ -608,7 +608,7 @@ export function toiletStall(state: number): BufFurniture {
   const rail = ramp('#c3cad4', 0.06);
   const s = floorSheet(2, 2, 26, 3, 4);
   const b = s.buf;
-  // Interior: sombra no piso e vaso ao fundo.
+  // Interior: floor shadow and toilet in the background.
   const c = ramp('#f6f6f3', 0.045);
   b.rect(11, -7, 10, 6, c.base);
   b.hline(11, 20, -7, c.hi);
@@ -618,11 +618,11 @@ export function toiletStall(state: number): BufFurniture {
   b.ellipse(16, 2.5, 5, 3.6, c.lt);
   b.ellipse(16, 3, 3, 2.2, '#cfd8e0');
   b.ellipse(16, 3.2, 2, 1.4, '#a9c9de');
-  // Papel higiênico na divisória esquerda.
+  // Toilet paper on left partition.
   b.rect(3, 2, 3, 3, '#ffffff');
   b.set(5, 4, '#d9dde3');
   b.vline(3, 2, 4, '#9aa2ae');
-  // Divisórias laterais (topo visto de cima, de y=-22 até a frente).
+  // Side partitions (top seen from above, from y=-22 to front).
   for (const x of [0, 29]) {
     b.rect(x, -22, 3, 34, panel.base);
     b.vline(x, -22, 11, panel.lt);
@@ -631,7 +631,7 @@ export function toiletStall(state: number): BufFurniture {
   }
   b.outline();
   underRect(b, 2, 0, 28, 12, 'rgba(30,34,52,0.12)');
-  // Frente: painel com porta (cobre o interior).
+  // Front: panel with door (covers interior).
   const front = floorSheet(2, 2, 26, 3, 4);
   const f = front.buf;
   f.rect(0, 10, 32, 20, panel.base);
@@ -640,7 +640,7 @@ export function toiletStall(state: number): BufFurniture {
   f.vline(0, 11, 29, panel.lt);
   f.vline(31, 11, 29, panel.dk);
   f.hline(0, 31, 29, panel.dk);
-  // Pés metálicos (vão inferior).
+  // Metal feet (bottom gap).
   for (const x of [1, 30]) f.rect(x, 30, 1, 2, '#9aa2ae');
   if (occupied) {
     f.rect(7, 12, 18, 17, panel.lt);
@@ -650,7 +650,7 @@ export function toiletStall(state: number): BufFurniture {
     f.rect(21, 18, 2, 3, '#5a6070');
     f.rect(21, 15, 2, 2, '#e05a5a');
   } else {
-    // Porta entreaberta: vão escuro à direita e folha estreita em perspectiva.
+    // Ajar door: dark gap on the right and narrow panel in perspective.
     f.rect(19, 12, 6, 17, '#3a4250');
     f.rect(20, 13, 4, 15, '#5a6577');
     f.rect(7, 12, 12, 17, panel.lt);
@@ -674,11 +674,11 @@ export function sink(): BufFurniture {
   b.rect(5, 8, 1, 3, '#9aa2ae');
   b.rect(10, 8, 1, 3, '#9aa2ae');
   topFace(b, 0, -3, 16, 7, ramp('#d7dbe1', 0.04));
-  // Cuba de louça.
+  // Ceramic basin.
   b.ellipse(8, 0.5, 5, 2.6, '#f8f8f6');
   b.ellipse(8, 0.8, 4, 1.8, '#dfe5ea');
   b.set(8, 1, '#7d8592');
-  // Torneira e saboneteira.
+  // Faucet and soap dispenser.
   b.rect(7, -5, 2, 3, '#c3cad4');
   b.set(7, -5, '#ffffff');
   b.hline(7, 9, -6, '#d3d8df');
@@ -689,29 +689,29 @@ export function sink(): BufFurniture {
   return { base: s };
 }
 
-// ------------------------------------------------------------------ recepção
+// ------------------------------------------------------------------ reception
 
 export function receptionDesk(seed: number): BufFurniture {
   const s = floorSheet(3, 1, 16);
   const b = s.buf;
   const wood = M.oak;
   const stone = ramp('#efede8', 0.04);
-  // Área de trabalho (atrás) com monitor de costas e planta.
+  // Work area (rear) with back-facing monitor and plant.
   topFace(b, 1, -10, 46, 6, M.white);
   monitorBack(b, 8, -15, 13, 7);
   pot(b, 38, -13, 5, 4, M.ceramic);
   foliage(b, 40.5, -16, 3.5, 3, M.leaf, seed + 1);
-  // Balcão frontal com faixa de acento.
+  // Front counter with accent stripe.
   frontFace(b, 0, -2, 48, 18, wood);
   woodGrain(b, 1, -1, 46, 14, wood, seed, true);
   b.rect(0, 5, 48, 3, '#3f7fd8');
   b.hline(0, 47, 5, '#6aa0ec');
   b.hline(0, 47, 7, '#2d62b3');
   b.rect(0, 14, 48, 2, wood.dd);
-  // Tampo (prateleira de atendimento).
+  // Countertop (service shelf).
   topFace(b, -1, -6, 50, 5, stone);
   b.hline(-1, 48, -2, stone.dk);
-  // Campainha, folhetos e caneta.
+  // Desk bell, flyers, and pen.
   b.rect(30, -6, 4, 2, '#d9a42e');
   b.set(31, -7, '#f2c14e');
   b.set(32, -7, '#f2c14e');
@@ -727,18 +727,18 @@ export function bench(): BufFurniture {
   const b = s.buf;
   const w = M.oak;
   const frame = '#3a3f4b';
-  // Estrutura metálica.
+  // Metal frame.
   for (const x of [2, 29]) {
     b.vline(x, -6, 15, frame);
     b.vline(x + 1, 8, 15, '#5a6070');
   }
   b.hline(2, 30, 13, frame);
-  // Encosto em ripas.
+  // Slatted backrest.
   for (const y of [-6, -3]) {
     b.rect(1, y, 30, 2, w.base);
     b.hline(1, 30, y, w.lt);
   }
-  // Assento em ripas.
+  // Slatted seat.
   for (const y of [2, 5]) {
     b.rect(0, y, 32, 3, w.lt);
     b.hline(0, 31, y, w.hi);

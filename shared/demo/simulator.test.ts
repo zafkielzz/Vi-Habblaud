@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DemoSimulator } from './simulator';
 
 describe('DemoSimulator', () => {
-  it('no ?mock=1 imita as contas C e D (e a do Codex, por último)', () => {
+  it('with ?mock=1 mimics accounts C and D (and Codex last)', () => {
     const sim = new DemoSimulator({ seed: 1 }, 1_000);
     expect(sim.snapshot(1_000).accounts.map((a) => [a.id, a.short, a.provider])).toEqual([
       ['.claude', 'C', undefined],
@@ -11,7 +11,7 @@ describe('DemoSimulator', () => {
     ]);
   });
 
-  it('com idPrefix usa contas próprias e ids que não colidem com dados reais', () => {
+  it('with idPrefix uses own accounts and ids that do not collide with real data', () => {
     const sim = new DemoSimulator({ seed: 1, idPrefix: 'demo:', sessions: 5 }, 1_000);
     const snap = sim.snapshot(1_000);
     expect(snap.accounts.map((a) => [a.id, a.short, a.name])).toEqual([
@@ -23,7 +23,7 @@ describe('DemoSimulator', () => {
     expect(snap.rooms.every((r) => r.id.startsWith('demo:'))).toBe(true);
   });
 
-  it('ids de atividades não se repetem entre instâncias (religar o demo)', () => {
+  it('activity ids do not repeat across instances (restarting the demo)', () => {
     const ids = new Set<string>();
     for (const start of [1_000, 2_000]) {
       const sim = new DemoSimulator({ seed: 7, idPrefix: 'demo:', speed: 20 }, start);
@@ -35,7 +35,7 @@ describe('DemoSimulator', () => {
     expect(ids.size).toBeGreaterThan(10);
   });
 
-  it('abre com alguém esperando um shell em segundo plano (com job e balão), e o shell termina com ShellDone', () => {
+  it('opens with someone waiting on a background shell (with job and balloon), and the shell ends with ShellDone', () => {
     const start = 5_000;
     const sim = new DemoSimulator({ seed: 3 }, start);
     const waiting = sim.snapshot(start).agents.filter((a) => a.status === 'shell');
@@ -51,7 +51,7 @@ describe('DemoSimulator', () => {
     expect(done).toContain(a.id);
   });
 
-  it('com o tempo: shells em segundo plano (status shell), comandos longos em primeiro plano e falhas', () => {
+  it('over time: background shells (shell status), long foreground commands, and failures', () => {
     for (const seed of [1, 2, 3]) {
       const sim = new DemoSimulator({ seed, speed: 10, sessions: 5 }, 0);
       const seen = { shell: 0, foreground: 0, ok: 0, failed: 0, noticeWait: 0 };
@@ -62,7 +62,7 @@ describe('DemoSimulator', () => {
           if (f.activity.error) seen.failed++;
           else seen.ok++;
         }
-        seen.noticeWait += r.notices.filter((n) => n.text.includes('está esperando o shell')).length;
+        seen.noticeWait += r.notices.filter((n) => n.text.includes('is waiting on the shell')).length;
         if (!r.changed) continue;
         for (const a of sim.snapshot(t).agents) {
           if (a.status === 'shell') {
@@ -85,7 +85,7 @@ describe('DemoSimulator', () => {
 describe('DemoSimulator: Codex', () => {
   const MIN = 60_000;
 
-  it('abre com uma sala de Claude Code e Codex juntos (e o resto das sessões no Claude Code)', () => {
+  it('opens with a room having Claude Code and Codex together (and the rest of the sessions in Claude Code)', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       const snap = new DemoSimulator({ seed }, 1_000).snapshot(1_000);
       const mains = snap.agents.filter((a) => a.kind === 'main');
@@ -93,16 +93,16 @@ describe('DemoSimulator: Codex', () => {
       expect(codex).toHaveLength(1);
       const room = codex[0].roomId;
       expect(mains.some((a) => a.roomId === room && a.provider === undefined)).toBe(true);
-      // Agente do Codex: conta própria, modelo gpt-*-codex, papel neutro, aprovação no lugar do modo de permissão, sem custo.
-      expect(codex[0]).toMatchObject({ account: '.codex', role: 'Agente principal', permissionMode: 'on-request', canMessage: true });
+      // Codex agent: own account, gpt-*-codex model, neutral role, approval instead of permission mode, no cost.
+      expect(codex[0]).toMatchObject({ account: '.codex', role: 'Main agent', permissionMode: 'on-request', canMessage: true });
       expect(codex[0].model).toMatch(/^gpt-5\.\d-codex/);
       expect(codex[0].stats.costUSD).toBeUndefined();
-      // Nunca grava provider 'claude'.
+      // Never writes provider 'claude'.
       expect(mains.every((a) => a.provider === undefined || a.provider === 'codex')).toBe(true);
     }
   });
 
-  it('determinístico: a mesma semente gera o mesmo escritório', () => {
+  it('deterministic: the same seed generates the same office', () => {
     const run = () => {
       const sim = new DemoSimulator({ seed: 9, speed: 6, sessions: 6 }, 0);
       for (let t = 0; t < 600_000; t += 250) sim.tick(t);
@@ -111,7 +111,7 @@ describe('DemoSimulator: Codex', () => {
     expect(run()).toEqual(run());
   });
 
-  it('com o tempo, ~30% das sessões novas são do Codex; os subagentes herdam a ferramenta', () => {
+  it('over time, ~30% of new sessions are Codex; subagents inherit the tool', () => {
     const sim = new DemoSimulator({ seed: 11, speed: 10, sessions: 6 }, 0);
     const seen = new Map<string, boolean>();
     let codexSub = false;
@@ -131,25 +131,25 @@ describe('DemoSimulator: Codex', () => {
     expect(codexSub).toBe(true);
   });
 
-  it('uso do Codex: "arquivos do Codex", lido na última atividade de uma sessão dele (envelhece sem sessão)', () => {
+  it('Codex usage: "Codex files", read in the last activity of its session (ages without a session)', () => {
     const sim = new DemoSimulator({ seed: 3 }, 0);
     const acc = () => sim.snapshot(t).accounts.find((a) => a.provider === 'codex')!;
     let t = 0;
     expect(acc()).toMatchObject({ id: '.codex', short: 'X', name: 'Codex', plan: 'Team', usageStatus: 'ok' });
     expect(acc().email).toBeUndefined();
     expect(acc().usage).toMatchObject({ source: 'codex' });
-    // Leitura de antes de abrir: a idade aparece.
+    // Read before opening: age appears.
     expect(acc().usage!.fetchedAt).toBeLessThan(0);
     const before = acc().usage!.fetchedAt;
     for (; t < 120_000; t += 250) sim.tick(t);
-    // Alguma sessão do Codex trabalhou: a leitura é nova (e nunca "agora" por conta própria).
+    // Some Codex session worked: read is new (and never "now" on its own).
     expect(acc().usage!.fetchedAt).toBeGreaterThan(before);
     expect(acc().usage!.fetchedAt).toBeLessThanOrEqual(t);
     expect(acc().usage!.fiveHour?.utilization).toBeGreaterThan(0);
     expect(acc().usage!.sevenDayOpus).toBeUndefined();
   });
 
-  it('"sem cota": sem janelas (nunca 0%), sempre com a opção e de vez em quando sem ela', () => {
+  it('"no quota": no windows (never 0%), always with the option and occasionally without it', () => {
     const forced = new DemoSimulator({ seed: 3, codexNoQuota: true }, 0).snapshot(0).accounts.find((a) => a.provider === 'codex')!;
     expect(forced.usage).toEqual({ source: 'codex', noQuota: true, fetchedAt: forced.usage!.fetchedAt });
     const sim = new DemoSimulator({ seed: 4, speed: 4, sessions: 6 }, 0);
@@ -168,13 +168,13 @@ describe('DemoSimulator: Codex', () => {
     expect(numbers).toBeGreaterThan(noQuota);
   });
 
-  it('mensagem para o Codex: entra na fila e só vira atividade quando a sessão fica ociosa', () => {
+  it('message to Codex: enters the queue and only becomes an activity when the session becomes idle', () => {
     const start = 10_000;
     const sim = new DemoSimulator({ seed: 6 }, start);
     const codex = sim.snapshot(start).agents.find((a) => a.provider === 'codex')!;
-    expect(sim.receiveMessage(codex.id, 'roda o lint também', start)).toBe(true);
-    // Na hora, nada aparece (está na fila).
-    expect(sim.snapshot(start).agents.find((a) => a.id === codex.id)!.recent.some((r) => r.text === 'Mensagem pelo Habblaud')).toBe(false);
+    expect(sim.receiveMessage(codex.id, 'run lint too', start)).toBe(true);
+    // Right away, nothing appears (it is queued).
+    expect(sim.snapshot(start).agents.find((a) => a.id === codex.id)!.recent.some((r) => r.text === 'Message via Habblaud')).toBe(false);
     let t = start;
     let deliveredAt = 0;
     let statusAtDelivery = '';
@@ -182,15 +182,15 @@ describe('DemoSimulator: Codex', () => {
       t += 250;
       sim.tick(t);
       const a = sim.snapshot(t).agents.find((x) => x.id === codex.id)!;
-      const m = a.recent.find((r) => r.text === 'Mensagem pelo Habblaud');
+      const m = a.recent.find((r) => r.text === 'Message via Habblaud');
       if (m) {
         deliveredAt = m.at;
         statusAtDelivery = a.recent[a.recent.indexOf(m) - 1]?.kind ?? '';
-        expect(m.detail).toBe('roda o lint também');
+        expect(m.detail).toBe('run lint too');
       }
     }
     expect(deliveredAt).toBeGreaterThan(start);
-    // Entrou depois do fim de um turno (o Codex só usa a fila com a sessão ociosa).
+    // Arrived after turn ended (Codex only uses the queue when session is idle).
     expect(['done', 'communicate']).toContain(statusAtDelivery);
   });
 });

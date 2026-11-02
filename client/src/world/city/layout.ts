@@ -1,13 +1,13 @@
-// Cidade do Habblaud World: a geometria de shared/world/city.ts virada no que a cena precisa (puro, sem DOM).
+// Habblaud World city: geometry from shared/world/city.ts adapted for scene needs (pure, no DOM).
 //
-// - Célula de quarteirão: o quarteirão, a calçada em volta e a rua a leste e ao sul (51 × 33 tiles, a distância
-//   entre dois quarteirões). Todas as células são iguais (menos a praça); o chão de uma célula é desenhado uma vez e
-//   repetido (render em scene.ts).
-// - Grade caminhável para o A* numa janela de tiles com origem deslocada (a cidade vai para os negativos).
-// - Decoração determinística pela semente do quarteirão e do lote: postes e árvores na calçada, bancos, jardins nos
-//   lotes vazios, quintal dos prédios e a praça (fonte, bancos, totem).
+// - Block cell: block, surrounding sidewalk, and street to east and south (51 × 33 tiles, distance
+//   between two blocks). All cells are identical (except plaza); cell ground is drawn once and
+//   repeated (rendered in scene.ts).
+// - Walkable grid for A* in a tile window with offset origin (city extends into negatives).
+// - Deterministic decoration via block and lot seed: lamp posts and trees on sidewalk, benches, gardens in
+//   empty lots, building backyards, and plaza (fountain, benches, totem).
 //
-// Unidades: TILES nas posições do protocolo (x leste, y sul; o ponto é o dos pés); px de mundo = tiles × TILE.
+// Units: TILES in protocol positions (x east, y south; point is at feet); world px = tiles × TILE.
 import { TILE } from '../../art/api';
 import { hash32, mulberry32 } from '../../../../shared/hash';
 import {
@@ -32,7 +32,7 @@ import { BLOCKED, FREE, WalkGrid } from '../path/grid';
 
 export { TILE };
 
-/** Retângulo em tiles. */
+/** Rectangle in tiles. */
 export interface TileRect {
   x: number;
   y: number;
@@ -40,31 +40,31 @@ export interface TileRect {
   h: number;
 }
 
-/** Célula de um quarteirão relativa à origem dele, em tiles: começa na calçada oeste/norte e inclui a rua leste/sul. */
+/** Block cell relative to block origin, in tiles: starts at west/north sidewalk and includes east/south street. */
 export const CELL: TileRect = { x: -SIDEWALK, y: -SIDEWALK, w: BLOCK_STRIDE.x, h: BLOCK_STRIDE.y };
 
-/** Largura (tiles) do prédio dentro do lote: 1 tile livre de cada lado (beco com cerca viva). */
+/** Building width (tiles) within lot: 1 free tile on each side (hedge-lined alley). */
 export const BUILDING_TILES = LOT.w - 2;
 
 export const lotKey = (lot: CityPoint): string => `${lot.x},${lot.y}`;
 export const blockKey = (b: CityPoint): string => `${b.x},${b.y}`;
 
-/** Semente visual de um quarteirão (postes, árvores, bancos). */
+/** Visual seed of a block (lamp posts, trees, benches). */
 export function blockSeed(b: CityPoint): number {
   return hash32(`quarteirao:${b.x},${b.y}`);
 }
 
-/** Semente visual de um lote (fachada, jardim). A mesma para quem quer que esteja no lote. */
+/** Visual seed of a lot (facade, garden). Same regardless of who occupies the lot. */
 export function lotSeed(lot: CityPoint): number {
   return hash32(`lote:${lot.x},${lot.y}`);
 }
 
-/** O lote é da fileira de cima do quarteirão (porta ao norte)? */
+/** Is lot in top row of block (door facing north)? */
 export function isNorthRow(lot: CityPoint): boolean {
   return lot.y - BLOCK.h * Math.floor(lot.y / BLOCK.h) === 0;
 }
 
-/** Os 6 lotes de um quarteirão, em ordem de linha (vazio na praça). */
+/** The 6 lots in a block, in row-major order (empty in plaza). */
 export function lotsOfBlock(b: CityPoint): CityPoint[] {
   if (isPlaza(b)) return [];
   const out: CityPoint[] = [];
@@ -72,13 +72,13 @@ export function lotsOfBlock(b: CityPoint): CityPoint[] {
   return out;
 }
 
-/** Retângulo (px) de uma célula. */
+/** Rectangle (px) of a cell. */
 export function cellPx(b: CityPoint): { x: number; y: number; w: number; h: number } {
   const o = blockOrigin(b);
   return { x: (o.x + CELL.x) * TILE, y: (o.y + CELL.y) * TILE, w: CELL.w * TILE, h: CELL.h * TILE };
 }
 
-/** Quarteirões cujas células cruzam o retângulo (px), com uma margem (px) para o que sobe acima da base. */
+/** Blocks whose cells intersect rectangle (px), with margin (px) for elements extending above base. */
 export function blockRange(view: { x0: number; y0: number; x1: number; y1: number }, margin = 4 * TILE): { bx0: number; by0: number; bx1: number; by1: number } {
   const sw = BLOCK_STRIDE.x * TILE;
   const sh = BLOCK_STRIDE.y * TILE;
@@ -92,29 +92,29 @@ export function blockRange(view: { x0: number; y0: number; x1: number; y1: numbe
   };
 }
 
-// ------------------------------------------------------------------ superfícies da célula (chão)
+// ------------------------------------------------------------------ cell surfaces (ground)
 
 export interface Crosswalk {
-  /** Retângulo em tiles relativo à célula; `across` = sentido em que se atravessa ('ns' cruza uma rua leste-oeste). */
+  /** Rectangle in tiles relative to cell; `across` = crossing direction ('ns' crosses an east-west street). */
   rect: TileRect;
   across: 'ns' | 'we';
 }
 
 export interface CellSurfaces {
-  /** Anel da calçada (retângulo externo e o quarteirão que fica dentro), relativo à célula. */
+  /** Sidewalk ring (outer rectangle and inner block), relative to cell. */
   sidewalkOuter: TileRect;
   block: TileRect;
-  /** Pistas: a vertical (leste), a horizontal (sul) e o cruzamento. */
+  /** Roadways: vertical (east), horizontal (south), and intersection. */
   streets: TileRect[];
   intersection: TileRect;
   crosswalks: Crosswalk[];
-  /** Faixa central tracejada: segmentos [x0, y0, x1, y1] em tiles (relativos à célula). */
+  /** Dashed center stripe: segments [x0, y0, x1, y1] in tiles (relative to cell). */
   laneMarks: [number, number, number, number][];
-  /** Lotes (ordem de linha) relativos à célula. */
+  /** Lots (row-major order) relative to cell. */
   lots: TileRect[];
 }
 
-/** O que há em cada célula, em tiles relativos ao canto noroeste da célula (todas iguais). */
+/** Contents of each cell, in tiles relative to northwest cell corner (all identical). */
 export function cellSurfaces(): CellSurfaces {
   const S = SIDEWALK;
   const bw = BLOCK_TILES.w;
@@ -133,10 +133,10 @@ export function cellSurfaces(): CellSurfaces {
     ],
     intersection: { x: ow, y: oh, w: STREET, h: STREET },
     crosswalks: [
-      // atravessando a rua de baixo (leste-oeste), nas duas esquinas do quarteirão
+      // crossing bottom street (east-west), at both corners of the block
       { rect: { x: 0, y: oh, w: S, h: STREET }, across: 'ns' },
       { rect: { x: ow - S, y: oh, w: S, h: STREET }, across: 'ns' },
-      // atravessando a rua da direita (norte-sul)
+      // crossing right street (north-south)
       { rect: { x: ow, y: 0, w: STREET, h: S }, across: 'we' },
       { rect: { x: ow, y: oh - S, w: STREET, h: S }, across: 'we' },
     ],
@@ -148,19 +148,19 @@ export function cellSurfaces(): CellSurfaces {
   };
 }
 
-// ------------------------------------------------------------------ grade caminhável (A*)
+// ------------------------------------------------------------------ walkable grid (A*)
 
-/** Grade caminhável de uma janela de tiles: `grid` local, (ox, oy) = tile da célula (0, 0). */
+/** Walkable grid of a tile window: local `grid`, (ox, oy) = tile of cell (0, 0). */
 export interface WalkWindow {
   grid: WalkGrid;
   ox: number;
   oy: number;
 }
 
-/** Todo lote bloqueia (com ou sem prédio), como no servidor. */
+/** Every lot blocks (with or without building), matching server. */
 const anyLot = (): boolean => true;
 
-/** Grade de uma janela (tiles, inteiros): livre onde `isWalkable` do city.ts diz que dá para pisar. */
+/** Grid of a window (tiles, integers): free where `isWalkable` from city.ts allows walking. */
 export function buildWalkGrid(rect: TileRect): WalkWindow {
   const x0 = Math.floor(rect.x);
   const y0 = Math.floor(rect.y);
@@ -171,7 +171,7 @@ export function buildWalkGrid(rect: TileRect): WalkWindow {
   return { grid, ox: x0, oy: y0 };
 }
 
-/** Janela da grade que cobre a ida de `a` até `b` (tiles) com folga: um quarteirão para cada lado. */
+/** Grid window covering path from `a` to `b` (tiles) with margin: one block on each side. */
 export function walkRectFor(a: CityPoint, b: CityPoint, margin = Math.max(BLOCK_STRIDE.x, BLOCK_STRIDE.y)): TileRect {
   const x0 = Math.floor(Math.min(a.x, b.x)) - margin;
   const y0 = Math.floor(Math.min(a.y, b.y)) - margin;
@@ -180,7 +180,7 @@ export function walkRectFor(a: CityPoint, b: CityPoint, margin = Math.max(BLOCK_
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-/** Tile caminhável mais perto de (x, y) (tiles), procurando em anéis até `maxR`. */
+/** Nearest walkable tile to (x, y) (tiles), searching in concentric rings up to `maxR`. */
 export function nearestWalkableTile(x: number, y: number, maxR = 16): CityPoint | null {
   const tx = Math.floor(x);
   const ty = Math.floor(y);
@@ -204,21 +204,21 @@ export function nearestWalkableTile(x: number, y: number, maxR = 16): CityPoint 
   return null;
 }
 
-/** Pode pisar em (x, y) tiles? (o mesmo teste do servidor). */
+/** Is (x, y) walkable in tiles? (same check as server). */
 export function walkable(x: number, y: number): boolean {
   return isWalkable(x, y, anyLot);
 }
 
-// ------------------------------------------------------------------ portas
+// ------------------------------------------------------------------ doors
 
 export interface DoorInfo {
   lot: CityPoint;
   side: 'n' | 's';
-  /** Ponto da calçada em frente à porta (tiles). */
+  /** Sidewalk point in front of door (tiles). */
   front: CityPoint;
 }
 
-/** A porta mais perto de (x, y) a até `maxDist` tiles, entre os lotes aceitos por `has` (ex.: só os com prédio). */
+/** Nearest door to (x, y) within `maxDist` tiles, among lots accepted by `has` (e.g. only built ones). */
 export function nearestDoor(x: number, y: number, has: (lot: CityPoint) => boolean, maxDist = 1.6): DoorInfo | null {
   const { x: bx, y: by } = blockAt(x, y);
   let best: DoorInfo | null = null;
@@ -238,26 +238,26 @@ export function nearestDoor(x: number, y: number, has: (lot: CityPoint) => boole
   return best;
 }
 
-// ------------------------------------------------------------------ decoração
+// ------------------------------------------------------------------ decoration
 
 export type DecorKind = 'tree' | 'pine' | 'bush' | 'flowers' | 'lamp' | 'bench' | 'rock' | 'hedge' | 'parasol' | 'totem' | 'fountain' | 'planter';
 
 export interface Decor {
   kind: DecorKind;
-  /** px de mundo: ponto central inferior (base); ordena a profundidade. */
+  /** world px: bottom center point (base); determines depth sorting. */
   x: number;
   y: number;
   seed: number;
-  /** Banco: onde se senta (tiles, ponto dos pés) e para onde olha. */
+  /** Bench: sitting position (tiles, feet point) and facing direction. */
   seat?: { x: number; y: number; dir: 'down' | 'up' | 'left' | 'right' };
-  /** Detalhe pequeno (some no zoom bem afastado). */
+  /** Small detail (hidden at far zoom). */
   small?: boolean;
 }
 
-/** Afastamento (tiles) de uma porta em que a calçada fica livre de árvore e poste. */
+/** Clearance (tiles) from a door where sidewalk remains clear of trees and lamp posts. */
 const DOOR_CLEAR = 3;
 
-/** Decoração da calçada de um quarteirão (postes, árvores nas covas, bancos), determinística. */
+/** Deterministic sidewalk decoration for a block (lamp posts, tree pits, benches). */
 export function sidewalkDecor(b: CityPoint): Decor[] {
   const o = blockOrigin(b);
   const seed = blockSeed(b);
@@ -265,7 +265,7 @@ export function sidewalkDecor(b: CityPoint): Decor[] {
   const out: Decor[] = [];
   const px = (t: number) => t * TILE;
   const flip = seed & 1;
-  // calçadas norte e sul: postes e árvores nas divisas dos lotes (longe das portas), na faixa junto ao meio-fio
+  // north and south sidewalks: lamp posts and trees on lot boundaries (away from doors), along curb
   const doorsX = [0, 1, 2].map((i) => o.x + i * LOT.w + DOOR.dx + DOOR.w / 2);
   const nearDoor = (x: number) => doorsX.some((d) => Math.abs(x - d) < DOOR_CLEAR);
   for (const side of ['n', 's'] as const) {
@@ -278,7 +278,7 @@ export function sidewalkDecor(b: CityPoint): Decor[] {
       if (lamp) out.push({ kind: 'lamp', x: px(tx) + (sx === 0 ? 6 : sx === 3 * LOT.w ? -6 : 0), y: px(rowY) + 10, seed: seed + i });
       else out.push({ kind: rng() < 0.22 ? 'pine' : 'tree', x: px(tx), y: px(rowY) + 12, seed: Math.floor(rng() * 1e9) });
     });
-    // um banco por lado, de frente para a rua (norte: de costas para o quarteirão)
+    // one bench per side, facing the street (north: back to the block)
     if (rng() < 0.7) {
       const lot = Math.floor(rng() * 3);
       const bx = o.x + lot * LOT.w + (rng() < 0.5 ? 2 : LOT.w - 3);
@@ -288,7 +288,7 @@ export function sidewalkDecor(b: CityPoint): Decor[] {
       }
     }
   }
-  // calçadas oeste e leste: um poste no meio e árvores perto das esquinas
+  // west and east sidewalks: one lamp post in middle and trees near corners
   for (const side of ['w', 'e'] as const) {
     const colX = side === 'w' ? o.x - SIDEWALK : o.x + BLOCK_TILES.w + SIDEWALK - 1;
     const ys = [3, Math.floor(BLOCK_TILES.h / 2), BLOCK_TILES.h - 3];
@@ -303,7 +303,7 @@ export function sidewalkDecor(b: CityPoint): Decor[] {
   return out;
 }
 
-/** Variantes de jardim de lote vazio. */
+/** Garden variants for empty lots. */
 export type GardenKind = 'park' | 'pond' | 'orchard' | 'cafe';
 export const GARDEN_KINDS: readonly GardenKind[] = ['park', 'pond', 'orchard', 'cafe'];
 
@@ -312,8 +312,8 @@ export function gardenKind(lot: CityPoint): GardenKind {
 }
 
 /**
- * Decoração de um lote. Vazio: jardim (árvores, canteiros, bancos, guarda-sóis). Com prédio: o quintal do meio do
- * quarteirão (cerca viva e arbustos atrás do prédio), escondido pelo próprio prédio quando ele é bem alto.
+ * Decoration of a lot. Empty: garden (trees, flowerbeds, benches, parasols). Built: middle-of-block
+ * backyard (hedge and bushes behind building), occluded by the building itself when tall.
  */
 export function lotDecor(lot: CityPoint, built: boolean): Decor[] {
   const o = lotOrigin(lot);
@@ -325,7 +325,7 @@ export function lotDecor(lot: CityPoint, built: boolean): Decor[] {
   const s = () => Math.floor(rng() * 1e9);
   const north = isNorthRow(lot);
   if (built) {
-    // quintal: fileira de cerca viva junto ao meio do quarteirão e um arbusto ou árvore pequena
+    // backyard: hedge row along middle of block and small bush or tree
     const hy = north ? Y(LOT.h) - 2 : Y(0) + 12;
     for (let x = 1; x < LOT.w - 1; x += 2) out.push({ kind: 'hedge', x: X(x) + TILE, y: hy, seed: seed + x, small: true });
     const ty = north ? Y(LOT.h - 1.4) : Y(1.6);
@@ -333,7 +333,7 @@ export function lotDecor(lot: CityPoint, built: boolean): Decor[] {
     if (rng() < 0.8) out.push({ kind: rng() < 0.3 ? 'pine' : 'tree', x: X(LOT.w - 1.2), y: ty, seed: s() });
     return out;
   }
-  // lote vazio: jardim. Bordas de cerca viva viradas para a calçada, com o portão onde seria a porta.
+  // empty lot: garden. Hedge borders facing sidewalk, with gate where door would be.
   const kind = gardenKind(lot);
   const edgeY = north ? Y(0) + 13 : Y(LOT.h) - 2;
   for (let x = 0; x < LOT.w; x += 2) {
@@ -373,7 +373,7 @@ export function lotDecor(lot: CityPoint, built: boolean): Decor[] {
   return out;
 }
 
-/** A praça (quarteirão 0,0): fonte no centro, bancos de frente para ela, canteiros com árvores, postes e o totem. */
+/** Plaza (block 0,0): central fountain, benches facing it, tree beds, lamp posts, and totem. */
 export function plazaDecor(): Decor[] {
   const o = blockOrigin({ x: 0, y: 0 });
   const X = (t: number) => (o.x + t) * TILE;
@@ -381,12 +381,12 @@ export function plazaDecor(): Decor[] {
   const out: Decor[] = [];
   const f = FOUNTAIN;
   out.push({ kind: 'fountain', x: X(f.x + f.w / 2), y: Y(f.y + f.h), seed: 1 });
-  // bancos em volta da fonte: dois ao norte (de costas para o norte, olhando a fonte) e dois ao sul
+  // benches around fountain: two to north (back to north, facing fountain) and two to south
   for (const dx of [-5, 5]) {
     out.push({ kind: 'bench', x: X(f.x + f.w / 2 + dx), y: Y(f.y - 1) + 13, seed: 3 + dx, seat: { x: o.x + f.x + f.w / 2 + dx, y: o.y + f.y - 1 + 0.85, dir: 'down' } });
     out.push({ kind: 'bench', x: X(f.x + f.w / 2 + dx), y: Y(f.y + f.h + 2) + 13, seed: 4 + dx, seat: { x: o.x + f.x + f.w / 2 + dx, y: o.y + f.y + f.h + 2 + 0.85, dir: 'down' } });
   }
-  // canteiros nos quatro cantos (árvores e flores) e postes nas diagonais
+  // corner flowerbeds (trees and flowers) and diagonal lamp posts
   const corners: [number, number][] = [
     [6, 5],
     [BLOCK_TILES.w - 6, 5],
@@ -408,13 +408,13 @@ export function plazaDecor(): Decor[] {
   ] as const) {
     out.push({ kind: 'lamp', x: X(lx) + 8, y: Y(ly) + 10, seed: lx * 3 + ly });
   }
-  // o totem do Habblaud ao lado do ponto de nascimento
+  // Habblaud totem beside spawn point
   out.push({ kind: 'totem', x: X(SPAWN.x - 3) + 8, y: Y(SPAWN.y) + 4, seed: 2 });
   out.push({ kind: 'planter', x: X(SPAWN.x + 3) + 8, y: Y(SPAWN.y) + 6, seed: 9, small: true });
   return out;
 }
 
-/** Decoração fixa de um quarteirão: a calçada e, na praça, a própria praça. */
+/** Fixed block decoration: sidewalk and, in the plaza, the plaza itself. */
 export function blockDecor(b: CityPoint): Decor[] {
   const out = sidewalkDecor(b);
   if (isPlaza(b)) out.push(...plazaDecor());

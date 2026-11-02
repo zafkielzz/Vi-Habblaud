@@ -24,8 +24,8 @@ function record(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-describe('arquivo do tap de statusline', () => {
-  it('resets_at em segundos vira ms; fetchedAt no futuro é limitado a agora', () => {
+describe('statusline tap file', () => {
+  it('resets_at in seconds becomes ms; future fetchedAt is capped to now', () => {
     const p = parseStatuslineFile(JSON.stringify(record()), 'x.json', NOW)!;
     expect(p).toEqual({
       file: 'x.json',
@@ -40,11 +40,11 @@ describe('arquivo do tap de statusline', () => {
       },
     });
     expect(parseStatuslineFile(JSON.stringify(record({ fetchedAt: NOW + 999_999 })), 'x', NOW)!.usage.fetchedAt).toBe(NOW);
-    // Sem fetchedAt: usa a data do arquivo.
+    // Without fetchedAt: uses file modification time.
     expect(parseStatuslineFile(JSON.stringify(record({ fetchedAt: undefined })), 'x', NOW, NOW - 5_000)!.usage.fetchedAt).toBe(NOW - 5_000);
   });
 
-  it('ignora lixo, JSON sem janelas e campos estranhos', () => {
+  it('ignores garbage, JSON without windows, and invalid fields', () => {
     expect(parseStatuslineFile('{', 'x', NOW)).toBeUndefined();
     expect(parseStatuslineFile('[]', 'x', NOW)).toBeUndefined();
     expect(parseStatuslineFile(JSON.stringify({ fetchedAt: NOW }), 'x', NOW)).toBeUndefined();
@@ -53,14 +53,14 @@ describe('arquivo do tap de statusline', () => {
     expect(clamped.usage.fiveHour).toEqual({ utilization: 100 });
   });
 
-  it('arquivo do mod do Claude Code: o mesmo formato com "source": "mod", que vira usage.via', () => {
+  it('Claude Code mod file: same format with "source": "mod", becoming usage.via', () => {
     const fromMod = parseStatuslineFile(JSON.stringify(record({ source: 'mod' })), 'x.json', NOW);
     const fromTap = parseStatuslineFile(JSON.stringify(record()), 'x.json', NOW)!;
     expect(fromMod).toEqual({ ...fromTap, usage: { ...fromTap.usage, via: 'mod' } });
     expect(fromMod?.usage.fiveHour).toEqual({ utilization: 42, resetsAt: Date.parse('2026-10-06T14:00:00Z') });
   });
 
-  it('leitor: leitura pela metade (o $.fs.write do mod não é atômico) mantém o último registro bom e relê depois', () => {
+  it('reader: partial reads (mod $.fs.write is not atomic) keep last good record and re-read later', () => {
     const tmp = tempDir();
     try {
       const file = join(tmp.dir, '.claude-conta2.json');
@@ -69,18 +69,18 @@ describe('arquivo do tap de statusline', () => {
       writeFileSync(file, JSON.stringify(record({ source: 'mod' })));
       touch(1_000);
       expect(r.read(NOW)[0].usage.fiveHour?.utilization).toBe(42);
-      // truncado (vazio) e depois no meio da escrita: continua o 42
+      // truncated (empty) and then mid-write: keeps 42
       writeFileSync(file, '');
       touch(2_000);
       expect(r.read(NOW).map((f) => f.usage.fiveHour?.utilization)).toEqual([42]);
       writeFileSync(file, JSON.stringify(record({ five_hour: { utilization: 50 } })).slice(0, 40));
       touch(2_000);
       expect(r.read(NOW).map((f) => f.usage.fiveHour?.utilization)).toEqual([42]);
-      // a escrita termina com a MESMA data (resolução do relógio): relido mesmo assim
+      // write completes with SAME mtime (clock resolution): re-read anyway
       writeFileSync(file, JSON.stringify(record({ source: 'mod', five_hour: { utilization: 50 } })));
       touch(2_000);
       expect(r.read(NOW).map((f) => f.usage.fiveHour?.utilization)).toEqual([50]);
-      // arquivo que nunca foi bom: nada (e relido a cada ciclo até ficar bom)
+      // file that was never valid: nothing (and re-read each cycle until valid)
       writeFileSync(join(tmp.dir, 'outra.json'), '{"accountId":');
       expect(r.read(NOW)).toHaveLength(1);
       writeFileSync(join(tmp.dir, 'outra.json'), JSON.stringify(record({ accountId: 'outra', configDir: '/x/outra' })));
@@ -90,7 +90,7 @@ describe('arquivo do tap de statusline', () => {
     }
   });
 
-  it('leitor: só *.json, cache por arquivo, some quando o arquivo some', () => {
+  it('reader: *.json only, per-file cache, removed when file disappears', () => {
     const tmp = tempDir();
     try {
       const reader = new StatuslineUsageReader(join(tmp.dir, 'nao-existe'));
@@ -112,7 +112,7 @@ describe('arquivo do tap de statusline', () => {
   });
 });
 
-describe('AccountsService com a fonte statusline', () => {
+describe('AccountsService with statusline source', () => {
   let tmp: ReturnType<typeof tempDir>;
   let home: string;
   let usageDir: string;
@@ -133,7 +133,7 @@ describe('AccountsService com a fonte statusline', () => {
   const service = (onChange = () => {}) =>
     new AccountsService({ dirs: dirs(), home, env: {}, onChange, usageDir, now: () => now });
 
-  it('casa pelo config dir e vira ok; envelhece para stale; arquivo apagado = sem dados', () => {
+  it('matches by config dir and becomes ok; ages to stale; deleted file = no data', () => {
     writeFileSync(join(usageDir, '.claude-conta2.json'), JSON.stringify(record({ configDir: join(home, '.claude-conta2') })));
     let changes = 0;
     const svc = service(() => changes++);
@@ -153,11 +153,11 @@ describe('AccountsService com a fonte statusline', () => {
     expect(svc.list(new Map())[1].usage).toBeUndefined();
   });
 
-  it('sem configDir, casa pelo accountId; vale a fonte mais recente', () => {
+  it('without configDir, matches by accountId; newest source takes precedence', () => {
     writeFileSync(join(usageDir, 'x.json'), JSON.stringify(record({ configDir: undefined, accountId: '.claude', fetchedAt: NOW - 120_000 })));
     const svc = service();
     expect(svc.list(new Map())[0]).toMatchObject({ usageStatus: 'ok', usage: { source: 'statusline' } });
-    // Cache do /usage mais novo vence; statusline mais novo volta a vencer.
+    // Newer /usage cache wins; newer statusline wins again.
     writeFileSync(join(home, '.claude.json'), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: NOW - 10_000, utilization: { five_hour: { utilization: 70 } } } }));
     svc.refresh();
     expect(svc.list(new Map())[0].usage).toMatchObject({ source: 'cache', fiveHour: { utilization: 70 } });
@@ -167,7 +167,7 @@ describe('AccountsService com a fonte statusline', () => {
     expect(svc.list(new Map())[0].usage).toMatchObject({ source: 'statusline', fiveHour: { utilization: 42 } });
   });
 
-  it('no Docker: casa pelo caminho do HOST (HABBLAUD_ACCOUNTS.configDir), não pelo da montagem', () => {
+  it('in Docker: matches by HOST path (HABBLAUD_ACCOUNTS.configDir), not mount path', () => {
     const env = {
       HABBLAUD_ACCOUNTS: JSON.stringify([{ id: '.claude-conta2', configDir: '/Users/fulano/.claude-conta2', mountDir: join(home, '.claude-conta2') }]),
     };
@@ -176,7 +176,7 @@ describe('AccountsService com a fonte statusline', () => {
     expect(svc.list(new Map())[0]).toMatchObject({ id: '.claude-conta2', usageStatus: 'ok', usage: { source: 'statusline' } });
   });
 
-  it('janela que já reiniciou desde a coleta aparece sem dados', () => {
+  it('window whose reset has passed since collection appears without data', () => {
     writeFileSync(join(usageDir, 'c.json'), JSON.stringify(record({ configDir: join(home, '.claude'), accountId: '.claude' })));
     const svc = service();
     now = Date.parse('2026-10-06T14:05:00Z');
@@ -186,8 +186,8 @@ describe('AccountsService com a fonte statusline', () => {
   });
 });
 
-describe('organização da conta', () => {
-  it('omite o nome genérico "<e-mail>\'s Organization"', () => {
+describe('account organization', () => {
+  it('omits generic name "<e-mail>\'s Organization"', () => {
     expect(meaningfulOrganization("fulano@x.com's Organization", 'fulano@x.com')).toBeUndefined();
     expect(meaningfulOrganization("FULANO@X.COM’s organization", 'fulano@x.com')).toBeUndefined();
     expect(meaningfulOrganization("outra@x.com's Organization", undefined)).toBeUndefined();
@@ -195,7 +195,7 @@ describe('organização da conta', () => {
     expect(meaningfulOrganization("Maria's Organization", 'fulano@x.com')).toBe("Maria's Organization");
   });
 
-  it('detectAccounts aplica a regra ao .claude.json', () => {
+  it('detectAccounts applies rule to .claude.json', () => {
     const tmp = tempDir();
     try {
       const dir = join(tmp.dir, '.claude');

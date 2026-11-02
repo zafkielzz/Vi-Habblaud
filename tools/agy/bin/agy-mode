@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# agy-mode <agent> <default|accept-edits|auto|plan>
+# Cycle an agy agent's mode with shift+tab until the status line shows the target.
+# Cycle order: default -> accept-edits -> auto -> plan -> default. Only run on an idle agent.
+set -eu
+agent="${1:?usage: agy-mode <agent> <default|accept-edits|auto|plan>}"; want="${2:?mode}"
+cur() {
+  local line; line=$(herdr agent read "$agent" --source visible --lines 6 | grep -E '^\? for shortcuts' | tail -1)
+  case "$line" in *accept-edits*) echo accept-edits;; *" auto "*) echo auto;; *" plan "*) echo plan;; *) echo default;; esac
+}
+for _ in 1 2 3 4 5; do
+  [ "$(cur)" = "$want" ] && { echo "$agent: $want"; exit 0; }
+  herdr agent send-keys "$agent" shift+tab >/dev/null; sleep 0.7
+done
+echo "agy-mode: could not reach $want (now $(cur))" >&2; exit 1

@@ -1,4 +1,4 @@
-// Utilitários de DOM da interface: criação de elementos, atualizações mínimas e listas com chave.
+// UI DOM utilities: element creation, minimal updates, and keyed lists.
 
 type Child = Node | string | null | undefined | false;
 type Props = {
@@ -11,11 +11,11 @@ type Props = {
   hidden?: boolean;
   type?: string;
   on?: Partial<{ [K in keyof HTMLElementEventMap]: (ev: HTMLElementEventMap[K]) => void }>;
-  /** Atributos arbitrários (aria-*, data-*, ...). */
+  /** Arbitrary attributes (aria-*, data-*, ...). */
   attrs?: Record<string, string | number | boolean | undefined>;
 };
 
-/** Cria um elemento com propriedades e filhos. */
+/** Creates an element with properties and children. */
 export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = {}, ...children: Child[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
   if (props.class) el.className = props.class;
@@ -32,14 +32,14 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = 
   return el;
 }
 
-/** Botão com ícone e rótulo acessível. */
+/** Button with an icon and accessible label. */
 export function iconButton(icon: string, label: string, onClick: (ev: MouseEvent) => void, extraClass = ''): HTMLButtonElement {
   const b = h('button', { class: `ui-icon-btn ${extraClass}`.trim(), type: 'button', title: label, attrs: { 'aria-label': label }, on: { click: onClick } });
   b.innerHTML = icon;
   return b;
 }
 
-/** Atualiza o texto só quando muda (evita relayout desnecessário). */
+/** Updates text only when changed (avoids unnecessary relayout). */
 export function setText(el: Element, text: string): void {
   if (el.textContent !== text) el.textContent = text;
 }
@@ -64,7 +64,7 @@ export function setHidden(el: HTMLElement, hidden: boolean): void {
   if (el.hidden !== hidden) el.hidden = hidden;
 }
 
-/** Ajusta a classe de um "grupo" (ex.: status-*) trocando a anterior pela nova. */
+/** Updates the class of a "group" (e.g. status-*), replacing the previous one with the new one. */
 export function setVariant(el: HTMLElement, prefix: string, value: string): void {
   const key = `__variant_${prefix}`;
   const rec = el as unknown as Record<string, string | undefined>;
@@ -79,7 +79,7 @@ export function prefersReducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** Anima a saída (fade + colapso de altura) e remove o elemento. */
+/** Animates removal (fade + height collapse) and removes the element. */
 export function animateOut(el: HTMLElement, done: () => void, ms = 260): void {
   if (prefersReducedMotion() || typeof el.animate !== 'function' || !el.isConnected) {
     done();
@@ -100,7 +100,7 @@ export function animateOut(el: HTMLElement, done: () => void, ms = 260): void {
   anim.oncancel = done;
 }
 
-/** Marca um elemento recém-criado para a animação de entrada (classe removida ao terminar). */
+/** Marks a newly created element for entrance animation (class removed when finished). */
 export function markEntering(el: HTMLElement): void {
   if (prefersReducedMotion()) return;
   el.classList.add('is-entering');
@@ -111,13 +111,13 @@ export interface KeyedListOptions<T, E extends HTMLElement> {
   key(item: T): string;
   create(item: T): E;
   update(el: E, item: T): void;
-  /** Anima entradas/saídas (padrão: true). */
+  /** Animates enter/exit transitions (default: true). */
   animate?: boolean;
 }
 
 /**
- * Lista reconciliada por chave: cria, atualiza, reordena e remove (com animação) só o que mudou.
- * Elementos que estão saindo permanecem no lugar até a animação terminar.
+ * Keyed reconciled list: creates, updates, reorders, and removes (with animation) only what changed.
+ * Leaving elements stay in place until the animation finishes.
  */
 export class KeyedList<T, E extends HTMLElement = HTMLElement> {
   private nodes = new Map<string, E>();
@@ -146,7 +146,7 @@ export class KeyedList<T, E extends HTMLElement = HTMLElement> {
     const seen = new Set<string>();
     const next = new Set(items.map((item) => this.opts.key(item)));
     let cursor: ChildNode | null = this.container.firstChild;
-    // Pula nós que estão saindo ou que vão sair: eles ficam onde estão e não "empurram" os demais.
+    // Skip nodes that are leaving or will leave: they stay in place and don't "push" others.
     const skipStale = () => {
       while (cursor && (this.isLeaving(cursor) || !next.has((cursor as HTMLElement).dataset?.key ?? ''))) cursor = cursor.nextSibling;
     };
@@ -158,7 +158,7 @@ export class KeyedList<T, E extends HTMLElement = HTMLElement> {
       if (!el) {
         const old = this.leaving.get(k);
         if (old) {
-          // Voltou antes de terminar de sair: descarta o antigo e recria.
+          // Returned before finishing exit animation: discard old and recreate.
           old.getAnimations?.().forEach((a) => a.cancel());
           old.remove();
           this.leaving.delete(k);
@@ -195,7 +195,7 @@ export class KeyedList<T, E extends HTMLElement = HTMLElement> {
     for (const el of this.leaving.values()) el.remove();
     this.nodes.clear();
     this.leaving.clear();
-    // O próximo preenchimento é "do zero": sem animação de entrada item a item.
+    // The next populate is "from scratch": no item-by-item entrance animation.
     this.initialized = false;
   }
 
@@ -204,7 +204,7 @@ export class KeyedList<T, E extends HTMLElement = HTMLElement> {
   }
 }
 
-/** Copia texto para a área de transferência, com alternativa para contextos sem Clipboard API. */
+/** Copies text to clipboard, with fallback for contexts without Clipboard API. */
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -212,7 +212,7 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     const ta = h('textarea', { style: 'position:fixed;opacity:0;pointer-events:none' });
     ta.value = text;
-    // Com uma janela modal aberta, o resto da página fica inerte (e o campo não seria selecionado): ele entra nela.
+    // With a modal open, the rest of the page is inert (and the field wouldn't be selected): append into it.
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (active?.closest('dialog[open]') ?? document.body).append(ta);
     ta.select();

@@ -1,5 +1,5 @@
-// Construtores de linhas JSONL SINTÉTICAS no formato dos transcripts do Claude Code (para testes).
-// Nada aqui vem de conversas reais.
+// Builders for SYNTHETIC JSONL lines in Claude Code transcript format (for tests).
+// Nothing here comes from real conversations.
 import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -39,11 +39,12 @@ export const L = {
   },
   assistant(
     blocks: Array<Record<string, unknown>>,
-    o: LineOpts & { msgId?: string; stop?: string | null; usage?: Record<string, number>; model?: string } = {},
+    o: LineOpts & { msgId?: string; stop?: string | null; usage?: Record<string, number>; model?: string; effort?: string } = {},
   ): string {
     return JSON.stringify({
       ...base('assistant', o),
       requestId: `req_${o.msgId ?? n}`,
+      ...(o.effort ? { effort: o.effort } : {}),
       message: {
         id: o.msgId ?? `msg_${++n}`,
         role: 'assistant',
@@ -71,7 +72,7 @@ export const L = {
   system(subtype: string, extra: Record<string, unknown> = {}, o: LineOpts = {}): string {
     return JSON.stringify({ ...base('system', o), subtype, ...extra });
   },
-  /** Linhas de metadados sem timestamp (custom-title, ai-title, cost-state...). */
+  /** Metadata lines without timestamp (custom-title, ai-title, cost-state...). */
   raw(type: string, fields: Record<string, unknown>): string {
     return JSON.stringify({ type, sessionId: 'sess-teste', ...fields });
   },
@@ -80,9 +81,9 @@ export const L = {
     return JSON.stringify({ ...base('user', o), origin: { kind: 'task-notification' }, message: { role: 'user', content: text } });
   },
   /**
-   * Começo do transcript de um fork, como o Claude Code grava: a referência ao contexto do pai, a
-   * CÓPIA da chamada Agent do pai (mesmo tool_use id do meta.json) e o resultado dela ("Fork
-   * started…") com a instrução do fork depois do bloco <fork-boilerplate>.
+   * Start of a fork transcript, as Claude Code records it: reference to parent context, the
+   * COPY of parent's Agent call (same tool_use id as in meta.json), and its result ("Fork
+   * started…") with fork directive following the <fork-boilerplate> block.
    */
   forkStart(agentId: string, toolUseId: string, directive: string, o: LineOpts = {}): string[] {
     const ref = JSON.stringify({ type: 'fork-context-ref', agentId, parentSessionId: o.sessionId ?? 'sess-teste', parentLastUuid: uuid(), contextLength: 42 });
@@ -91,7 +92,7 @@ export const L = {
     const text = `<fork-boilerplate>\nYou are a worker fork. Do the directive.\n</fork-boilerplate>\n\nYour directive: ${directive}`;
     return [ref, JSON.stringify(spawn), L.result(toolUseId, 'Fork started — processing in background', { ...o, agentId, extraText: text })];
   },
-  /** Bash em segundo plano lançado: tool_result com o id da tarefa (como o Claude Code grava). */
+  /** Background Bash launched: tool_result with task id (as Claude Code records it). */
   bgLaunched(toolUseId: string, taskId: string, o: LineOpts = {}): string {
     return L.result(toolUseId, `Command running in background with ID: ${taskId}. Output is being written to: /tmp/tasks/${taskId}.output`, {
       ...o,
@@ -99,8 +100,8 @@ export const L = {
     });
   },
   /**
-   * Fim de um shell em segundo plano: 'queue' = linha queue-operation (enqueue, no momento em que termina);
-   * 'message' = a notificação entregue ao agente como mensagem user.
+   * End of a background shell: 'queue' = queue-operation line (enqueue, at the moment it finishes);
+   * 'message' = notification delivered to agent as user message.
    */
   shellNotification(
     via: 'queue' | 'message',
@@ -123,15 +124,15 @@ export const L = {
   },
 };
 
-/** O sistema guarda os bits de permissão do POSIX? No Windows, o stat devolve 0o666 (ou 0o444, se só leitura). */
+/** Does the system preserve POSIX permission bits? On Windows, stat returns 0o666 (or 0o444 if read-only). */
 export const HAS_POSIX_MODES = process.platform !== 'win32';
 
-/** Funções do tap de statusline (JavaScript puro, sem tipos). */
+/** Functions from statusline tap (pure JavaScript, untyped). */
 const { originalShell } = (await import(pathToFileURL(resolve(__dirname, '../../scripts/statusline-tap.mjs')).href)) as { originalShell: () => string | true };
 
 /**
- * Shell em que o Claude Code roda os comandos de hooks e de statusline, para rodar o comando instalado de verdade:
- * /bin/sh; no Windows, o Git Bash (o mesmo que o tap acha). undefined = Windows sem Git Bash (o teste é pulado).
+ * Shell where Claude Code runs hook and statusline commands, to run the installed command for real:
+ * /bin/sh; on Windows, Git Bash (same as tap finds). undefined = Windows without Git Bash (test is skipped).
  */
 export function posixShell(): string | undefined {
   if (process.platform !== 'win32') return '/bin/sh';
@@ -140,19 +141,19 @@ export function posixShell(): string | undefined {
 }
 
 /**
- * symlinkSync de arquivo, ou pula o resto do teste quando o sistema não deixa criar o link: no Windows, isso pede o
- * Modo de Desenvolvedor ou administrador (EPERM). Link de pasta: `'junction'`, que no Windows não pede nada.
+ * symlinkSync for file, or skips remainder of test when system disallows link creation: on Windows, this requires
+ * Developer Mode or administrator (EPERM). Directory symlink: `'junction'`, which requires neither on Windows.
  */
 export function symlinkOrSkip(skip: (note: string) => never, target: string, path: string): void {
   try {
     symlinkSync(target, path);
   } catch (err) {
-    if (process.platform === 'win32' && (err as NodeJS.ErrnoException).code === 'EPERM') skip('o Windows não deixou criar o link (Modo de Desenvolvedor desligado)');
+    if (process.platform === 'win32' && (err as NodeJS.ErrnoException).code === 'EPERM') skip('Windows disallowed link creation (Developer Mode turned off)');
     throw err;
   }
 }
 
-/** Pasta temporária para um teste (apagada com `cleanup`). */
+/** Temporary directory for a test (deleted via `cleanup`). */
 export function tempDir(prefix = 'habblaud-'): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };

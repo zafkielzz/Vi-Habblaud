@@ -1,4 +1,4 @@
-// Registro de spots com reservas (1 ocupante por spot) e busca de alternativas livres.
+// Spot registry with reservations (1 occupant per spot) and search for free alternatives.
 import type { SpotDef, SpotKind } from '../layout/types';
 
 export class SpotRegistry {
@@ -7,7 +7,7 @@ export class SpotRegistry {
   private byKind = new Map<SpotKind, SpotDef[]>();
   private byGroup = new Map<string, SpotDef[]>();
 
-  /** Substitui o conjunto de spots mantendo as reservas dos que continuam existindo. Retorna as reservas perdidas. */
+  /** Replaces the set of spots while preserving reservations for those that still exist. Returns lost reservations. */
   setSpots(spots: Iterable<SpotDef>): { spotId: string; owner: string }[] {
     this.spots.clear();
     this.byKind.clear();
@@ -41,8 +41,10 @@ export class SpotRegistry {
     return this.spots.values();
   }
 
-  ofKind(kind: SpotKind): readonly SpotDef[] {
-    return this.byKind.get(kind) ?? [];
+  /** Spots of a kind; `within` = only those of one building (its tile columns, see Sim.within). */
+  ofKind(kind: SpotKind, within?: TileSpan): readonly SpotDef[] {
+    const list = this.byKind.get(kind) ?? [];
+    return within ? list.filter((s) => inSpan(s, within)) : list;
   }
 
   group(group: string): readonly SpotDef[] {
@@ -72,7 +74,7 @@ export class SpotRegistry {
     for (const [id, o] of this.owners) if (o === by) this.owners.delete(id);
   }
 
-  /** Spots reservados por alguém. */
+  /** Spots reserved by someone. */
   reservedBy(by: string): string[] {
     const out: string[] = [];
     for (const [id, o] of this.owners) if (o === by) out.push(id);
@@ -80,14 +82,15 @@ export class SpotRegistry {
   }
 
   /**
-   * Spot livre de um tipo, o mais próximo de `near` (distância Manhattan em tiles), opcionalmente
-   * filtrado. Com `rng`, sorteia entre os 3 mais próximos para variar o destino.
+   * Free spot of a given kind, closest to `near` (Manhattan distance in tiles), optionally
+   * filtered. With `rng`, picks randomly among the 3 closest to vary destinations.
    */
-  findFree(kind: SpotKind, opts: { near?: { tx: number; ty: number }; filter?: (s: SpotDef) => boolean; by?: string; rng?: () => number } = {}): SpotDef | null {
+  findFree(kind: SpotKind, opts: { near?: { tx: number; ty: number }; filter?: (s: SpotDef) => boolean; by?: string; rng?: () => number; within?: TileSpan } = {}): SpotDef | null {
     const list = this.byKind.get(kind);
     if (!list) return null;
     const cands: { s: SpotDef; d: number }[] = [];
     for (const s of list) {
+      if (opts.within && !inSpan(s, opts.within)) continue;
       if (!this.isFree(s.id, opts.by)) continue;
       if (opts.filter && !opts.filter(s)) continue;
       const d = opts.near ? Math.abs(s.tx - opts.near.tx) + Math.abs(s.ty - opts.near.ty) : 0;
@@ -99,12 +102,13 @@ export class SpotRegistry {
     return cands[0].s;
   }
 
-  /** Grupo (par) totalmente livre de um tipo: retorna os spots do grupo. */
-  findFreeGroup(kind: SpotKind, opts: { rng?: () => number; filter?: (g: readonly SpotDef[]) => boolean } = {}): readonly SpotDef[] | null {
+  /** Fully free group (pair) of a given kind: returns the spots in the group. */
+  findFreeGroup(kind: SpotKind, opts: { rng?: () => number; filter?: (g: readonly SpotDef[]) => boolean; within?: TileSpan } = {}): readonly SpotDef[] | null {
     const groups: (readonly SpotDef[])[] = [];
     const seen = new Set<string>();
     for (const s of this.byKind.get(kind) ?? []) {
       if (!s.group || seen.has(s.group)) continue;
+      if (opts.within && !inSpan(s, opts.within)) continue;
       seen.add(s.group);
       const g = this.group(s.group);
       if (g.length < 2 || !g.every((x) => this.isFree(x.id))) continue;
@@ -114,4 +118,14 @@ export class SpotRegistry {
     if (!groups.length) return null;
     return groups[Math.floor((opts.rng ?? Math.random)() * groups.length)];
   }
+}
+
+/** Tile columns [x0, x1) of one building (several offices = several buildings in one world). */
+export interface TileSpan {
+  x0: number;
+  x1: number;
+}
+
+export function inSpan(s: { tx: number }, span: TileSpan): boolean {
+  return s.tx >= span.x0 && s.tx < span.x1;
 }

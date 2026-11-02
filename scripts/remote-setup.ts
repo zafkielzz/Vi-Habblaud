@@ -1,12 +1,13 @@
-// npm run remote:setup — liga o acesso pelo celular com login e HTTPS, num passo só.
+// npm run remote:setup — enables phone access with login and HTTPS, in a single step.
 //
-// Pergunta (ou recebe por opção) o usuário, a senha (escondida, duas vezes), o nome do endereço (<nome>.local) e, se
-// quiser, um endereço próprio (ex.: meuclaude.home); e então:
-//   1. cria a CA local e o certificado do servidor (server/remote/tls.ts) em ~/.habblaud/remote-tls;
-//   2. grava no .env SÓ o hash scrypt da senha (nunca a senha), o nome, a porta e HABBLAUD_REMOTE_BIND=0.0.0.0;
-//   3. deixa o anúncio do <nome>.local rodando como serviço (npm run remote:mdns; LaunchAgent/systemd);
-//   4. mostra os endereços, a impressão digital da CA e o passo a passo do celular.
-// Depois: npm run docker:up. Para desligar: npm run remote:setup -- --off.
+// Prompts for (or takes as options) username, password (hidden, twice), address name (<name>.local) and,
+// optionally, a custom address (e.g. myclaude.home); and then:
+//   1. creates the local CA and server certificate (server/remote/tls.ts) in ~/.habblaud/remote-tls;
+//   2. writes ONLY the scrypt hash of the password to .env (never the password), name, port and
+//      HABBLAUD_REMOTE_BIND=0.0.0.0;
+//   3. keeps the <name>.local announcement running as a service (npm run remote:mdns; LaunchAgent/systemd);
+//   4. prints the addresses, CA fingerprint and phone setup instructions.
+// Afterwards: npm run docker:up. To disable: npm run remote:setup -- --off.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
@@ -48,18 +49,18 @@ export interface SetupArgs {
   help: boolean;
 }
 
-const USAGE = tr(`Uso: npm run remote:setup [-- opções]
+const USAGE = tr(`Usage: npm run remote:setup [-- options]
 
-Liga o acesso pelo celular (https://<nome>.local) com usuário, senha e HTTPS.
+Turns on phone access (https://<name>.local) with username, password and HTTPS.
 
-  --user <nome>        usuário do login (padrão: o seu usuário do sistema)
-  --name <nome>        endereço <nome>.local (padrão: habblaud)
-  --domain <endereço>  endereço próprio, ex.: meuclaude.home (precisa de uma entrada no DNS do roteador)
-  --port <n>           porta no computador (padrão: 443 se estiver livre, senão 4748)
-  --allow <lista>      o que o celular pode fazer: permissions, messages, terminal, spawn, none (padrão: permissions)
-  --password-stdin     lê a senha da entrada padrão (automação), em vez de perguntar
-  --no-service         não instala o serviço do anúncio <nome>.local (rode npm run remote:mdns você mesmo)
-  --off                desliga o acesso pelo celular (tira as linhas do .env e o serviço; mantém a CA)`);
+  --user <name>        login username (default: your system username)
+  --name <name>        address <name>.local (default: habblaud)
+  --domain <address>   own address, e.g. myclaude.home (needs an entry in the router's DNS)
+  --port <n>           port on the computer (default: 443 if free, otherwise 4748)
+  --allow <list>       what the phone can do: permissions, messages, terminal, spawn, none (default: permissions)
+  --password-stdin     reads the password from standard input (automation) instead of asking
+  --no-service         doesn't install the <name>.local announcement service (run npm run remote:mdns yourself)
+  --off                turns off phone access (removes the lines from .env and the service; keeps the CA)`);
 
 export function parseArgs(argv: string[]): SetupArgs {
   const out: SetupArgs = { passwordStdin: false, service: true, off: false, help: false };
@@ -67,7 +68,7 @@ export function parseArgs(argv: string[]): SetupArgs {
     const a = argv[i];
     const val = () => {
       const v = argv[++i];
-      if (v === undefined) throw new Error(tr('falta o valor de {0}', [a]));
+      if (v === undefined) throw new Error(tr('missing value for {0}', [a]));
       return v;
     };
     if (a === '--user') out.user = val();
@@ -79,21 +80,21 @@ export function parseArgs(argv: string[]): SetupArgs {
     else if (a === '--no-service') out.service = false;
     else if (a === '--off') out.off = true;
     else if (a === '--help' || a === '-h') out.help = true;
-    else throw new Error(tr('opção desconhecida: {0}', [a]));
+    else throw new Error(tr('unknown option: {0}', [a]));
   }
-  if (out.port !== undefined && !(Number.isInteger(out.port) && out.port > 0 && out.port < 65536)) throw new Error(tr('porta inválida'));
+  if (out.port !== undefined && !(Number.isInteger(out.port) && out.port > 0 && out.port < 65536)) throw new Error(tr('invalid port'));
   return out;
 }
 
-/** Por que a senha não serve (undefined = serve). */
+/** Why the password is not accepted (undefined = valid). */
 export function passwordProblem(password: string, user: string): string | undefined {
-  if (password.length < MIN_PASSWORD) return tr('use pelo menos {0} caracteres', [MIN_PASSWORD]);
-  if (password.trim() !== password) return tr('sem espaços no começo ou no fim');
-  if (password.toLowerCase() === user.toLowerCase()) return tr('a senha não pode ser o usuário');
+  if (password.length < MIN_PASSWORD) return tr('use at least {0} characters', [MIN_PASSWORD]);
+  if (password.trim() !== password) return tr('no spaces at the start or end');
+  if (password.toLowerCase() === user.toLowerCase()) return tr("the password can't be the username");
   return undefined;
 }
 
-/** O .env com o acesso remoto ligado (o resto do arquivo fica igual). */
+/** The .env with remote access enabled (the rest of the file stays the same). */
 export function remoteEnv(
   current: string,
   s: { user: string; hash: string; name: string; domain?: string; port: number; httpPort?: number; allow?: string },
@@ -135,10 +136,10 @@ function ask(question: string, fallback?: string): Promise<string> {
   );
 }
 
-/** Pergunta sem ecoar o que é digitado (só no terminal de verdade). */
+/** Prompts without echoing input (real terminal only). */
 function askHidden(question: string): Promise<string> {
   const stdin = process.stdin;
-  if (!stdin.isTTY) throw new Error(tr('sem terminal para perguntar a senha: use --password-stdin'));
+  if (!stdin.isTTY) throw new Error(tr('no terminal to ask for the password: use --password-stdin'));
   return new Promise((ok) => {
     process.stdout.write(`${question}: `);
     stdin.setRawMode(true);
@@ -198,7 +199,7 @@ function xml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Instala (ou reinstala) o anúncio do <nome>.local como serviço. Devolve uma linha de status. */
+/** Installs (or reinstalls) the <name>.local announcement as a service. Returns a status line. */
 function installService(): string {
   const cmd = tsxCommand();
   const logDir = join(HOME, '.habblaud', 'logs');
@@ -228,11 +229,11 @@ function installService(): string {
     const domain = `gui/${process.getuid?.() ?? userInfo().uid}`;
     spawnSync('launchctl', ['bootout', `${domain}/${SERVICE_LABEL}`], { stdio: 'ignore' });
     const r = spawnSync('launchctl', ['bootstrap', domain, plistPath()], { encoding: 'utf8' });
-    return r.status === 0 ? tr('serviço {0} ligado (log: ~/.habblaud/logs/remote-mdns.log)', [SERVICE_LABEL]) : tr('não consegui ligar o serviço: {0}', [String(r.stderr).trim()]);
+    return r.status === 0 ? tr('service {0} enabled (log: ~/.habblaud/logs/remote-mdns.log)', [SERVICE_LABEL]) : tr("couldn't enable the service: {0}", [String(r.stderr).trim()]);
   }
   if (process.platform === 'linux') {
     const unit = `[Unit]
-Description=${tr('Habblaud: anuncia o endereço .local do acesso pelo celular')}
+Description=${tr('Habblaud: announces the .local address for phone access')}
 After=network-online.target
 
 [Service]
@@ -250,10 +251,10 @@ WantedBy=default.target
     spawnSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'ignore' });
     const r = spawnSync('systemctl', ['--user', 'enable', '--now', 'habblaud-remote-mdns.service'], { encoding: 'utf8' });
     return r.status === 0
-      ? tr('serviço habblaud-remote-mdns ligado (para seguir ligado sem login: loginctl enable-linger)')
-      : tr('não consegui ligar o serviço: {0}', [String(r.stderr).trim()]);
+      ? tr('habblaud-remote-mdns service enabled (to keep it on while logged out: loginctl enable-linger)')
+      : tr("couldn't enable the service: {0}", [String(r.stderr).trim()]);
   }
-  return tr('{0}: sem serviço automático; deixe npm run remote:mdns rodando ou use o IP', [process.platform]);
+  return tr('{0}: no automatic service; keep npm run remote:mdns running or use the IP', [process.platform]);
 }
 
 function removeService(): void {
@@ -275,89 +276,89 @@ async function main(): Promise<void> {
   if (args.off) {
     writeEnv(updateEnv(current, Object.fromEntries(REMOTE_KEYS.map((k) => [k, null]))));
     removeService();
-    console.log(tr('[remote-setup] Acesso pelo celular desligado (a CA continua em ~/.habblaud/remote-tls). Agora: npm run docker:up'));
+    console.log(tr('[remote-setup] Phone access turned off (the CA stays in ~/.habblaud/remote-tls). Now: npm run docker:up'));
     return;
   }
 
-  const user = args.user ?? (args.passwordStdin ? undefined : await ask(tr('Usuário do login'), readEnvValue(current, 'HABBLAUD_REMOTE_USER') ?? userInfo().username));
-  if (!user || /\s/.test(user)) throw new Error(tr('usuário inválido (sem espaços)'));
+  const user = args.user ?? (args.passwordStdin ? undefined : await ask(tr('Login username'), readEnvValue(current, 'HABBLAUD_REMOTE_USER') ?? userInfo().username));
+  if (!user || /\s/.test(user)) throw new Error(tr('invalid username (no spaces)'));
 
   let password: string;
   if (args.passwordStdin) {
     password = await readStdinLine();
     const problem = passwordProblem(password, user);
-    if (problem) throw new Error(tr('senha recusada: {0}', [problem]));
+    if (problem) throw new Error(tr('password rejected: {0}', [problem]));
   } else {
     for (;;) {
-      password = await askHidden(tr('Senha ({0}+ caracteres; não aparece enquanto você digita)', [MIN_PASSWORD]));
+      password = await askHidden(tr('Password ({0}+ characters; hidden while you type)', [MIN_PASSWORD]));
       const problem = passwordProblem(password, user);
       if (problem) {
         console.log(`  ${problem}.`);
         continue;
       }
-      if ((await askHidden(tr('Repita a senha'))) !== password) {
-        console.log(tr('  as duas não batem; de novo.'));
+      if ((await askHidden(tr('Repeat the password'))) !== password) {
+        console.log(tr("  they don't match; try again."));
         continue;
       }
       break;
     }
   }
 
-  const name = args.name ?? (args.passwordStdin ? 'habblaud' : await ask(tr('Nome do endereço (vira <nome>.local)'), readEnvValue(current, 'HABBLAUD_REMOTE_NAME') ?? 'habblaud')).toLowerCase();
-  if (!isValidName(name)) throw new Error(tr('nome inválido: "{0}" (letras, números e hífen)', [name]));
+  const name = args.name ?? (args.passwordStdin ? 'habblaud' : await ask(tr('Address name (becomes <name>.local)'), readEnvValue(current, 'HABBLAUD_REMOTE_NAME') ?? 'habblaud')).toLowerCase();
+  if (!isValidName(name)) throw new Error(tr('invalid name: "{0}" (letters, numbers and hyphens)', [name]));
   const domainAnswer =
     args.domain ??
-    (args.passwordStdin ? '' : await ask(tr('Endereço próprio, opcional (ex.: meuclaude.home; Enter pula)'), readEnvValue(current, 'HABBLAUD_REMOTE_DOMAIN') ?? ''));
+    (args.passwordStdin ? '' : await ask(tr('Own address, optional (e.g. myclaude.home; Enter skips)'), readEnvValue(current, 'HABBLAUD_REMOTE_DOMAIN') ?? ''));
   const domain = domainAnswer.trim().toLowerCase() || undefined;
-  if (domain && !isValidDomain(domain)) throw new Error(tr('endereço inválido: "{0}"', [domain]));
+  if (domain && !isValidDomain(domain)) throw new Error(tr('invalid address: "{0}"', [domain]));
 
   const existingPort = Number(readEnvValue(current, 'HABBLAUD_REMOTE_PORT'));
   const port = args.port ?? (Number.isInteger(existingPort) && existingPort > 0 ? existingPort : (await portFree(443)) ? 443 : 4748);
 
-  // Na 443, a 80 (se livre) só redireciona para https://: digitar "meuclaude.local" sem https:// também funciona.
+  // On 443, port 80 (if free) just redirects to https://: typing "myclaude.local" without https:// also works.
   const existingHttp = Number(readEnvValue(current, 'HABBLAUD_REMOTE_HTTP_PORT'));
   const httpPort = port !== 443 ? undefined : existingHttp === 80 || (await portFree(80)) ? 80 : undefined;
 
-  console.log(tr('[remote-setup] Gerando o hash da senha…'));
+  console.log(tr('[remote-setup] Generating the password hash…'));
   const hash = await hashPassword(password);
   const paths = tlsPaths(remoteTlsBase(HOME));
   const hadCa = caFingerprint(paths);
   const cert = ensureServerCert(paths, remoteTargets({ name, domain }), { force: true, newCa: true });
   writeEnv(remoteEnv(current, { user, hash, name, domain, port, httpPort, allow: args.allow }));
-  const service = args.service ? installService() : tr('serviço não instalado (--no-service): rode npm run remote:mdns');
+  const service = args.service ? installService() : tr('service not installed (--no-service): run npm run remote:mdns');
 
   const fp = caFingerprint(paths);
-  // O IP do Wi-Fi/cabo (rota padrão), não o de uma VPN que também entra no certificado.
+  // Wi-Fi/cable IP (default route), not a VPN IP which also enters the certificate.
   const ip = primaryIp() ?? cert.targets.ips.find((i) => i !== '127.0.0.1');
-  const caNote = !cert.createdCa ? '' : hadCa ? tr(' CA local nova (o endereço mudou ou a anterior não tinha restrição de nomes): instale o certificado de novo no celular.') : tr(' CA local criada.');
+  const caNote = !cert.createdCa ? '' : hadCa ? tr(' New local CA (the address changed or the previous one had no name constraints): install the certificate on the phone again.') : tr(' Local CA created.');
   const urls = [
-    `${urlFor(`${name}.local`, port)}${ip ? tr('   (ou {0})', [urlFor(ip, port)]) : ''}`,
-    ...(domain ? [tr('{0}   (depois de criar no roteador: {1} -> {2})', [urlFor(domain, port), domain, ip ?? tr('IP deste computador')])] : []),
+    `${urlFor(`${name}.local`, port)}${ip ? tr('   (or {0})', [urlFor(ip, port)]) : ''}`,
+    ...(domain ? [tr('{0}   (after creating it in the router: {1} -> {2})', [urlFor(domain, port), domain, ip ?? tr("this computer's IP")])] : []),
   ];
   console.log(
     [
       '',
-      tr('[remote-setup] Pronto.{0}', [caNote]),
-      tr('  .env:        usuário "{0}", senha guardada só como hash (scrypt), porta {1}', [user, port]),
-      tr('  Certificado: {0}', [cert.targets.dns.concat(cert.targets.ips).join(', ')]),
-      tr('  Anúncio:     {0}', [service]),
+      tr('[remote-setup] Done.{0}', [caNote]),
+      tr('  .env:        user "{0}", password stored only as a hash (scrypt), port {1}', [user, port]),
+      tr('  Certificate: {0}', [cert.targets.dns.concat(cert.targets.ips).join(', ')]),
+      tr('  Announcing:  {0}', [service]),
       '',
-      tr('  Agora rode:  npm run docker:up'),
+      tr('  Now run:     npm run docker:up'),
       '',
-      tr('  No celular (mesmo Wi-Fi):'),
+      tr('  On the phone (same Wi-Fi):'),
       ...urls.map((u) => `    ${u}`),
-      tr('  Primeira vez: aceite o aviso, toque em "Instale o certificado do Habblaud" e confie nele'),
-      tr('    iPhone:  Ajustes > Perfil Baixado > Instalar; depois Ajustes > Geral > Sobre > Ajustes de Confiança de Certificados'),
-      tr('    Android: Configurações > Segurança > Criptografia e credenciais > Instalar certificado > Certificado de CA'),
-      tr('  Impressão digital da CA (confira no celular antes de confiar):'),
-      `    ${fp ?? tr('(indisponível)')}`,
+      tr('  First time: accept the warning, tap "Install the Habblaud certificate" and trust it'),
+      tr('    iPhone:  Settings > Profile Downloaded > Install; then Settings > General > About > Certificate Trust Settings'),
+      tr('    Android: Settings > Security > Encryption & credentials > Install a certificate > CA certificate'),
+      tr('  CA fingerprint (check it on the phone before trusting it):'),
+      `    ${fp ?? tr('(unavailable)')}`,
     ].join('\n'),
   );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((err: unknown) => {
-    console.error(tr('[remote-setup] Erro: {0}', [(err as Error).message]));
+    console.error(tr('[remote-setup] Error: {0}', [(err as Error).message]));
     process.exitCode = 1;
   });
 }

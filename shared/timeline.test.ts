@@ -26,12 +26,12 @@ function agent(id: string, extra: Partial<AgentInfo> = {}): AgentInfo {
     roomId: '/p/loja',
     name: 'Marina',
     look: 'f',
-    role: 'Agente principal',
+    role: 'Main agent',
     sessionId: `s-${id}`,
     account: '.claude',
     status: 'working',
     recent: [],
-    tasks: [{ id: '1', title: 'tarefa', status: 'pending' }],
+    tasks: [{ id: '1', title: 'task', status: 'pending' }],
     startedAt: T0,
     lastEventAt: T0,
     statusSince: T0,
@@ -46,8 +46,8 @@ const room = (id: string, slot = 0): RoomInfo => ({ id, name: id.split('/').pop(
 const account = (id: string, five = 10): AccountInfo => ({
   id,
   short: 'C',
-  name: 'Conta C',
-  email: 'alguem@exemplo.example',
+  name: 'Account C',
+  email: 'someone@example.example',
   organization: 'Org',
   color: '#f08a3c',
   configDir: '/home/x/.claude',
@@ -60,15 +60,15 @@ function snap(agents: AgentInfo[], rooms: RoomInfo[] = [room('/p/loja')], accoun
   return { rev: 1, serverTime: T0, rooms, agents, accounts, meta: { demo: false, sources: [], startedAt: T0, version: 't' } };
 }
 
-/** Frame -> objeto comparável (Maps viram listas ordenadas). */
+/** Frame -> comparable object (Maps become sorted lists). */
 const plain = (f: TimelineFrame) => ({
   rooms: [...f.rooms.values()].sort((a, b) => a.id.localeCompare(b.id)),
   agents: [...f.agents.values()].sort((a, b) => a.id.localeCompare(b.id)),
   accounts: [...f.accounts.values()].sort((a, b) => a.id.localeCompare(b.id)),
 });
 
-describe('timeline: dias', () => {
-  it('chave do dia local, validação estrita e aritmética de calendário', () => {
+describe('timeline: days', () => {
+  it('local day key, strict validation, and calendar arithmetic', () => {
     expect(dayKey(T0)).toBe('2026-10-07');
     expect(dayKey(new Date(2026, 0, 1, 0, 0, 1).getTime())).toBe('2026-01-01');
     expect(isDayKey('2026-10-07')).toBe(true);
@@ -83,20 +83,20 @@ describe('timeline: dias', () => {
   });
 });
 
-describe('timeline: resumo do snapshot', () => {
-  it('só os campos de desenho: sem tarefas, números, detalhe do comando nem e-mail da conta', () => {
+describe('timeline: snapshot compacting', () => {
+  it('only rendering fields: no tasks, stats, command details, or account email', () => {
     const a = agent('.claude:1', {
-      waitingFor: 'aprovar uma permissão',
-      activity: { id: 'x', kind: 'run', icon: '💻', text: 'Rodando npm test', detail: 'npm test -- --token=***', tool: 'Bash', at: T0 + 5 },
-      shells: [{ id: 'b1', label: 'Testes', command: 'npm test', startedAt: T0, background: true, kind: 'shell' }],
+      waitingFor: 'approve a permission',
+      activity: { id: 'x', kind: 'run', icon: '💻', text: 'Running npm test', detail: 'npm test -- --token=***', tool: 'Bash', at: T0 + 5 },
+      shells: [{ id: 'b1', label: 'Tests', command: 'npm test', startedAt: T0, background: true, kind: 'shell' }],
       title: 'x'.repeat(400),
     });
     const c = compactAgent(a);
     expect(c).not.toHaveProperty('tasks');
     expect(c).not.toHaveProperty('stats');
     expect(c).not.toHaveProperty('recent');
-    expect(c.activity).toEqual({ kind: 'run', icon: '💻', text: 'Rodando npm test', at: T0 + 5, tool: 'Bash' });
-    expect(c.shells).toEqual([{ id: 'b1', label: 'Testes', startedAt: T0, background: true, kind: 'shell' }]);
+    expect(c.activity).toEqual({ kind: 'run', icon: '💻', text: 'Running npm test', at: T0 + 5, tool: 'Bash' });
+    expect(c.shells).toEqual([{ id: 'b1', label: 'Tests', startedAt: T0, background: true, kind: 'shell' }]);
     expect(c.title!.length).toBeLessThanOrEqual(160);
     expect(c.demo).toBeUndefined();
     const f = compactSnapshot(snap([a, agent('demo:x1', { name: 'Caio' })], [room('/p/loja'), room('demo:/p/app', 1)], [account('.claude'), account('demo:.claude')]));
@@ -111,8 +111,8 @@ describe('timeline: resumo do snapshot', () => {
   });
 });
 
-describe('timeline: ferramenta (provider)', () => {
-  it('copia provider de agente e conta (ausente = Claude Code) e volta igual', () => {
+describe('timeline: tool (provider)', () => {
+  it('copies provider from agent and account (absent = Claude Code) and round-trips identically', () => {
     const cx = agent('.codex:t1', { provider: 'codex', account: '.codex' });
     const acc: AccountInfo = { ...account('.codex'), provider: 'codex', usage: { source: 'codex', fetchedAt: T0, noQuota: true } };
     const f = compactSnapshot(snap([cx, agent('.claude:1')], [room('/p/loja')], [account('.claude'), acc]));
@@ -128,14 +128,14 @@ describe('timeline: ferramenta (provider)', () => {
 });
 
 describe('timeline: deltas', () => {
-  it('diferença aplicada sobre o estado anterior reconstrói o novo', () => {
+  it('difference applied over previous state reconstructs the new state', () => {
     const before = compactSnapshot(
-      snap([agent('.claude:1', { waitingFor: 'responder', status: 'waiting' }), agent('.claude:2', { name: 'Caio', roomId: '/p/api' })], [room('/p/loja'), room('/p/api', 1)]),
+      snap([agent('.claude:1', { waitingFor: 'respond', status: 'waiting' }), agent('.claude:2', { name: 'Caio', roomId: '/p/api' })], [room('/p/loja'), room('/p/api', 1)]),
     );
     const after = compactSnapshot(
       snap(
         [
-          agent('.claude:1', { status: 'idle', statusSince: T0 + 9, activity: { id: 'a', kind: 'done', icon: '✅', text: 'Concluiu', at: T0 + 9 } }),
+          agent('.claude:1', { status: 'idle', statusSince: T0 + 9, activity: { id: 'a', kind: 'done', icon: '✅', text: 'Done', at: T0 + 9 } }),
           agent('s:sub', { kind: 'sub', parentId: '.claude:1', name: 'Luan', role: 'Explore' }),
         ],
         [room('/p/loja')],
@@ -144,9 +144,9 @@ describe('timeline: deltas', () => {
     );
     const d = diffFrames(before, after)!;
     expect(d).not.toBeNull();
-    // Agente alterado: só o que mudou (waitingFor some com null); o novo vem completo; o que saiu, null.
+    // Modified agent: only what changed (waitingFor is removed with null); new agent comes in full; departed agent, null.
     const byId = new Map(d.agents!);
-    expect(byId.get('.claude:1')).toEqual({ status: 'idle', statusSince: T0 + 9, activity: { kind: 'done', icon: '✅', text: 'Concluiu', at: T0 + 9 }, waitingFor: null });
+    expect(byId.get('.claude:1')).toEqual({ status: 'idle', statusSince: T0 + 9, activity: { kind: 'done', icon: '✅', text: 'Done', at: T0 + 9 }, waitingFor: null });
     expect(byId.get('s:sub')).toMatchObject({ id: 's:sub', kind: 'sub', parentId: '.claude:1', name: 'Luan' });
     expect(byId.get('.claude:2')).toBeNull();
     expect(d.rooms).toEqual([['/p/api', null]]);
@@ -156,26 +156,26 @@ describe('timeline: deltas', () => {
     const old = frame.agents.get('.claude:1')!;
     applyChanges(frame, JSON.parse(JSON.stringify(d)));
     expect(plain(frame)).toEqual(plain(after));
-    // O objeto antigo não foi alterado (snapshots já entregues continuam valendo).
+    // Old object was not modified (already-delivered snapshots remain valid).
     expect(old.status).toBe('waiting');
-    expect(old.waitingFor).toBe('responder');
+    expect(old.waitingFor).toBe('respond');
   });
 
-  it('sem mudança no que o player desenha = sem delta', () => {
+  it('no change in what the player renders = no delta', () => {
     const a = compactSnapshot(snap([agent('.claude:1')]));
     const b = compactSnapshot(snap([agent('.claude:1', { stats: { toolCalls: 99, tokensIn: 1, tokensOut: 1, subagents: 0 }, lastEventAt: T0 + 50 })]));
     expect(diffFrames(a, b)).toBeNull();
   });
 
-  it('patch de agente desconhecido incompleto (linha perdida) é ignorado', () => {
+  it('incomplete patch for unknown agent (lost line) is ignored', () => {
     const frame = frameOf(keyframeOf(compactSnapshot(snap([])), T0, 300_000));
     applyChanges(frame, { agents: [['fantasma', { status: 'idle' }]] });
     expect(frame.agents.size).toBe(0);
   });
 });
 
-describe('timeline: leitura do arquivo', () => {
-  it('ignora linhas inválidas e segura o relógio que voltou', () => {
+describe('timeline: reading the file', () => {
+  it('ignores invalid lines and clamps backwards clock', () => {
     const k = keyframeOf(compactSnapshot(snap([agent('.claude:1')])), T0, 300_000, true);
     const text = [
       JSON.stringify(k),
@@ -183,7 +183,7 @@ describe('timeline: leitura do arquivo', () => {
       JSON.stringify({ t: 'd', at: T0 + 2000, agents: [['.claude:1', { status: 'idle' }]] }),
       JSON.stringify({ t: 'd', at: T0 + 1000, agents: [['.claude:1', { status: 'working' }]] }),
       JSON.stringify({ t: 'x', at: T0 + 3000 }),
-      JSON.stringify({ t: 'd', at: 'ontem' }),
+      JSON.stringify({ t: 'd', at: 'yesterday' }),
       JSON.stringify({ t: 'end', at: T0 + 4000 }),
       '',
     ].join('\n');
@@ -192,8 +192,8 @@ describe('timeline: leitura do arquivo', () => {
     expect(recs.map((r) => r.at)).toEqual([T0, T0 + 2000, T0 + 2000, T0 + 4000]);
   });
 
-  it('resumo -> AgentInfo/AccountInfo completos para o mundo e a interface', () => {
-    const c = compactAgent(agent('.claude:1', { activity: { id: 'z', kind: 'edit', icon: '✏️', text: 'Editando App.tsx', at: T0 + 7 } }));
+  it('summary -> complete AgentInfo/AccountInfo for world and UI', () => {
+    const c = compactAgent(agent('.claude:1', { activity: { id: 'z', kind: 'edit', icon: '✏️', text: 'Editing App.tsx', at: T0 + 7 } }));
     const a = toAgentInfo(c);
     expect(a).toMatchObject({ id: '.claude:1', sessionId: '.claude:1', tasks: [], stats: { toolCalls: 0 }, lastEventAt: T0 + 7 });
     expect(a.activity!.id).toBe(`tl:.claude:1:${T0 + 7}:edit`);
@@ -203,7 +203,7 @@ describe('timeline: leitura do arquivo', () => {
     expect(acc.configDir).toBe('');
   });
 
-  it('parts do personagem editado vão e voltam; agente sem parts continua sem', () => {
+  it('character parts round-trip; agent without parts remains without them', () => {
     const parts = { skin: '#5a3623', hairStyle: 'bob' } as const;
     const c = compactAgent(agent('.claude:1', { parts }));
     expect(c.parts).toEqual(parts);

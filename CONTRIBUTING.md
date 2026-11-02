@@ -1,38 +1,40 @@
-# Como contribuir
+# How to contribute
 
-Obrigado por querer contribuir com o Habblaud! Relatos de bugs, ideias e melhorias são bem-vindos.
+Thanks for wanting to contribute to Habblaud! Bug reports, ideas, and improvements are welcome.
 
-## Antes de começar
+## Before starting
 
-- Para bugs e ideias, procure nas [issues](https://github.com/marmottajr/habblaud/issues) se o assunto já foi registrado.
-- Para mudanças maiores ou que alterem o comportamento do Habblaud, abra uma issue para conversar sobre a proposta antes de implementar.
-- Prefira mudanças pequenas e focadas. Se a alteração muda o que aparece ou acontece no escritório, descreva esse comportamento no pull request.
+- For bugs and ideas, check the [issues](https://github.com/marmottajr/habblaud/issues) to see if the topic was
+  already reported.
+- For larger changes or those changing Habblaud's behavior, open an issue to discuss the proposal before implementing.
+- Prefer small, focused changes. If the change modifies what appears or happens in the office, describe that
+  behavior in the pull request.
 
-## Preparar o ambiente
+## Setting up the environment
 
-O Habblaud requer Node.js 22.12 ou mais recente e npm. Depois de clonar o repositório:
+Habblaud requires Node.js 22.12 or newer and npm. After cloning the repository:
 
 ```sh
 npm install
 npm run dev
 ```
 
-O escritório de desenvolvimento fica em <http://localhost:4747>.
+The development office is at <http://localhost:4747>.
 
-## Textos e traduções
+## Texts and translations
 
-O Habblaud tem interface em português, inglês, espanhol e francês. O português é a língua de origem:
+Habblaud's interface is in English and Vietnamese. English is the source language:
 
-- Todo texto que aparece para quem usa (interface, erros, logs, scripts de instalação) é escrito em português dentro
-  de `tr()` (`shared/i18n.ts`). Valores entram por lacunas numeradas: `tr('Lendo {0}', [arquivo])`, nunca uma
-  template string dentro do `tr()`.
-- A chave da tradução é o próprio texto em português: mudar o texto muda a chave. Atualize as traduções dele em
-  `shared/locales/` (`en.ts`, `es.ts`, `fr.ts`) ou deixe sem: um texto sem tradução aparece em português.
-- `npm run i18n:check` lista os textos sem tradução e as traduções que sobraram.
+- Every text users see (interface, errors, logs, install scripts) is written in English inside `tr()`
+  (`shared/i18n.ts`). Values go in numbered placeholders: `tr('Reading {0}', [file])`, never a template string inside
+  `tr()`.
+- The translation key is the English text itself: changing the text changes the key. Update its Vietnamese translation
+  in `shared/locales/vi.ts`, or leave it out: an untranslated text shows up in English.
+- `npm run i18n:check` lists untranslated texts and leftover translations.
 
-## Verificar uma mudança
+## Verifying a change
 
-Antes de abrir o pull request, rode:
+Before opening a pull request, run:
 
 ```sh
 npm run typecheck
@@ -40,25 +42,25 @@ npm test
 npm run build
 ```
 
-Se a mudança alterar um plugin do Claude Code, valide também o plugin afetado:
+If the change affects a Claude Code plugin, also validate the affected plugin:
 
 ```sh
 claude plugin validate mod/habblaud
 claude plugin test mod/habblaud
 ```
 
-Use o caminho do plugin alterado (`mod/habblaud-permissoes` ou `mod/habblaud-mensagens`) quando for o caso.
+Use the path of the modified plugin (`mod/habblaud-permissoes` or `mod/habblaud-mensagens`) when applicable.
 
-## Abrir um pull request
+## Opening a pull request
 
-- Use um título claro e explique o problema, a mudança e como ela foi verificada.
-- Referencie a issue relacionada, se houver.
-- Para mudanças visuais, inclua uma captura de tela ou um GIF, se ajudar a mostrar o resultado. Faça as capturas no
-  modo demonstração (`?mock=1` na URL ou `npm run demo`), que mostra só agentes fictícios.
-- Atualize a seção **Não lançado** do `CHANGELOG.md` quando a mudança trouxer algo visível para quem usa o Habblaud.
-- PRs que tocam `shared/world/` ou `server/world/` (Habblaud World) explicam o que muda no que sai do computador, e a
-  revisão confere a lista de [`docs/world/privacidade.md`](docs/world/privacidade.md) contra o código. Leia antes o
-  [`shared/world/README.md`](shared/world/README.md).
-- Não inclua dados pessoais, credenciais ou conteúdo privado de sessões em capturas, exemplos ou logs.
+- Use a clear title and explain the problem, the change, and how it was verified.
+- Reference the related issue, if any.
+- For visual changes, include a screenshot or GIF if helpful to demonstrate results. Take screenshots in
+  demo mode (`?mock=1` in URL or `npm run demo`), which only shows fictional agents.
+- Update the **Unreleased** section of `CHANGELOG.md` when the change introduces something visible to Habblaud users.
+- PRs touching `shared/world/` or `server/world/` (Habblaud World) explain what changes in what leaves the machine, and
+  review cross-checks the [`docs/world/privacidade.md`](docs/world/privacidade.md) list against the code. Read
+  [`shared/world/README.md`](shared/world/README.md) first.
+- Do not include personal data, credentials, or private session content in screenshots, examples, or logs.
 
-Se algo não estiver claro, pergunte na issue relacionada antes de seguir por uma direção que possa mudar o comportamento do projeto.
+If anything is unclear, ask in the related issue before heading in a direction that might change project behavior.

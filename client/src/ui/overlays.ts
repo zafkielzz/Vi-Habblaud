@@ -1,4 +1,4 @@
-// Camadas de estado: splash de carregamento, escritório vazio e aviso de conexão perdida.
+// State overlays: loading splash, empty office, and disconnected banner.
 import type { UiComponent, UiContext } from './context';
 import { h, prefersReducedMotion, setHidden, setText } from './dom';
 import { FALLBACK_MARK } from './icons';
@@ -6,7 +6,7 @@ import { emptyOfficeHint } from './provider';
 import { wordmark } from './widgets';
 import { tr } from '../../../shared/i18n';
 
-/** Depois de quanto tempo sem conexão o aviso aparece. */
+/** How long without connection before the banner appears. */
 const DISCONNECTED_BANNER_MS = 8_000;
 
 function brandMark(size: number): HTMLElement {
@@ -27,7 +27,7 @@ export class Splash implements UiComponent {
   private tick: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private ctx: UiContext) {
-    this.text = h('p', { class: 'ui-splash__text', text: tr('Conectando ao escritório…') });
+    this.text = h('p', { class: 'ui-splash__text', text: tr('Connecting to the office…') });
     this.el = h(
       'div',
       { class: 'ui-splash', role: 'status', attrs: { 'aria-live': 'polite' } },
@@ -47,11 +47,11 @@ export class Splash implements UiComponent {
       return;
     }
     const waited = performance.now() - this.startedAt;
-    let text = tr('Conectando ao escritório…');
-    if (waited > DISCONNECTED_BANNER_MS) text = tr('O servidor do Habblaud não responde. Confira se ele está rodando (npm run dev ou npm start); seguimos tentando.');
-    else if (store.connection === 'closed') text = tr('Não foi possível conectar ao servidor do Habblaud. Tentando de novo…');
+    let text = tr('Connecting to the office…');
+    if (waited > DISCONNECTED_BANNER_MS) text = tr("The Habblaud server isn't responding. Check that it's running (npm run dev or npm start); we'll keep trying.");
+    else if (store.connection === 'closed') text = tr("Couldn't connect to the Habblaud server. Retrying…");
     setText(this.text, text);
-    // Reavalia o texto mesmo sem eventos novos.
+    // Re-evaluates text even without new events.
     this.tick ??= setTimeout(() => {
       this.tick = null;
       this.ctx.invalidate();
@@ -59,12 +59,12 @@ export class Splash implements UiComponent {
   }
 }
 
-/** Conectado e sem nenhuma sessão: o cartão "escritório vazio" aparece (e os painéis não repetem o aviso). */
+/** Connected and no sessions: the "empty office" card appears (and panels do not repeat the notice). */
 export function officeIsEmpty(ctx: UiContext): boolean {
   const { store } = ctx;
   const snap = store.snapshot;
   const connected = store.connection === 'open' || store.connection === 'mock';
-  // No timelapse, um momento sem ninguém não é "abra o Claude Code (ou o Codex)".
+  // In timelapse, a moment with nobody isn't "open Claude Code (or Codex)".
   return connected && !store.replaying && !!snap && snap.agents.length === 0 && snap.rooms.length === 0;
 }
 
@@ -80,7 +80,7 @@ export class EmptyState implements UiComponent {
     img.addEventListener('error', () => {
       img.remove();
       art.classList.add('is-css');
-      // Ilustração em CSS: mesa vazia, monitor apagado, planta e luminária.
+      // CSS illustration: empty desk, powered-off monitor, plant, and lamp.
       art.append(
         h('span', { class: 'ui-empty__lamp' }),
         h('span', { class: 'ui-empty__monitor' }),
@@ -91,12 +91,12 @@ export class EmptyState implements UiComponent {
     });
     art.append(img);
     this.hint = h('p', { class: 'ui-empty__text' });
-    this.demoBtn = h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('Ver demonstração'), on: { click: () => void this.startDemo() } });
+    this.demoBtn = h('button', { class: 'ui-btn ui-btn--primary', type: 'button', text: tr('View demo'), on: { click: () => void this.startDemo() } });
     this.el = h(
       'section',
       { class: 'ui-empty', hidden: true, attrs: { 'aria-labelledby': 'ui-empty-title' } },
       art,
-      h('h2', { class: 'ui-empty__title', text: tr('O escritório está vazio'), attrs: { id: 'ui-empty-title' } }),
+      h('h2', { class: 'ui-empty__title', text: tr('The office is empty'), attrs: { id: 'ui-empty-title' } }),
       this.hint,
       this.demoBtn,
     );
@@ -118,9 +118,9 @@ export class EmptyState implements UiComponent {
     this.ctx.invalidate();
     try {
       const ok = await this.ctx.store.setDemo(true);
-      if (!ok) this.ctx.announce(tr('Não foi possível ligar a demonstração.'));
+      if (!ok) this.ctx.announce(tr("Couldn't start the demo."));
     } catch {
-      this.ctx.announce(tr('Não foi possível falar com o servidor.'));
+      this.ctx.announce(tr("Couldn't reach the server."));
     } finally {
       this.busy = false;
       this.ctx.invalidate();
@@ -138,8 +138,8 @@ export class ConnectionBanner implements UiComponent {
   constructor(private ctx: UiContext) {
     this.text = h('span');
     this.retry = h('span', { class: 'ui-banner__retry' });
-    // A reconexão automática (com espera crescente) mora no store; o botão só antecipa a próxima tentativa.
-    const retryBtn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Tentar agora'), on: { click: () => ctx.store.reconnectNow() } });
+    // Automatic reconnection (with exponential backoff) lives in the store; the button just rushes the next attempt.
+    const retryBtn = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Try now'), on: { click: () => ctx.store.reconnectNow() } });
     this.el = h(
       'div',
       { class: 'ui-banner', role: 'alert', hidden: true },
@@ -172,14 +172,14 @@ export class ConnectionBanner implements UiComponent {
     setText(
       this.text,
       store.snapshot
-        ? tr('Sem conexão com o servidor do Habblaud há algum tempo. O escritório mostra o último estado conhecido.')
-        : tr('O servidor do Habblaud não responde. Confira se ele está rodando (npm run dev ou npm start).'),
+        ? tr('No connection to the Habblaud server for a while. The office shows the last known state.')
+        : tr("The Habblaud server isn't responding. Check that it's running (npm run dev or npm start)."),
     );
     const next = store.nextRetryAt;
     const secs = next === null ? 0 : Math.max(1, Math.ceil((next - Date.now()) / 1000));
-    setText(this.retry, next === null ? tr(' Tentando reconectar…') : tr(' Nova tentativa em {0} s.', [secs]));
+    setText(this.retry, next === null ? tr(' Trying to reconnect…') : tr(' Retrying in {0} s.', [secs]));
     setHidden(this.el, false);
-    // Atualiza a contagem regressiva a cada segundo enquanto o aviso estiver aberto.
+    // Updates the countdown every second while the banner is open.
     this.timer ??= setTimeout(() => {
       this.timer = null;
       this.ctx.invalidate();

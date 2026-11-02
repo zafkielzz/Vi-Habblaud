@@ -1,14 +1,14 @@
-/* ------------------------------------------------------------------ Habblaud World: social leve na cidade (Fase 5)
-   Os botões perto de mim (curtir, bater, cumprimentar), a roda de cumprimentos, o "Ir para HB-XXXX" no minimapa, o
-   fade do teletransporte e as ações nos cartões (curtir, bater, cumprimentar, bloquear, denunciar). Carregado junto
-   com a cena da cidade; as cores saem dos tokens do .ui-root (ui/styles.css). */
+/* ------------------------------------------------------------------ Habblaud World: lightweight city social (Phase 5)
+   Nearby buttons (like, knock, wave), wave wheel, "Go to HB-XXXX" on minimap,
+   teleport fade, and card actions (like, knock, wave, block, report). Loaded along
+   with the city scene; colors derived from .ui-root tokens (ui/styles.css). */
 
-/* os avisos do escritório na cidade sobem acima do "Ir para" do minimapa */
+/* office toasts in city view lift above minimap's "Go to" panel */
 .ui-root.is-city .ui-toasts {
   bottom: calc(226px + env(safe-area-inset-bottom));
 }
 
-/* ---- botões perto de mim */
+/* ---- nearby action dock */
 
 .ui-city-dock {
   position: fixed;
@@ -104,7 +104,7 @@
   font: 600 10px/15px var(--font-ui);
 }
 
-/* ---- a roda de cumprimentos */
+/* ---- wave wheel */
 
 .ui-city-wheel {
   position: fixed;
@@ -229,7 +229,7 @@
   text-align: center;
 }
 
-/* a seta que aponta para quem vai receber */
+/* arrow pointing towards the recipient */
 .ui-city-wheel__arrow {
   width: 0;
   height: 0;
@@ -259,7 +259,7 @@
   }
 }
 
-/* ---- "Ir para HB-XXXX" e "Visitar um prédio aleatório", em cima do minimapa */
+/* ---- "Go to HB-XXXX" and "Visit a random building", above minimap */
 
 .ui-city-tp {
   position: fixed;
@@ -361,7 +361,7 @@
   display: none;
 }
 
-/* ---- fade do teletransporte: escurece em íris e clareia no lugar novo */
+/* ---- teleport fade: iris fade-out and fade-in at new location */
 
 .ui-city-fade {
   position: fixed;
@@ -375,7 +375,7 @@
   display: none;
 }
 
-/* ---- botão de teste dos fogos (modo demonstração com ?fireworks=1) */
+/* ---- fireworks test button (demo mode with ?fireworks=1) */
 
 .ui-city-testfw {
   position: fixed;
@@ -391,7 +391,7 @@
   box-shadow: 0 8px 20px rgba(5, 7, 12, 0.45);
 }
 
-/* ---- ações nos cartões */
+/* ---- card actions */
 
 .ui-city-x {
   display: flex;
@@ -525,9 +525,9 @@
   }
 }
 
-/* celular: sem teclado, os botões ficam maiores e sem a tecla; o "Ir para" encolhe em cima do minimapa menor */
+/* mobile: without keyboard, buttons are larger and hide hotkeys; "Go to" shrinks over smaller minimap */
 @media (max-width: 600px) {
-  /* no canto de baixo à esquerda (a dica das teclas some no celular), só os ícones, do tamanho de um dedo */
+  /* bottom-left corner (key hints hidden on mobile), icons only, touch-sized */
   .ui-city-dock {
     left: calc(8px + env(safe-area-inset-left));
     bottom: calc(12px + env(safe-area-inset-bottom));

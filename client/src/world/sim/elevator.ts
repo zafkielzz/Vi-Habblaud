@@ -1,18 +1,18 @@
-// Elevadores da recepção: portas animadas (estados 0..4) que abrem enquanto alguém entra/sai.
+// Lobby elevators: animated doors (states 0..4) that open while someone enters/exits.
 
-/** Velocidade da porta: estados por segundo (0 -> 4 em ~0,45 s). */
+/** Door speed: states per second (0 -> 4 in ~0.45 s). */
 const DOOR_SPEED = 9;
-/** Tempo que a porta fica aberta depois do último uso. */
+/** Time the door stays open after the last use. */
 const HOLD_MS = 650;
-/** Intervalo entre pessoas saindo do mesmo elevador. */
+/** Interval between people exiting the same elevator. */
 export const ELEVATOR_STAGGER_MS = 520;
 
 export class Elevator {
-  /** Abertura contínua da porta, 0 (fechada) .. 4 (aberta). */
+  /** Continuous door opening, 0 (closed) .. 4 (open). */
   door = 0;
   private holdUntil = 0;
   private users = new Set<string>();
-  /** Próximo instante livre para alguém surgir (fila de chegada). */
+  /** Next free instant for someone to appear (arrival queue). */
   nextAppearAt = 0;
 
   constructor(
@@ -45,7 +45,7 @@ export class Elevator {
     this.door = Math.max(0, Math.min(4, this.door + (want ? 1 : -1) * DOOR_SPEED * dt));
   }
 
-  /** Reserva um horário para surgir dentro do elevador (escalonando chegadas simultâneas). */
+  /** Reserves a time slot to appear inside the elevator (staggering simultaneous arrivals). */
   reserveAppear(now: number): number {
     const at = Math.max(now, this.nextAppearAt);
     this.nextAppearAt = at + ELEVATOR_STAGGER_MS;

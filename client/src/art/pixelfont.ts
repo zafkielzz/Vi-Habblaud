@@ -1,6 +1,6 @@
-// Fonte bitmap minúscula (3x5) para rótulos nítidos na página de prévia. Puro.
-// Acentos e til ficam 2 linhas ACIMA do glifo (y-3..y-2, com 1 linha de folga) e a cedilha 2 linhas
-// abaixo (y+5..y+6): reserve esse espaço ao posicionar rótulos com acentos.
+// Tiny bitmap font (3x5) for sharp labels on preview page. Pure.
+// Accents and tilde sit 2 lines ABOVE the glyph (y-3..y-2, with 1 line gap) and cedilla 2 lines
+// below (y+5..y+6): keep this space in mind when positioning accented labels.
 const GLYPHS: Readonly<Record<string, string>> = {
   a: '010101111101101', b: '110101110101110', c: '011100100100011', d: '110101101101110', e: '111100110100111',
   f: '111100110100100', g: '011100101101011', h: '101101111101101', i: '111010010010111', j: '001001001101010',
@@ -15,7 +15,7 @@ const GLYPHS: Readonly<Record<string, string>> = {
   '+': '000010111010000',
 };
 
-/** Marcas diacríticas: linhas de 3 colunas e deslocamento vertical da primeira linha. */
+/** Diacritic marks: 3-column rows and vertical offset of first row. */
 const MARKS = {
   acute: { dy: -3, rows: ['001', '010'] },
   grave: { dy: -3, rows: ['100', '010'] },
@@ -32,12 +32,12 @@ const DIACRITIC: Readonly<Record<string, readonly [string, Mark]>> = {
   ó: ['o', 'acute'], ô: ['o', 'circ'], õ: ['o', 'tilde'], ú: ['u', 'acute'], ç: ['c', 'cedilla'],
 };
 
-/** Largura em px de `text` desenhado por pixelText (3 px por letra + 1 px de espaço). */
+/** Width in px of `text` drawn by pixelText (3 px per letter + 1 px spacing). */
 export function pixelTextWidth(text: string): number {
   return Math.max(0, [...text].length * 4 - 1);
 }
 
-/** Desenha texto em minúsculas (3x5 por letra, 1px de espaço, com acentos e cedilha) via fillRect. */
+/** Draws lowercase text (3x5 per letter, 1px spacing, with accents and cedilla) via fillRect. */
 export function pixelText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string): number {
   ctx.fillStyle = color;
   let cx = x;

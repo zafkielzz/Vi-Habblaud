@@ -1,4 +1,4 @@
-// Hash FNV-1a 32-bit: determinístico, rápido e suficiente para sementes visuais.
+// FNV-1a 32-bit hash: deterministic, fast, and sufficient for visual seeds.
 export function hash32(input: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
@@ -8,7 +8,7 @@ export function hash32(input: string): number {
   return h >>> 0;
 }
 
-/** PRNG mulberry32 — use com uma semente de hash32 para sequências reprodutíveis. */
+/** mulberry32 PRNG — use with a hash32 seed for reproducible sequences. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {

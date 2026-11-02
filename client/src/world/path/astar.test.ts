@@ -14,8 +14,8 @@ function pairs(out: number[]): [number, number][] {
   return r;
 }
 
-describe('A* 4 direções', () => {
-  it('encontra o caminho mais curto contornando paredes', () => {
+describe('A* 4 directions', () => {
+  it('finds shortest path around walls', () => {
     const g = gridFrom(['.....', '.###.', '...#.', '.#...']);
     const pf = new PathFinder(g);
     const out: number[] = [];
@@ -23,7 +23,7 @@ describe('A* 4 direções', () => {
     const p = pairs(out);
     expect(p[p.length - 1]).toEqual([4, 3]);
     expect(p.length).toBe(7);
-    // passos adjacentes em 4 direções e só por células livres
+    // adjacent steps in 4 directions and only through free cells
     let prev: [number, number] = [0, 0];
     for (const [x, y] of p) {
       expect(Math.abs(x - prev[0]) + Math.abs(y - prev[1])).toBe(1);
@@ -32,7 +32,7 @@ describe('A* 4 direções', () => {
     }
   });
 
-  it('retorna false quando não há caminho e true (vazio) quando já está no destino', () => {
+  it('returns false when no path exists and true (empty) when already at destination', () => {
     const g = gridFrom(['..#..', '..#..', '..#..']);
     const pf = new PathFinder(g);
     const out: number[] = [1, 2, 3];
@@ -42,7 +42,7 @@ describe('A* 4 direções', () => {
     expect(out).toEqual([]);
   });
 
-  it('evita assentos quando há alternativa, mas pode terminar num assento', () => {
+  it('avoids seats when an alternative exists, but can end on a seat', () => {
     const g = gridFrom(['.s.', '...']);
     const pf = new PathFinder(g);
     const out: number[] = [];
@@ -52,14 +52,14 @@ describe('A* 4 direções', () => {
     expect(pairs(out)).toEqual([[1, 0]]);
   });
 
-  it('pode partir de uma célula bloqueada (personagem num assento/elevador)', () => {
+  it('can start from a blocked cell (character on seat/elevator)', () => {
     const g = gridFrom(['#..', '...']);
     const pf = new PathFinder(g);
     const out: number[] = [];
     expect(pf.find(0, 0, 2, 1, out)).toBe(true);
   });
 
-  it('prefere trajetos com menos curvas', () => {
+  it('prefers paths with fewer turns', () => {
     const g = gridFrom(['......', '......', '......', '......']);
     const pf = new PathFinder(g);
     const out: number[] = [];
@@ -77,7 +77,7 @@ describe('A* 4 direções', () => {
     expect(turns).toBeLessThanOrEqual(1);
   });
 
-  it('reaproveita buffers entre buscas sem vazar estado', () => {
+  it('reuses buffers between searches without leaking state', () => {
     const g = gridFrom(['.....', '.....']);
     const pf = new PathFinder(g);
     const out: number[] = [];
@@ -87,7 +87,7 @@ describe('A* 4 direções', () => {
     }
   });
 
-  it('acha o tile caminhável mais próximo', () => {
+  it('finds nearest walkable tile', () => {
     const g = gridFrom(['###', '#.#', '###']);
     expect(g.nearestWalkable(0, 0)).toEqual({ x: 1, y: 1 });
     expect(g.nearestWalkable(1, 1)).toEqual({ x: 1, y: 1 });

@@ -1,12 +1,12 @@
-// Despacho dos móveis por kind (puro). Cada combinação (kind, variant, state, variação) é gerada uma
-// vez e guardada em cache por quem chama (ver art/index.ts).
+// Furniture dispatch by kind (pure). Each combination (kind, variant, state, variation) is generated
+// once and cached by the caller (see art/index.ts).
 import { FURNITURE, type FurnitureKind } from '../api';
 import { trim, type BufFurniture } from '../core/sprite';
 import * as C from './common';
 import * as O from './office';
 import * as W from './wall';
 
-/** Quantas variações de detalhes (seed) cada kind tem; os demais ignoram a seed. */
+/** How many detail variations (seed) each kind has; others ignore the seed. */
 export const SEED_VARIATIONS: Partial<Record<FurnitureKind, number>> = {
   desk: 6,
   desk_back: 4,
@@ -20,7 +20,7 @@ export const SEED_VARIATIONS: Partial<Record<FurnitureKind, number>> = {
   plant_tall: 3,
 };
 
-/** Normaliza variante/estado para valores válidos do catálogo. */
+/** Normalizes variant/state to valid catalog values. */
 export function normalizeFurniture(kind: FurnitureKind, variant?: string, state?: number, seed?: number): { variant: string | undefined; state: number; vseed: number } {
   const def = FURNITURE[kind];
   const v = def.variants ? (variant && def.variants.includes(variant) ? variant : def.variants[0]) : undefined;
@@ -128,7 +128,7 @@ function build(kind: FurnitureKind, variant: string | undefined, state: number, 
   }
 }
 
-/** Gera os sprites (em buffer) de um móvel, recortados ao conteúdo. */
+/** Generates the sprites (buffered) for a piece of furniture, trimmed to content. */
 export function renderFurniture(kind: FurnitureKind, variant?: string, state?: number, seed?: number): BufFurniture {
   const n = normalizeFurniture(kind, variant, state, seed);
   const f = build(kind, n.variant, n.state, n.vseed);

@@ -1,16 +1,16 @@
-// Binário falso do Codex para os testes das mensagens: imita as saídas reais do `codex queue` (0.162) e anota cada
-// chamada (argumentos e CODEX_HOME) num arquivo. Nunca chama o Codex de verdade.
-// - thread que começa com 0199aaaa: "Error: ... no rollout found for thread id ..." no stderr, retorno 1;
-// - thread que começa com 0199bbbb: demora 10 s (para o prazo);
-// - opção proibida (-c, --enable, --disable, --no-daemon) ou argumento faltando: retorno 2;
-// - senão: "Queued message <id> for thread <thread>." no stdout, retorno 0.
+// Fake Codex binary for message tests: mimics real `codex queue` (0.162) output and records each
+// call (arguments and CODEX_HOME) in a file. Never calls real Codex.
+// - thread starting with 0199aaaa: "Error: ... no rollout found for thread id ..." on stderr, exit code 1;
+// - thread starting with 0199bbbb: delays 10 s (for timeout testing);
+// - forbidden flag (-c, --enable, --disable, --no-daemon) or missing argument: exit code 2;
+// - otherwise: "Queued message <id> for thread <thread>." on stdout, exit code 0.
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CODEX_BIN_NAME } from '../messages/codex';
 
 /**
- * O binário falso roda aqui? Ele é um script com shebang, e no Windows o execFile (sem shell) só roda .exe: lá os testes
- * que o executam ficam de fora (a busca pelo nome segue testada).
+ * Does the fake binary run here? It is a script with a shebang, and on Windows execFile (without a shell) only runs
+ * .exe: there, tests executing it are skipped (searching by name remains tested).
  */
 export const FAKE_CODEX_RUNS = process.platform !== 'win32';
 
@@ -36,7 +36,7 @@ if (args[0] !== 'queue' || args.some((a) => /^(-c|--config|--enable|--disable|--
 }
 `;
 
-/** Grava o binário falso como <dir>/codex (no Windows, codex.exe: o nome que a busca procura) e devolve o caminho. */
+/** Writes the fake binary as <dir>/codex (on Windows, codex.exe: the name searched for) and returns the path. */
 export function writeFakeCodex(dir: string): string {
   const bin = join(dir, CODEX_BIN_NAME);
   writeFileSync(bin, SCRIPT);
@@ -44,7 +44,7 @@ export function writeFakeCodex(dir: string): string {
   return bin;
 }
 
-/** Chamadas anotadas pelo binário falso. */
+/** Calls recorded by the fake binary. */
 export function fakeCodexCalls(log: string): Array<{ args: string[]; codexHome?: string }> {
   if (!existsSync(log)) return [];
   return readFileSync(log, 'utf8')

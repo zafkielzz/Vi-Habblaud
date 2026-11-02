@@ -25,7 +25,7 @@ export function seasonalCostume(theme: SeasonalTheme, seed: number): CharacterFr
   return undefined;
 }
 
-/** Reutiliza footprints de plantas: nenhuma nova colisão ou mudança de caminhos. */
+/** Reuses plant footprints: no new collisions or pathing changes. */
 export function seasonalFurniture(theme: SeasonalTheme, kind: FurnitureKind, area: AreaLayout, seed: number): Sprite | null {
   if (theme === 'none' || area.kind === 'restroom') return null;
   if (kind === 'plant_tall') {
@@ -46,7 +46,7 @@ export function seasonalWallStyle(theme: SeasonalTheme, original: WallStyle): Wa
   return { ...original, base: mix(original.base, theme === 'christmas' ? '#ffe3b4' : '#bc97d1', 0.18), trim: theme === 'christmas' ? '#4e7756' : '#725486' };
 }
 
-/** Motivos de tapete (cacheados junto com o piso). */
+/** Rug patterns (cached alongside the floor). */
 export function decorateSeasonalRug(ctx: CanvasRenderingContext2D, theme: SeasonalTheme, rug: { x: number; y: number; w: number; h: number }): void {
   if (theme === 'none') return;
   const x = Math.round(rug.x), y = Math.round(rug.y), w = Math.floor(rug.w), h = Math.floor(rug.h);
@@ -76,7 +76,7 @@ export function decorateSeasonalRug(ctx: CanvasRenderingContext2D, theme: Season
   ctx.restore();
 }
 
-/** Enfeites no alto da parede, longe das telas e placas. Os vãos ficam livres. */
+/** Decorations at the top of the wall, away from screens and plaques. Doorways remain clear. */
 export function decorateSeasonalWall(ctx: CanvasRenderingContext2D, theme: SeasonalTheme, wall: WallSegment): void {
   if (theme === 'none' || wall.kind !== 'face') return;
   ctx.save();
@@ -94,7 +94,7 @@ export function decorateSeasonalWall(ctx: CanvasRenderingContext2D, theme: Seaso
     }
   }
   if (theme === 'halloween') {
-    // Teias pequenas nos cantos; não cobrem os equipamentos.
+    // Small cobwebs in corners; do not cover equipment.
     ctx.strokeStyle = '#d6bfdd';
     ctx.lineWidth = 1;
     for (const side of [1, -1]) {
@@ -119,7 +119,7 @@ export function decorateSeasonalWall(ctx: CanvasRenderingContext2D, theme: Seaso
   ctx.restore();
 }
 
-/** Guirlandas nas molduras dos elevadores (sem cobrir a porta animada). */
+/** Wreaths on elevator frames (without covering the animated door). */
 export function decorateElevator(ctx: CanvasRenderingContext2D, theme: SeasonalTheme, x: number, y: number): void {
   if (theme === 'none') return;
   const sprite = prop(theme === 'christmas' ? 'wreath' : 'bat');
@@ -143,7 +143,7 @@ function glowSprite(theme: SeasonalTheme): HTMLCanvasElement {
   return canvas;
 }
 
-/** Luz decorativa suave, limitada à face da parede. Não interfere com salas apagadas. */
+/** Soft decorative light, limited to the wall face. Does not interfere with unlit rooms. */
 export function drawSeasonalLights(ctx: CanvasRenderingContext2D, theme: SeasonalTheme, layout: AreaLayout, light: number): void {
   if (theme === 'none' || light <= 0.01) return;
   ctx.save();

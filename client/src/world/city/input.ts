@@ -1,24 +1,24 @@
-// Entrada da cidade: setas/WASD andam (Shift corre), clique/toque anda até o ponto (A*), E/Enter perto de uma
-// porta, arrastar move a câmera (e ela para de seguir o jogador até ele andar de novo), roda/pinça e +/− dão zoom.
-// O teclado é ignorado com um campo, um diálogo ou um popover em foco (Configurações continua usável na cidade).
+// City input: arrow keys/WASD walk (Shift runs), click/tap walks to point (A*), E/Enter near a
+// door, drag pans camera (which stops following player until walking again), wheel/pinch and +/− zoom.
+// Keyboard is ignored when input, dialog, or popover has focus (Settings remains usable in city).
 import { modalOpen } from '../input';
 import type { Camera } from '../camera';
 import type { MoveIntent } from './players';
 
 export interface CityInputHandlers {
-  /** A cena está na tela (senão, nada). */
+  /** Scene is on screen (otherwise, no-op). */
   active(): boolean;
   hover(sx: number, sy: number, inside: boolean): void;
-  /** Clique ou toque sem arrastar (px CSS do canvas). */
+  /** Click or tap without dragging (canvas CSS px). */
   click(sx: number, sy: number, mods: { shift: boolean }): void;
-  /** O usuário mexeu na câmera: ela para de seguir o jogador. */
+  /** User interacted with camera: stops following player. */
   interact(): void;
   zoomStep(steps: number, sx?: number, sy?: number): void;
-  /** E ou Enter. */
+  /** E or Enter. */
   use(): void;
-  /** 0: volta a câmera para o jogador. */
+  /** 0: returns camera to player. */
   recenter(): void;
-  /** Alguma tecla de andar foi apertada. */
+  /** A movement key was pressed. */
   moved(): void;
 }
 
@@ -40,7 +40,7 @@ function isTyping(t: EventTarget | null): boolean {
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName ?? '') || el.getAttribute?.('role') === 'radio');
 }
 
-/** Teclas pressionadas → intenção de movimento (puro, testável). */
+/** Pressed keys → movement intent (pure, testable). */
 export function intentFrom(keys: ReadonlySet<string>, shift: boolean): MoveIntent {
   let dx = 0;
   let dy = 0;
@@ -53,7 +53,7 @@ export function intentFrom(keys: ReadonlySet<string>, shift: boolean): MoveInten
   return { dx: Math.sign(dx), dy: Math.sign(dy), run: shift };
 }
 
-/** Normaliza a tecla (WASD em maiúscula com Shift, layouts que mandam "W"). */
+/** Normalizes key (uppercase WASD with Shift, layouts that send "W"). */
 export function moveKeyOf(e: { key: string; code?: string }): string | null {
   if (MOVE_KEYS[e.key]) return e.key;
   const low = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -99,7 +99,7 @@ export class CityInput {
     on(document, 'visibilitychange', () => this.clearKeys());
   }
 
-  /** O que as teclas pedem agora. */
+  /** Current intent from pressed keys. */
   intent(): MoveIntent {
     return intentFrom(this.keys, this.shift);
   }
@@ -169,7 +169,7 @@ export class CityInput {
     try {
       this.canvas.setPointerCapture(e.pointerId);
     } catch {
-      // ponteiro já liberado
+      // pointer already released
     }
     if (this.pointers.size === 1) {
       this.downX = p.x;
@@ -238,7 +238,7 @@ export class CityInput {
     const p = this.local(e);
     const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
     if (e.ctrlKey) {
-      // pinça do trackpad: zoom contínuo, encaixa num nível ao parar
+      // trackpad pinch: continuous zoom, snaps to level on settle
       this.camera.zoomAt(this.camera.zoom * Math.exp(-delta * 0.012), p.x, p.y, Date.now(), false);
       if (this.wheelSettle) clearTimeout(this.wheelSettle);
       this.wheelSettle = setTimeout(() => this.camera.settle(Date.now()), 180);

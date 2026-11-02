@@ -1,10 +1,10 @@
-// Terminal do Codex: converte as linhas do rollout em TerminalEntry (prompts, respostas, raciocínio resumido,
-// comandos com a saída, mudanças de arquivo, chamadas MCP), com segredos mascarados e textos truncados pelas mesmas
-// regras do terminal do Claude Code (sources/terminal.ts).
+// Codex terminal: converts rollout lines into TerminalEntry (prompts, responses, summarized reasoning,
+// commands with output, file changes, MCP calls), with secrets masked and text truncated by the same
+// rules as the Claude Code terminal (sources/terminal.ts).
 //
-// No formato paginated a conversa sai dos `item_completed`; os `response_item` são o contexto mandado ao modelo (há
-// mensagens injetadas) e ficam de fora. No legacy (threads antigos), o básico: user_message, agent_message,
-// agent_reasoning e os pares function_call/function_call_output.
+// In paginated format, conversation comes from `item_completed`; `response_item` entries are context sent
+// to the model (contains injected messages) and are excluded. In legacy (older threads), the basics:
+// user_message, agent_message, agent_reasoning, and pairs of function_call/function_call_output.
 import type { TerminalEntry, TerminalInputKind } from '../../../shared/types';
 import { formatDuration, maskSecrets } from '../../../shared/activity';
 import { marked, oneLine, prepare, RESULT_MAX, RESULT_MAX_LINES, TEXT_MAX, THINKING_MAX, toolView, INPUT_MAX, type TerminalParser } from '../terminal';
@@ -50,14 +50,14 @@ function toMs(v: unknown): number | undefined {
   return Number.isNaN(t) ? undefined : t;
 }
 
-/** Texto de um resultado MCP ({content: [{type: 'text', text}...]}) ou de uma saída de função. */
+/** Text of an MCP result ({content: [{type: 'text', text}...]}) or a function output. */
 function resultText(raw: unknown): string {
   if (typeof raw === 'string') {
     try {
       const j = rec(JSON.parse(raw));
       if (j && typeof j.output === 'string') return j.output;
     } catch {
-      // texto puro
+      // plain text
     }
     return raw;
   }
@@ -78,7 +78,7 @@ class CodexTerminalParser implements TerminalParser {
   private cwd?: string;
   private lastAt?: number;
   private seq = 0;
-  /** Chamadas do legacy (call_id → nome), para rotular o resultado. */
+  /** Legacy calls (call_id → name), to label the result. */
   private readonly calls = new Map<string, string>();
 
   push(line: string): TerminalEntry[] {
@@ -86,7 +86,7 @@ class CodexTerminalParser implements TerminalParser {
     try {
       this.line(line);
     } catch {
-      // Linha estranha demais: fica o que já tiver saído dela; a leitura segue.
+      // Line too malformed: keep whatever was already produced from it; reading continues.
     }
     return this.out;
   }
@@ -126,25 +126,25 @@ class CodexTerminalParser implements TerminalParser {
       case 'event_msg':
         return this.event(p, at, key);
       case 'response_item': {
-        // Resposta entregue no code mode do app: vale em qualquer formato (o id é o da chamada que a mandou).
+        // Response delivered in app code mode: valid in any format (ID is that of the call that sent it).
         const delivered = deliveredMessage(j);
         if (delivered) return this.assistant(delivered.id ?? key, at, delivered.text);
         if (this.mode === 'legacy') this.responseItem(p, at, key);
         return;
       }
       case 'compacted':
-        if (this.mode === 'legacy') this.sys(key, at, tr('Conversa compactada'));
+        if (this.mode === 'legacy') this.sys(key, at, tr('Conversation compacted'));
         return;
       default:
         return;
     }
   }
 
-  // ---------------------------------------------------------------- entradas
+  // ---------------------------------------------------------------- entries
 
   private user(id: string, at: number, raw: string, images = 0): void {
     const clean = promptText(raw);
-    const pics = images ? Array.from({ length: Math.min(images, 10) }, () => tr('[imagem]')).join(' ') : '';
+    const pics = images ? Array.from({ length: Math.min(images, 10) }, () => tr('[image]')).join(' ') : '';
     const text = marked(prepare([clean, pics].filter(Boolean).join('\n'), TEXT_MAX));
     if (text) this.emit({ kind: 'user', id: `${id}:u`, at, text });
   }
@@ -179,7 +179,7 @@ class CodexTerminalParser implements TerminalParser {
 
   private result(toolId: string, at: number, raw: string, error: boolean): void {
     const p = prepare(raw, RESULT_MAX, RESULT_MAX_LINES);
-    const e: ResultEntry = { kind: 'result', id: `${toolId}:r`, at, toolUseId: toolId, text: p.text || tr('(sem saída)') };
+    const e: ResultEntry = { kind: 'result', id: `${toolId}:r`, at, toolUseId: toolId, text: p.text || tr('(no output)') };
     if (error) e.error = true;
     if (p.truncated) e.truncated = true;
     this.emit(e);
@@ -195,12 +195,12 @@ class CodexTerminalParser implements TerminalParser {
       case 'turn_complete': {
         const ms = num(p.duration_ms);
         const err = rec(p.error);
-        if (err) this.sys(`${str(p.turn_id) ?? key}:err`, at, tr('Erro: {0}', [oneLine(str(err.message) ?? tr('desconhecido'), 160)]), { level: 'error' });
-        if (ms !== undefined && ms >= 0) this.sys(`${str(p.turn_id) ?? key}:done`, at, tr('Turno concluído em {0}', [formatDuration(ms)]));
+        if (err) this.sys(`${str(p.turn_id) ?? key}:err`, at, tr('Error: {0}', [oneLine(str(err.message) ?? tr('unknown'), 160)]), { level: 'error' });
+        if (ms !== undefined && ms >= 0) this.sys(`${str(p.turn_id) ?? key}:done`, at, tr('Turn completed in {0}', [formatDuration(ms)]));
         return;
       }
       case 'turn_aborted':
-        if (p.reason === 'interrupted' || p.reason === undefined) this.sys(`${str(p.turn_id) ?? key}:int`, at, tr('Interrompido pelo usuário'), { level: 'warn' });
+        if (p.reason === 'interrupted' || p.reason === undefined) this.sys(`${str(p.turn_id) ?? key}:int`, at, tr('Interrupted by user'), { level: 'warn' });
         return;
       // ---- legacy
       case 'user_message':
@@ -219,7 +219,7 @@ class CodexTerminalParser implements TerminalParser {
         return this.command(str(p.call_id) ?? key, at, p.command, str(p.aggregated_output) ?? str(p.formatted_output) ?? str(p.stdout) ?? '', num(p.exit_code), str(p.status));
       case 'context_compacted':
         if (this.mode === 'paginated') return;
-        return this.sys(key, at, tr('Conversa compactada'));
+        return this.sys(key, at, tr('Conversation compacted'));
       default:
         return;
     }
@@ -250,7 +250,7 @@ class CodexTerminalParser implements TerminalParser {
         return this.fileChange(id, at, item.changes, str(item.status));
       case 'McpToolCall': {
         this.mode ??= 'paginated';
-        // Code mode: a mensagem para você é a resposta (mesmo id da entrega gravada como response_item).
+        // Code mode: message to user is the response (same ID as delivery saved as response_item).
         const said = userMessagingText(item.server, item.tool, item.arguments);
         if (said) return this.assistant(id, at, said);
         const name = mcpName(item.server, item.tool);
@@ -264,7 +264,7 @@ class CodexTerminalParser implements TerminalParser {
       case 'ImageView':
         return this.tool(id, at, 'view_image', toolView('Read', { file_path: pathFromUri(item.path) ?? '' }, this.cwd));
       case 'ContextCompaction':
-        return this.sys(id, at, tr('Conversa compactada'));
+        return this.sys(id, at, tr('Conversation compacted'));
       case 'CollabAgentToolCall': {
         const tool = str(item.tool) ?? 'spawn_agent';
         return this.tool(id, at, tool, toolView(tool, str(item.prompt) ? { prompt: item.prompt } : {}, this.cwd));
@@ -279,9 +279,9 @@ class CodexTerminalParser implements TerminalParser {
   private command(id: string, at: number, cmd: unknown, output: string, exitCode: number | undefined, status: string | undefined): void {
     const command = commandText(cmd);
     this.tool(id, at, 'Bash', toolView('Bash', { command }, this.cwd));
-    if (status === 'declined') return this.result(id, at, tr('Recusado pelo usuário'), true);
+    if (status === 'declined') return this.result(id, at, tr('Denied by the user'), true);
     const failed = status === 'failed' || (exitCode !== undefined && exitCode !== 0);
-    const text = failed && exitCode !== undefined && exitCode !== 0 ? tr('Código de saída {0}\n{1}', [exitCode, output]) : output;
+    const text = failed && exitCode !== undefined && exitCode !== 0 ? tr('Exit code {0}\n{1}', [exitCode, output]) : output;
     this.result(id, at, text, failed);
   }
 
@@ -289,36 +289,36 @@ class CodexTerminalParser implements TerminalParser {
     const changes = fileChanges(raw);
     const rel = (p: string) => toolView('Read', { file_path: p }, this.cwd).title.replace(/^Read\(|\)$/g, '');
     const names = changes.map((c) => rel(c.movePath ?? c.path));
-    const arg = names.length > 2 ? tr('{0} e mais {1}', [names[0], names.length - 1]) : names.join(', ');
+    const arg = names.length > 2 ? tr('{0} and {1} more', [names[0], names.length - 1]) : names.join(', ');
     const tool = changes.length && changes.every((c) => c.kind === 'add') ? 'Write' : 'Edit';
     const diff = changes
       .slice(0, 12)
       .map((c) => {
-        const head = `*** ${c.kind === 'add' ? tr('Novo') : c.kind === 'delete' ? tr('Apagado') : tr('Alterado')}: ${rel(c.path)}${c.movePath ? ` → ${rel(c.movePath)}` : ''}`;
+        const head = `*** ${c.kind === 'add' ? tr('New') : c.kind === 'delete' ? tr('Deleted') : tr('Modified')}: ${rel(c.path)}${c.movePath ? ` → ${rel(c.movePath)}` : ''}`;
         const body = c.kind === 'update' ? c.text : c.text.replace(/\n$/, '').split('\n').map((l) => `${c.kind === 'add' ? '+' : '-'} ${l}`).join('\n');
         return `${head}\n${body}`;
       })
       .join('\n');
     const input = diff.trim() ? marked(prepare(diff, INPUT_MAX, Infinity, false)) : '';
     this.tool(id, at, tool, input ? { title: arg ? `${tool}(${arg})` : tool, input, inputKind: 'diff' } : { title: arg ? `${tool}(${arg})` : tool });
-    if (status === 'declined') this.result(id, at, tr('Recusado pelo usuário'), true);
-    else if (status === 'failed') this.result(id, at, tr('A mudança não foi aplicada'), true);
+    if (status === 'declined') this.result(id, at, tr('Denied by the user'), true);
+    else if (status === 'failed') this.result(id, at, tr("The change wasn't applied"), true);
   }
 
-  // ---------------------------------------------------------------- response_item (só no legacy)
+  // ---------------------------------------------------------------- response_item (legacy only)
 
   private responseItem(p: Rec, at: number, key: string): void {
     switch (p.type) {
       case 'function_call':
       case 'custom_tool_call': {
         const id = str(p.call_id) ?? key;
-        const name = str(p.name) ?? 'ferramenta';
+        const name = str(p.name) ?? 'tool';
         this.calls.set(id, name);
         if (this.calls.size > 512) this.calls.delete(this.calls.keys().next().value as string);
         if (p.type === 'custom_tool_call' && name === 'apply_patch') {
           const patch = typeof p.input === 'string' ? p.input : '';
           const files = patchFiles(patch).map((f) => f.path);
-          const title = files.length ? `Edit(${files.length > 2 ? tr('{0} e mais {1}', [files[0], files.length - 1]) : files.join(', ')})` : 'Edit';
+          const title = files.length ? `Edit(${files.length > 2 ? tr('{0} and {1} more', [files[0], files.length - 1]) : files.join(', ')})` : 'Edit';
           const input = patch.trim() ? marked(prepare(patch, INPUT_MAX, Infinity, false)) : '';
           return this.tool(id, at, 'Edit', input ? { title, input, inputKind: 'diff' } : { title });
         }
@@ -345,7 +345,7 @@ class CodexTerminalParser implements TerminalParser {
   }
 }
 
-/** Parser com estado do terminal do Codex: uma instância por leitura de arquivo, alimentada na ordem do arquivo. */
+/** Stateful parser for Codex terminal: one instance per file read, fed in file order. */
 export function createCodexTerminalParser(): TerminalParser {
   return new CodexTerminalParser();
 }

@@ -1,44 +1,44 @@
-// Fontes de agentes (uma por ferramenta: Claude Code, Codex...) e o que o resto do servidor espera delas.
+// Agent sources (one per tool: Claude Code, Codex...) and what the rest of the server expects from them.
 //
-// Cada fonte observa as sessões ABERTAS da sua ferramenta e alimenta o Office (addMain, addActivity...). O
-// servidor liga todas por um SourceSet: o snapshot (meta.sources), o /api/health, o terminal e o caminho do
-// transcript de um agente passam por ele, sem saber de qual ferramenta o agente vem. Hoje só existe a do Claude
-// Code (sources/watcher.ts, ClaudeWatcher); a do Codex entra pelo mesmo contrato.
+// Each source watches OPEN sessions of its tool and feeds the Office (addMain, addActivity...). The
+// server binds them all via a SourceSet: snapshot (meta.sources), /api/health, terminal, and agent
+// transcript path go through it, agnostic of which tool the agent comes from. Currently there is Claude
+// Code (sources/watcher.ts, ClaudeWatcher); Codex connects through the same contract.
 //
-// Histórico do terminal (sessões recentes, abertas ou encerradas): um HistoryProvider por ferramenta, juntos num
-// HistorySet que atende as rotas /api/sessions/*. O do Claude Code é o SessionHistory (sources/history.ts).
+// Terminal history (recent sessions, open or closed): one HistoryProvider per tool, united in a
+// HistorySet serving /api/sessions/* routes. Claude Code's is SessionHistory (sources/history.ts).
 //
-// Boot: a fonte que reconstrói as sessões abertas ao começar chama office.beginBoot() antes e office.endBoot()
-// depois, SEMPRE em par (num `finally`, inclusive num boot assíncrono). O Office conta os boots: enquanto alguma
-// fonte boota não há avisos e o feed fica guardado para sair em ordem cronológica no fim do último boot (uma fonte
-// que nunca chamasse endBoot calaria os avisos de todas).
+// Boot: a source reconstructing open sessions at startup calls office.beginBoot() before and office.endBoot()
+// after, ALWAYS in pairs (in a `finally`, including async boot). Office tracks boot counts: while any
+// source boots there are no alerts and feed is buffered to flush in chronological order at end of last boot (a
+// source never calling endBoot would silence alerts for all).
 import type { Provider, RecentSession, SourceInfo } from '../../shared/types';
 import { errMsg, log } from '../log';
 import { HISTORY_LIMIT } from './history';
 import { createTerminalParser, type TerminalParser } from './terminal';
 import { tr } from '../../shared/i18n';
 
-/** Uma fonte de agentes: observa as sessões abertas de uma ferramenta e alimenta o Office. */
+/** An agent source: watches open sessions of a tool and feeds the Office. */
 export interface AgentSource {
   readonly provider: Provider;
   /**
-   * Boot (reconstrói as sessões abertas, entre office.beginBoot/endBoot) e o acompanhamento ao vivo. Uma fonte
-   * síncrona termina o boot antes de voltar; uma assíncrona devolve a promessa (falhas só vão para o log).
+   * Boot (reconstructs open sessions, between office.beginBoot/endBoot) and live tracking. A synchronous
+   * source finishes boot before returning; an async one returns a promise (failures only go to log).
    */
   start(): void | Promise<void>;
   stop(): void;
-  /** Uma entrada por conta observada (meta.sources do snapshot e /api/health). */
+  /** One entry per observed account (snapshot meta.sources and /api/health). */
   sources(): SourceInfo[];
-  /** Arquivo da conversa de um agente presente desta fonte; undefined se o agente não é dela (ou ainda sem arquivo). */
+  /** Conversation file for a present agent of this source; undefined if agent is not from it (or no file yet). */
   transcriptPathOf(agentId: string): string | undefined;
   /**
-   * Parser do terminal para a conversa de um agente desta fonte: um NOVO a cada chamada (parsers guardam estado).
-   * Ausente, ou undefined, = o do Claude Code (createTerminalParser).
+   * Terminal parser for an agent's conversation from this source: NEW on each call (parsers are stateful).
+   * Missing, or undefined, = Claude Code's parser (createTerminalParser).
    */
   terminalParser?(agentId: string): TerminalParser | undefined;
 }
 
-/** Todas as fontes de agentes ligadas, vistas como uma só. */
+/** All connected agent sources, viewed as one. */
 export class SourceSet {
   private readonly list: AgentSource[] = [];
 
@@ -46,7 +46,7 @@ export class SourceSet {
     for (const s of sources) this.add(s);
   }
 
-  /** Acrescenta uma fonte (antes de start()). */
+  /** Adds a source (before start()). */
   add(source: AgentSource): void {
     this.list.push(source);
   }
@@ -55,20 +55,20 @@ export class SourceSet {
     return this.list;
   }
 
-  /** A fonte de uma ferramenta, se estiver ligada. */
+  /** A tool's source, if connected. */
   of(provider: Provider): AgentSource | undefined {
     return this.list.find((s) => s.provider === provider);
   }
 
   /**
-   * Liga as fontes na ordem em que entraram: as síncronas terminam o boot aqui mesmo (antes de o hub começar a
-   * transmitir). A falha de uma não impede as outras: vai para o log. A promessa resolve quando as assíncronas
-   * terminarem de ligar.
+   * Starts sources in order added: synchronous ones finish boot right here (before hub starts
+   * broadcasting). Failure of one does not block others: goes to log. Promise resolves when
+   * async sources finish connecting.
    */
   start(): Promise<void> {
     const pending: Promise<void>[] = [];
     for (const s of this.list) {
-      const failed = (err: unknown) => log.error(tr('Fonte de agentes {0}: falha ao iniciar ({1}).', [s.provider, errMsg(err)]));
+      const failed = (err: unknown) => log.error(tr('Agent source {0}: failed to start ({1}).', [s.provider, errMsg(err)]));
       try {
         const r = s.start();
         if (r) pending.push(r.catch(failed));
@@ -84,7 +84,7 @@ export class SourceSet {
       try {
         s.stop();
       } catch (err) {
-        log.warn(tr('Fonte de agentes {0}: falha ao parar ({1}).', [s.provider, errMsg(err)]));
+        log.warn(tr('Agent source {0}: failed to stop ({1}).', [s.provider, errMsg(err)]));
       }
     }
   }
@@ -93,7 +93,7 @@ export class SourceSet {
     return this.list.flatMap((s) => s.sources());
   }
 
-  /** Arquivo da conversa de um agente presente (a primeira fonte que o conhece). */
+  /** Conversation file of a present agent (first source that knows it). */
   transcriptPathOf(agentId: string): string | undefined {
     for (const s of this.list) {
       const path = s.transcriptPathOf(agentId);
@@ -103,8 +103,8 @@ export class SourceSet {
   }
 
   /**
-   * Parser NOVO para o terminal de um agente: o da fonte que conhece o transcript dele (transcriptPathOf); sem
-   * fonte, ou se ela não tiver um próprio, o do Claude Code.
+   * NEW parser for an agent's terminal: from source that knows its transcript (transcriptPathOf);
+   * without source, or if source lacks its own, Claude Code's.
    */
   parserFor(agentId: string): TerminalParser {
     const owner = this.list.find((s) => s.transcriptPathOf(agentId) !== undefined);
@@ -112,40 +112,40 @@ export class SourceSet {
   }
 }
 
-// ------------------------------------------------------------------ histórico do terminal
+// ------------------------------------------------------------------ terminal history
 
-/** Sessão do histórico achada: o arquivo da conversa e o parser do terminal para ele. */
+/** Located history session: conversation file and terminal parser for it. */
 export interface HistorySession {
   path: string;
-  /** Parser NOVO a cada chamada (o terminal cria outro quando o arquivo é truncado ou substituído). */
+  /** NEW parser on each call (terminal creates another when file is truncated or replaced). */
   createParser: () => TerminalParser;
 }
 
-/** Resultado de resolve(): a sessão ou o erro HTTP. */
+/** Result of resolve(): session or HTTP error. */
 export type HistoryResolveResult = HistorySession | { status: 400 | 404; error: string };
 
-/** O que as rotas /api/sessions/* precisam: um provedor sozinho ou o HistorySet. */
+/** What /api/sessions/* routes need: a single provider or HistorySet. */
 export interface SessionLookup {
-  /** Sessões recentes, da atividade mais recente para a mais antiga. */
+  /** Recent sessions, from newest activity to oldest. */
   list(): Promise<RecentSession[]>;
   /**
-   * Valida e acha a sessão `sessionId` da conta (nada de path traversal). Nunca lança: 400 = id inválido,
-   * 404 = conta ou sessão desconhecida.
+   * Validates and finds session `sessionId` of account (no path traversal). Never throws: 400 = invalid ID,
+   * 404 = unknown account or session.
    */
   resolve(account: string, sessionId: string): HistoryResolveResult;
 }
 
-/** Histórico de uma ferramenta: as sessões recentes das contas dela. */
+/** History of a tool: recent sessions of its accounts. */
 export interface HistoryProvider extends SessionLookup {
   readonly provider: Provider;
-  /** A conta é deste provedor (o HistorySet manda o resolve() dela para cá). */
+  /** Account belongs to this provider (HistorySet routes resolve() here). */
   hasAccount(account: string): boolean;
 }
 
 /**
- * Junta o histórico de todas as ferramentas: a listagem de todos (da atividade mais recente para a mais antiga,
- * até `limit`) e cada sessão resolvida pelo provedor da conta. Conta que nenhum provedor conhece vai para o
- * primeiro (o do Claude Code), que dá o erro de sempre (400 para id inválido, senão 404).
+ * Unites history across all tools: lists all (from newest activity to oldest, up to `limit`) and resolves
+ * each session via account provider. Account unknown to all providers falls back to first (Claude Code),
+ * giving standard error (400 for invalid ID, else 404).
  */
 export class HistorySet implements SessionLookup {
   private readonly list_: HistoryProvider[] = [];
@@ -161,7 +161,7 @@ export class HistorySet implements SessionLookup {
     this.list_.push(provider);
   }
 
-  /** Um provedor que falha não derruba a listagem dos outros (só vai para o log); todos falhando, a falha sobe. */
+  /** A failing provider does not bring down listing of others (goes to log); if all fail, error bubbles up. */
   async list(): Promise<RecentSession[]> {
     const results = await Promise.allSettled(this.list_.map((p) => p.list()));
     const out: RecentSession[] = [];
@@ -172,13 +172,13 @@ export class HistorySet implements SessionLookup {
     });
     if (failures.length && failures.length === results.length) throw failures[0].err;
     for (const f of failures) {
-      log.warnOnce(`history-list:${f.provider}:${errMsg(f.err)}`, tr('Histórico de sessões ({0}): falha ao listar ({1}).', [f.provider, errMsg(f.err)]));
+      log.warnOnce(`history-list:${f.provider}:${errMsg(f.err)}`, tr('Session history ({0}): failed to list ({1}).', [f.provider, errMsg(f.err)]));
     }
     return out.sort((a, b) => b.lastAt - a.lastAt).slice(0, this.limit);
   }
 
   resolve(account: string, sessionId: string): HistoryResolveResult {
     const owner = this.list_.find((p) => p.hasAccount(account)) ?? this.list_[0];
-    return owner ? owner.resolve(account, sessionId) : { status: 404, error: tr('conta desconhecida') };
+    return owner ? owner.resolve(account, sessionId) : { status: 404, error: tr('unknown account') };
   }
 }

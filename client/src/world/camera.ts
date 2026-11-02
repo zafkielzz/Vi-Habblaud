@@ -1,5 +1,5 @@
-// Câmera 2D: centro (px de mundo) + zoom (px CSS por px de mundo), com transições suaves,
-// níveis de zoom "nítidos" (zoom × devicePixelRatio inteiro) e deslocamento alinhado ao pixel.
+// 2D Camera: center (world px) + zoom (CSS px per world px), with smooth transitions,
+// "crisp" zoom levels (integer zoom × devicePixelRatio), and pixel-aligned offsets.
 import { TILE, ZOOM_MAX, ZOOM_MIN } from './constants';
 
 export interface Bounds {
@@ -9,14 +9,14 @@ export interface Bounds {
   h: number;
 }
 
-/** Margens (px CSS) da visão geral: pílulas flutuantes acima das salas, meio-fio abaixo, laterais. */
+/** Overview margins (CSS px): floating pills above rooms, curb below, sides. */
 export const OVERVIEW_MARGIN = { top: 34, bottom: 10, side: 16 } as const;
 
 /**
- * Enquadramento da visão geral: o prédio de 1,5 tile acima da parede norte (placas e itens altos)
- * até o meio-fio sul (cerca viva e calçada), dentro da área livre (fora dos painéis da UI).
- * Retorna o zoom que cabe, o ponto do mundo a centralizar e quanto (px CSS) esse ponto fica abaixo
- * do centro da área livre (as margens de cima e de baixo são diferentes). Puro.
+ * Overview framing: building from 1.5 tiles above north wall (signs and tall items)
+ * to south curb (hedge and sidewalk), within free area (outside UI panels).
+ * Returns fitting zoom, world point to center, and offset (CSS px) below center of
+ * free area (top and bottom margins differ). Pure.
  */
 export function overviewFrame(
   building: Bounds,
@@ -40,14 +40,14 @@ export class Camera {
   viewW = 800;
   viewH = 600;
   dpr = 1;
-  /** Zoom mínimo dinâmico (permite enquadrar prédios grandes abaixo de 1×). */
+  /** Dynamic minimum zoom (allows framing large buildings below 1×). */
   minZoom = ZOOM_MIN;
   bounds: Bounds = { x: 0, y: 0, w: 800, h: 600 };
   follow: string | null = null;
-  /** Margens cobertas pela UI (px CSS): enquadramentos usam só a área livre. */
+  /** Margins covered by UI (CSS px): framings use only free area. */
   insets = { top: 0, right: 0, bottom: 0, left: 0 };
   private anim: { fx: number; fy: number; fz: number; tx: number; ty: number; tz: number; t0: number; dur: number } | null = null;
-  /** Zoom contínuo em andamento (pinça); ao terminar, encaixa num nível nítido. */
+  /** Continuous pinch zoom in progress; settles to crisp level on end. */
   private freeZoom = false;
 
   setView(w: number, h: number, dpr: number): void {
@@ -60,13 +60,13 @@ export class Camera {
     return this.anim !== null;
   }
 
-  /** Níveis de zoom nítidos: zoom × dpr inteiro (e meio-inteiro acima de 2× no dpr 1). */
+  /** Crisp zoom levels: integer zoom × dpr (and half-integers above 2× at dpr 1). */
   levels(): number[] {
     const min = Math.min(this.minZoom, ZOOM_MIN);
     const set = new Set<number>();
-    // inteiros em pixels de dispositivo (nitidez perfeita)
+    // integers in device pixels (perfect sharpness)
     for (let k = 1; k <= ZOOM_MAX * this.dpr; k++) set.add(Math.round((k / this.dpr) * 1000) / 1000);
-    // meio-níveis a partir de 2× (a irregularidade de 1px fica imperceptível)
+    // half-levels from 2× up (1px unevenness is imperceptible)
     for (let h = 4; h <= ZOOM_MAX * 2; h++) set.add(h / 2);
     const out = [...set].filter((z) => z >= min - 1e-6 && z <= ZOOM_MAX + 1e-6).sort((a, b) => a - b);
     if (!out.length || out[0] > min + 1e-6) out.unshift(min);
@@ -89,7 +89,7 @@ export class Camera {
     return best;
   }
 
-  /** Próximo nível acima/abaixo do zoom atual. */
+  /** Next level above/below current zoom. */
   stepZoom(steps: number): number {
     const lv = this.levels();
     const cur = this.anim ? this.anim.tz : this.zoom;
@@ -107,7 +107,7 @@ export class Camera {
     this.anim = null;
   }
 
-  /** Arrastar: desloca pelo equivalente em px CSS. */
+  /** Pan: offsets by equivalent in CSS px. */
   panBy(dx: number, dy: number): void {
     this.anim = null;
     this.x -= dx / this.zoom;
@@ -115,7 +115,7 @@ export class Camera {
     this.clamp();
   }
 
-  /** Zoom ancorado num ponto da tela (CSS px). */
+  /** Zoom anchored to a screen point (CSS px). */
   zoomAt(newZoom: number, sx: number, sy: number, now: number, animate = true): void {
     const z = Math.max(Math.min(this.minZoom, ZOOM_MIN), Math.min(ZOOM_MAX, newZoom));
     const wx = this.x + (sx - this.viewW / 2) / this.zoom;
@@ -133,7 +133,7 @@ export class Camera {
     }
   }
 
-  /** Encaixa o zoom contínuo (pinça) no nível nítido mais próximo. */
+  /** Settles continuous pinch zoom to nearest crisp level. */
   settle(now: number): void {
     if (!this.freeZoom) return;
     this.freeZoom = false;
@@ -157,7 +157,7 @@ export class Camera {
     this.clamp();
   }
 
-  /** Mantém a área livre (fora dos painéis da UI) dentro dos limites; se couber inteira, centraliza. */
+  /** Clamps free area (outside UI panels) within bounds; centers if it fits entirely. */
   clamp(): void {
     const b = this.bounds;
     const z = this.zoom;
@@ -172,7 +172,7 @@ export class Camera {
     else this.y = Math.max(b.y - t, Math.min(b.y + b.h - btm, this.y));
   }
 
-  /** Transformação para o contexto em px de dispositivo, com deslocamento inteiro (sem tremido). */
+  /** Transform for device pixel context, with integer offset (no jitter). */
   transform(): { scale: number; ox: number; oy: number } {
     const scale = this.zoom * this.dpr;
     const ox = Math.round((this.viewW * this.dpr) / 2 - this.x * scale);
@@ -190,14 +190,14 @@ export class Camera {
     return { x: (sx * this.dpr - ox) / scale, y: (sy * this.dpr - oy) / scale };
   }
 
-  /** Zoom que enquadra um retângulo do mundo com margem (CSS px), dentro da área livre. */
+  /** Zoom that frames a world rectangle with margin (CSS px), within free area. */
   fitZoom(r: Bounds, margin = 24): number {
     const w = Math.max(80, this.viewW - this.insets.left - this.insets.right);
     const h = Math.max(80, this.viewH - this.insets.top - this.insets.bottom);
     return Math.min((w - margin * 2) / r.w, (h - margin * 2) / r.h);
   }
 
-  /** Centro de câmera que põe o ponto (wx, wy) no meio da área livre, para um dado zoom. */
+  /** Camera center placing point (wx, wy) in the middle of free area, for a given zoom. */
   centerFor(wx: number, wy: number, zoom: number): { x: number; y: number } {
     return { x: wx - (this.insets.left - this.insets.right) / 2 / zoom, y: wy - (this.insets.top - this.insets.bottom) / 2 / zoom };
   }

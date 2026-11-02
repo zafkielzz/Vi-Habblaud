@@ -1,19 +1,21 @@
-// Rotas do terminal interativo (PtyManager, server/pty/manager.ts):
-//   GET  /api/pty                      estado do recurso e terminais abertos
-//   POST /api/pty                      {cwd, account?, cols?, rows?}: sessão nova do Claude Code
-//   GET  /api/pty/:id/stream           SSE: reset (tela guardada) | data | exit
+// Interactive terminal routes (PtyManager, server/pty/manager.ts):
+//   GET  /api/pty                      feature status and open terminals
+//   POST /api/pty                      {cwd, account?, cols?, rows?}: new Claude Code session;
+//                                      {agy: agentId, cols?, rows?}: an Antigravity worker's interactive agy
+//   GET  /api/pty/:id/stream           SSE: reset (screen buffer) | data | exit
 //   POST /api/pty/:id/input|resize|close
-//   POST /api/agents/:id/stop          encerra o agente (aqui ou noutro terminal)
-//   POST /api/agents/:id/takeover      assume a sessão: encerra lá e retoma aqui
-// Quem controla um terminal destes executa comandos na máquina: só conexões do próprio computador, com Host
-// local e (quando o navegador manda) Origin da mesma origem. A borda (http/guard.ts) já exige JSON nos POST.
+//   POST /api/agents/:id/stop          stops agent (here or in another terminal)
+//   POST /api/agents/:id/takeover      takes over session: stops there and resumes here
+// Controlling these terminals executes commands on the machine: connections from computer itself only, with
+// local Host and (when browser sends it) same-origin Origin. Request guard (http/guard.ts) already requires
+// JSON on POST.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { PtyError, type PtyManager } from '../pty/manager';
 import { HttpError, readJson, sendJson } from './app';
 import { isLoopbackHost } from './guard';
 import { tr } from '../../shared/i18n';
 
-/** /api/agents/:id/(stop|takeover) (ids nunca contêm '/'). */
+/** /api/agents/:id/(stop|takeover) (ids never contain '/'). */
 const AGENT_ACTION_ROUTE = /^\/api\/agents\/([^/]+)\/(stop|takeover)$/;
 
 function isLoopbackAddress(addr: string | undefined): boolean {
@@ -22,11 +24,11 @@ function isLoopbackAddress(addr: string | undefined): boolean {
   return a === '::1' || a.startsWith('127.');
 }
 
-/** Motivo da recusa, ou null. */
+/** Rejection reason, or null. */
 export function ptyRequestProblem(req: IncomingMessage): string | null {
-  if (!isLoopbackAddress(req.socket.remoteAddress)) return tr('o terminal interativo só pode ser usado no próprio computador');
+  if (!isLoopbackAddress(req.socket.remoteAddress)) return tr('the interactive terminal can only be used on the computer running Habblaud');
   const host = req.headers.host;
-  if (!isLoopbackHost(host)) return tr('abra o Habblaud por http://localhost para usar o terminal interativo');
+  if (!isLoopbackHost(host)) return tr('open Habblaud at http://localhost to use the interactive terminal');
   const origin = req.headers.origin;
   if (typeof origin === 'string') {
     let same = false;
@@ -35,11 +37,11 @@ export function ptyRequestProblem(req: IncomingMessage): string | null {
     } catch {
       same = false;
     }
-    if (!same) return tr('origem não permitida para o terminal interativo');
+    if (!same) return tr('origin not allowed for the interactive terminal');
   }
-  // Navegadores marcam pedidos de outro site (ou de outra porta do localhost = "same-site").
+  // Browsers tag requests from another site (or another port on localhost = "same-site").
   const site = req.headers['sec-fetch-site'];
-  if (site === 'cross-site' || site === 'same-site') return tr('origem não permitida para o terminal interativo');
+  if (site === 'cross-site' || site === 'same-site') return tr('origin not allowed for the interactive terminal');
   return null;
 }
 
@@ -47,11 +49,11 @@ export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: S
   const fail = (res: ServerResponse, err: unknown) => {
     if (res.headersSent) return void res.destroy();
     if (err instanceof HttpError || err instanceof PtyError) sendJson(res, err.status, { error: err.message });
-    else sendJson(res, 500, { error: tr('erro interno') });
+    else sendJson(res, 500, { error: tr('internal error') });
   };
   const notAllowed = (res: ServerResponse, allow: string) => {
     res.setHeader('Allow', allow);
-    sendJson(res, 405, { error: tr('método não permitido') });
+    sendJson(res, 405, { error: tr('method not allowed') });
   };
   const noContent = (res: ServerResponse) => {
     res.writeHead(204, { 'Cache-Control': 'no-store' });
@@ -61,7 +63,7 @@ export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: S
     try {
       return decodeURIComponent(raw);
     } catch {
-      throw new HttpError(400, tr('id inválido'));
+      throw new HttpError(400, tr('invalid id'));
     }
   };
 
@@ -85,6 +87,7 @@ export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: S
       if (method === 'GET') return sendJson(res, 200, { status: ptys.status(), ptys: ptys.list() });
       if (method !== 'POST') return notAllowed(res, 'GET, POST');
       const body = (await readJson(req)) as Record<string, unknown>;
+      if (body?.agy !== undefined) return sendJson(res, 201, ptys.openAgy({ agent: body.agy, cols: body?.cols, rows: body?.rows }));
       return sendJson(res, 201, ptys.create({ cwd: body?.cwd, account: body?.account, cols: body?.cols, rows: body?.rows }));
     }
     const id = decode(rawId);
@@ -97,7 +100,7 @@ export function createPtyRoutes(ptys: PtyManager): (req: IncomingMessage, res: S
     if (act === 'input') ptys.input(id, body?.data);
     else if (act === 'resize') ptys.resize(id, body?.cols, body?.rows);
     else if (act === 'close') ptys.close(id);
-    else throw new HttpError(404, tr('rota desconhecida'));
+    else throw new HttpError(404, tr('unknown route'));
     noContent(res);
   };
 

@@ -1,0 +1,28 @@
+{
+  "home": "/home/u",
+  "folder": "/home/u/proj",
+  "scope": { "write": ["~/shared/out"], "deny": ["~/.ssh", ".env", ".env.*", "secrets"], "commands": ["git push", "sudo", "rm -rf"] },
+  "paths": [
+    { "path": "/home/u/proj/src/a.ts", "mode": "write", "ok": true },
+    { "path": "src/a.ts", "cwd": "/home/u/proj", "mode": "write", "ok": true },
+    { "path": "/home/u/proj/../other/a.ts", "mode": "write", "ok": false, "kind": "outside" },
+    { "path": "/home/u/projX/a.ts", "mode": "write", "ok": false, "kind": "outside" },
+    { "path": "/home/u/other/a.ts", "mode": "read", "ok": true },
+    { "path": "~/shared/out/r.md", "mode": "write", "ok": true },
+    { "path": "/home/u/.ssh/id_ed25519", "mode": "read", "ok": false, "kind": "deny" },
+    { "path": "/home/u/proj/.env", "mode": "read", "ok": false, "kind": "deny" },
+    { "path": "/home/u/proj/.env.local", "mode": "write", "ok": false, "kind": "deny" },
+    { "path": "/home/u/proj/.envrc", "mode": "read", "ok": true },
+    { "path": "/home/u/proj/secrets/k.txt", "mode": "read", "ok": false, "kind": "deny" },
+    { "path": "/home/u/proj", "mode": "write", "ok": true }
+  ],
+  "commands": [
+    { "cmd": "git status", "hit": null },
+    { "cmd": "git push origin main", "hit": "git push" },
+    { "cmd": "npm test && git  push", "hit": "git push" },
+    { "cmd": "FOO=1 sudo apt install x", "hit": "sudo" },
+    { "cmd": "echo sudo", "hit": null },
+    { "cmd": "ls | rm -rf build", "hit": "rm -rf" },
+    { "cmd": "git pushd", "hit": null }
+  ]
+}

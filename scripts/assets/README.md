@@ -1,129 +1,129 @@
-# Assets do Habblaud (imagens com IA + pixel art)
+# Habblaud Assets (AI Images + Pixel Art)
 
-Marca, ilustrações da UI e arte de parede do Habblaud. Os modelos de imagem da OpenRouter desenham
-as imagens, que o pós-processamento em Python transforma em pixel art de verdade: grade nítida,
-paleta limitada, sem dithering, alfa binário e ampliações só com NEAREST. Personagens e móveis
-**não** estão aqui: são procedurais (`client/src/art`).
+Habblaud brand, UI illustrations, and wall art. OpenRouter image models draw
+the images, which Python post-processing turns into true pixel art: crisp grid,
+limited palette, no dithering, binary alpha, and scaling exclusively with NEAREST. Characters and furniture
+are **not** here: they are procedural (`client/src/art`).
 
 ```
 scripts/assets/
-  specs.json            receita de cada asset: modelo, proporção, prompt, estilos e parâmetros de pós-processamento
-  generate.mjs          chama a OpenRouter (Node 24, sem dependências), com cache, retries, orçamento e log
-  postprocess.py        CLI: processa as imagens brutas e compõe marca, ícones, molduras, og-image e manifest
-  pixelops.py           operações de imagem (chroma key, detecção de grade, redução por moda, paleta...)
-  pixelart.py           pixel art desenhada à mão: mark 32/16 px, fonte bitmap e placa "Habblaud"
-  test_pixelops.py      testes (unittest da stdlib)
-  generation-log.json   todas as requisições: modelo, prompt exato, arquivo, custo e tomadas escolhidas
-  .cache/               (ignorado) raw/ = imagem bruta em uso, takes/ = todas as tomadas, contact-sheet.png
-client/public/assets/   saída final, servida pelo Vite em /assets/ (manifest.json descreve tudo)
+  specs.json            recipe for each asset: model, aspect ratio, prompt, styles, and postprocessing parameters
+  generate.mjs          calls OpenRouter (Node 24, no dependencies), with cache, retries, budget, and log
+  postprocess.py        CLI: processes raw images and composites brand, icons, frames, og-image, and manifest
+  pixelops.py           image operations (chroma key, grid detection, mode downsampling, palette...)
+  pixelart.py           hand-drawn pixel art: 32/16 px mark, bitmap font, and "Habblaud" sign
+  test_pixelops.py      tests (stdlib unittest)
+  generation-log.json   all requests: model, exact prompt, file, cost, and selected takes
+  .cache/               (ignored) raw/ = raw image in use, takes/ = all takes, contact-sheet.png
+client/public/assets/   final output, served by Vite at /assets/ (manifest.json describes everything)
 ```
 
-## Uso
+## Usage
 
-Requisitos: Node 24, a variável `OPENROUTER_KEY` exportada (só para gerar) e Python 3 com Pillow e
-numpy (no macOS desta máquina, o `/usr/bin/python3` já tem os dois no site-packages do usuário).
+Requirements: Node 24, exported `OPENROUTER_KEY` variable (only to generate), and Python 3 with Pillow and
+numpy (on this machine's macOS, `/usr/bin/python3` already has both in user site-packages).
 
 ```sh
-node scripts/assets/generate.mjs models            # modelos com saída de imagem
-node scripts/assets/generate.mjs list              # assets e estado do cache
-node scripts/assets/generate.mjs gen               # gera o que falta em .cache/raw/
-node scripts/assets/generate.mjs gen poster-cat --force                          # nova tomada
-node scripts/assets/generate.mjs gen logo-mark --model openai/gpt-5.4-image-2 --as gpt   # tomada alternativa
-node scripts/assets/generate.mjs pick logo-mark gpt                              # adota a tomada alternativa
-python3 -E scripts/assets/postprocess.py           # gera client/public/assets/** + manifest + folha de contato
-python3 -E scripts/assets/postprocess.py --only painting-cat --out /tmp/teste    # testa um asset isolado
-python3 -E scripts/assets/test_pixelops.py         # testes (grade/desampliação, chroma key, moda, fonte, marks)
+node scripts/assets/generate.mjs models            # models with image output
+node scripts/assets/generate.mjs list              # assets and cache state
+node scripts/assets/generate.mjs gen               # generates what is missing in .cache/raw/
+node scripts/assets/generate.mjs gen poster-cat --force                          # new take
+node scripts/assets/generate.mjs gen logo-mark --model openai/gpt-5.4-image-2 --as gpt   # alternative take
+node scripts/assets/generate.mjs pick logo-mark gpt                              # adopts alternative take
+python3 -E scripts/assets/postprocess.py           # generates client/public/assets/** + manifest + contact sheet
+python3 -E scripts/assets/postprocess.py --only painting-cat --out /tmp/teste    # tests isolated asset
+python3 -E scripts/assets/test_pixelops.py         # tests (grid/downscaling, chroma key, mode, font, marks)
 ```
 
-- `gen` usa até 2 retries por asset, roda com `--concurrency` (padrão 3) e recusa passar do
-  orçamento (`--budget`, padrão 45 requisições no log). Uma trava (`.cache/generate.lock`) impede
-  duas execuções simultâneas, porque uma reescreveria o log da outra.
-- O pós-processamento é determinístico: rode-o quantas vezes quiser, sem custo.
-- A chave só vai no header `Authorization`: nunca é impressa, registrada nem gravada.
-- `python3 -E` (e não `-I`): o `-I` desliga o site-packages do usuário, onde estão Pillow e numpy.
-  O `-E` continua ignorando `PYTHONPATH`. Os scripts ficam em `scripts/assets/` e os dados baixados
-  em `.cache/` (outra pasta), então o `sys.path` só contém código nosso.
-- QA: abra `scripts/assets/.cache/contact-sheet.png` (marca e arte de parede em 4x, ilustração e og-image).
+- `gen` uses up to 2 retries per asset, runs with `--concurrency` (default 3), and refuses to exceed
+  budget (`--budget`, default 45 requests in log). A lock (`.cache/generate.lock`) prevents
+  two concurrent runs, because one would overwrite the other's log.
+- Post-processing is deterministic: run it as many times as you want, at no cost.
+- The key is only sent in the `Authorization` header: never printed, logged, or saved.
+- `python3 -E` (not `-I`): `-I` disables user site-packages where Pillow and numpy live.
+  `-E` still ignores `PYTHONPATH`. Scripts live in `scripts/assets/` and downloaded data
+  in `.cache/` (different folder), so `sys.path` only contains our code.
+- QA: open `scripts/assets/.cache/contact-sheet.png` (brand and wall art at 4x, illustration, and og-image).
 
-## Direção de arte (prompts originais)
+## Art Direction (Original Prompts)
 
-Os prompts descrevem o estilo com palavras genéricas, sem citar jogos, tilesets, artistas ou marcas:
-escritório moderno, claro e aconchegante, cinzas neutros frios, porcelanato claro, madeira cor de mel,
-vidro azulado, monitores azuis acesos, sofás azuis com almofadas laranja, vasos de terracota e pastas
-coloridas, contorno azul-acinzentado escuro (`#2b3245`) e luz vinda de cima à esquerda. O estilo
-compartilhado `pixel` (em `specs.json`) ainda pede arte original, sem copiar nem imitar obra existente.
+The prompts describe the style in generic terms, without citing games, tilesets, artists, or brands:
+modern, bright, and cozy office, cool neutral grays, light porcelain tile, honey-colored wood,
+blueish glass, lit blue monitors, blue sofas with orange cushions, terracotta planters, and colorful
+folders, dark blue-gray outline (`#2b3245`), and lighting from top-left. The shared
+`pixel` style (in `specs.json`) also asks for original art, without copying or imitating existing works.
 
-As primeiras tomadas do logo e da ilustração usavam uma versão anterior desse estilo, que citava obras
-comerciais de terceiros como referência. Elas foram descartadas e saíram do log; o logo, os marks
-desenhados à mão a partir dele, os ícones, o og-image e a ilustração foram refeitos com os prompts
-atuais. Pinturas e pôsteres nunca usaram essa referência (o estilo deles é `wallart`/`poster`).
+Initial takes of the logo and illustration used an earlier version of this style referencing third-party
+commercial works. They were discarded and removed from the log; the logo, hand-drawn marks derived from
+it, icons, og-image, and illustration were remade with current prompts. Paintings and posters never used
+that reference (their style is `wallart`/`poster`).
 
-## Escolha do modelo
+## Model Selection
 
-Lista de 06/10/2026: 11 modelos com `image` em `output_modalities`. Comparei três modelos fortes com o
-mesmo prompt (pintura "montanhas") e, no logo, o Flash e o Pro com o mesmo prompt, julgando o
-resultado **depois** da redução ao tamanho nativo, que é o que aparece no jogo:
+List from 2026-10-06: 11 models with `image` in `output_modalities`. Compared three strong models with
+the same prompt ("mountains" painting) and, for the logo, Flash and Pro with the same prompt, judging the
+result **after** reduction to native size, which is what appears in the game:
 
-| Modelo | Bruto | Reduzido | Tempo | Custo/img |
+| Model | Raw | Reduced | Time | Cost |
 |---|---|---|---|---|
-| `google/gemini-3.1-flash-image` | formas chapadas e ousadas, magenta limpo; "pixels" de tamanho irregular | **o mais legível em 26x16 e 12x16** | ~10 s | ~US$ 0,07 |
-| `google/gemini-3-pro-image` | pixel art rica e coerente, grade mais regular | o melhor no logo nativo e em cenas | ~25–35 s | ~US$ 0,14 |
-| `openai/gpt-5.4-image-2` | o mais detalhado | detalhe demais: vira ruído | 75–120 s | maior |
+| `google/gemini-3.1-flash-image` | bold shapes; uneven pixels | **most readable at 26x16/12x16** | ~10 s | ~$0.07 |
+| `google/gemini-3-pro-image` | rich pixel art, regular grid | best for native logo/scenes | ~25–35 s | ~$0.14 |
+| `openai/gpt-5.4-image-2` | most detailed | too much detail: turns into noise | 75–120 s | higher |
 
-Decisão:
-- **Gemini 3.1 Flash Image** (padrão): pinturas e pôsteres. Formas grandes e chapadas sobrevivem a
-  26x16 e 12x16; é rápido e barato, o que deixou orçamento para refazer o que ficou fraco.
-- **Gemini 3 Pro Image**: logo e ilustração do escritório vazio. No logo, as tomadas do Flash tinham
-  "pixels" fora da grade (a desampliação deixava ruído nas janelas); a do Pro sai limpa. Na
-  ilustração, ele reproduz os elementos do próprio jogo: porcelanato claro, mesas brancas com
-  monitores azuis, sofá azul com almofadas laranja, bebedouro, terracota e pastas coloridas. Com isso,
-  fica coerente com o mundo.
+Decision:
+- **Gemini 3.1 Flash Image** (default): paintings and posters. Large, flat shapes survive
+  26x16 and 12x16; it is fast and cheap, leaving budget to redo weak takes.
+- **Gemini 3 Pro Image**: logo and empty office illustration. For the logo, Flash takes had
+  off-grid "pixels" (downscaling left noise in windows); Pro comes out clean. In the
+  illustration, it reproduces game elements: light porcelain tile, white desks with
+  blue monitors, blue sofa with orange cushions, water cooler, terracotta, and colorful folders. This
+  makes it coherent with the world.
 
-## Pipeline de pós-processamento
+## Post-Processing Pipeline
 
-1. **Chroma key**: a cor de fundo é a mediana da moldura da imagem (a IA nem sempre acerta o
-   `#FF00FF`), mais qualquer tom claramente magenta (franja). Ilhas pequenas são removidas.
-2. **Desampliação** (`kind: native`): a IA desenha numa grade de "pixels grandes" (~10 px por pixel
-   numa imagem de 1024). Um detector de periodicidade (pente sobre as bordas de cor, nos dois eixos,
-   preferindo o menor divisor do melhor período) encontra a grade, e cada bloco vira um pixel (moda do
-   miolo). O resultado é a pixel art nativa da IA, sem perdas. É assim que nasce `logo-detailed.png` (78x86).
-3. **Redução por moda** (`art`, `poster`, `scene`): corte na proporção e redução em que cada célula
-   recebe a cor mais frequente de uma paleta intermediária, sem misturar cores. Isso dá bordas
-   nítidas, ao contrário da média. `darkBias` favorece tons escuros (contornos) ou, se negativo,
-   claros (janelas acesas).
-4. **Paleta**: median cut + k-means, **sem dithering**. A opção `balance` reamostra por 1/frequência^b,
-   para cores de área pequena (o verde das plantas) não sumirem. Com ela, a cena coube em 32 cores.
-   No logo, `merge` funde tons quase iguais (distância RGB menor que o valor) que o k-means às vezes
-   cria numa mesma área chapada; sobra um tom por material (24 cores).
-5. **Acabamento**: `despeckle` remove pixels isolados; contorno de 1px `#2b3245` nos pôsteres;
-   molduras de 3px (madeira, preta, branca, dourada) com luz em cima e à esquerda nas pinturas.
+1. **Chroma key**: background color is median of image border (AI does not always hit
+   `#FF00FF`), plus any clearly magenta shade (fringe). Small islands are removed.
+2. **Native downscaling** (`kind: native`): AI draws on a grid of "large pixels" (~10 px per pixel
+   in a 1024 image). A periodicity detector (comb over color edges on both axes,
+   favoring smallest divisor of best period) finds the grid, and each block becomes a pixel (core mode).
+   The result is native AI pixel art, lossless. This is how `logo-detailed.png` (78x86) is produced.
+3. **Mode downsampling** (`art`, `poster`, `scene`): aspect ratio crop and reduction where each cell
+   receives the most frequent color of an intermediate palette, without blending colors. This gives crisp
+   edges, unlike averaging. `darkBias` favors dark tones (outlines) or, if negative,
+   light tones (lit windows).
+4. **Palette**: median cut + k-means, **without dithering**. The `balance` option resamples by 1/frequency^b,
+   so small area colors (plant greens) do not disappear. With it, the scene fit in 32 colors.
+   In the logo, `merge` merges nearly identical shades (RGB distance below threshold) that k-means sometimes
+   creates within the same flat area; leaves one tone per material (24 colors).
+5. **Finishing**: `despeckle` removes isolated pixels; 1px `#2b3245` outline on posters;
+   3px frames (wood, black, white, gold) with top-left lighting on paintings.
 
-### O que foi desenhado à mão (e por quê)
+### What Was Hand-Drawn (and Why)
 
-- **Mark 32x32 e favicon 16x16** (`pixelart.py`). A arte nativa da IA tem 78x86 px, e reduzi-la para 32
-  ou 16 sempre embaralha janelas e faixas. Então o mark pequeno é um "hinting" do desenho da IA:
-  mesmo prédio (laje com borda clara, vaso à direita, faixas de madeira, duas telas azuis no 2º andar,
-  porta de vidro com toldo), mesma paleta amostrada, redesenhado pixel a pixel. A versão da IA aparece onde há
-  espaço (`logo-detailed.png`, `icon-512.png`, og-image).
-- **Placa e textos do og-image**: texto de IA reduzido fica ilegível, e a Pixelify Sans em tamanhos
-  de pixel fecha a abertura do "C" ("Oode Town"). Por isso há uma fonte bitmap proporcional 5x7
-  própria, com minúsculas, descendentes e acentos do português (á à â ã é ê í ó ô õ ú ç).
+- **32x32 mark and 16x16 favicon** (`pixelart.py`). Native AI art is 78x86 px, and scaling it down to 32
+  or 16 always scrambles windows and bands. So the small mark is a "hinting" of the AI drawing:
+  same building (slab with light trim, planter on right, wood slats, two blue screens on 2nd floor,
+  glass door with awning), same sampled palette, redrawn pixel by pixel. The AI version appears where
+  space permits (`logo-detailed.png`, `icon-512.png`, og-image).
+- **Signage and og-image text**: scaled-down AI text is unreadable, and Pixelify Sans at pixel
+  sizes closes the "C" opening ("Oode Town"). Hence a custom 5x7 proportional bitmap
+  font, with lowercase, descenders, and Portuguese accents (á à â ã é ê í ó ô õ ú ç).
 
-## Entregáveis (`client/public/assets/`)
+## Deliverables (`client/public/assets/`)
 
-| Arquivo | Tamanho | Observação |
+| File | Size | Note |
 |---|---|---|
-| `brand/logo-mark.png` / `@4x` | 32x32 / 128x128 | transparente, desenhado à mão a partir da IA |
-| `brand/logo-detailed.png` | 78x86 | arte nativa da IA (transparente) |
-| `brand/favicon-16.png`, `favicon-32.png` | 16, 32 | transparentes |
-| `brand/apple-touch-icon.png`, `icon-192.png`, `icon-512.png` | 180, 192, 512 | céu de entardecer em faixas + calçada; 512 usa o prédio detalhado |
-| `brand/signage.png` / `@4x` | 64x16 / 256x64 | placa da recepção |
-| `illustrations/empty-office.png` | 960x540 | 480x270 nativo, x2 NEAREST, 32 cores |
-| `art/painting-*.png` (8) | 26x16 | só a tela (sem moldura), para `rects.art` do sprite `painting` |
+| `brand/logo-mark.png` / `@4x` | 32x32 / 128x128 | transparent, hand-drawn based on AI |
+| `brand/logo-detailed.png` | 78x86 | native AI art (transparent) |
+| `brand/favicon-16.png`, `favicon-32.png` | 16, 32 | transparent |
+| `brand/apple-touch-icon.png`, `icon-192/512.png` | 180, 192, 512 | banded sky + sidewalk; 512 uses detailed building |
+| `brand/signage.png` / `@4x` | 64x16 / 256x64 | reception signage |
+| `illustrations/empty-office.png` | 960x540 | 480x270 native, x2 NEAREST, 32 colors |
+| `art/painting-*.png` (8) | 26x16 | canvas only (no frame), for `rects.art` of `painting` sprite |
 | `art/painting-wide-*.png` (3) | 58x24 | lounge |
-| `art/framed/painting-*.png` | 32x22 e 64x30 | mesma arte com moldura de 3px, ocupando exatamente 2 ou 4 tiles |
-| `art/poster-*.png` (6) | 12x16 | com contorno; ids batem com as variants do móvel `poster` |
-| `og-image.png` | 1200x630 | 600x315 nativo x2 |
+| `art/framed/painting-*.png` | 32x22 and 64x30 | same art with 3px frame, occupying exactly 2 or 4 tiles |
+| `art/poster-*.png` (6) | 12x16 | with outline; ids match `poster` furniture variants |
+| `og-image.png` | 1200x630 | 600x315 native x2 |
 
 ### manifest.json
 
@@ -141,27 +141,33 @@ Decisão:
   },
   "illustrations": { "emptyOffice": { "file": "illustrations/empty-office.png", "w": 960, "h": 540, "scale": 2 } },
   "wallArt": [
-    { "id": "painting-mountains", "kind": "painting", "file": "art/painting-mountains.png", "w": 26, "h": 16,
-      "tiles": 2, "title": "Montanhas ao amanhecer", "framed": { "file": "art/framed/painting-mountains.png", "w": 32, "h": 22 } },
-    { "id": "poster-coffee", "kind": "poster", "variant": "coffee", "file": "art/poster-coffee.png", "w": 12, "h": 16, "tiles": 1, "title": "Café" }
+    {
+      "id": "painting-mountains", "kind": "painting", "file": "art/painting-mountains.png", "w": 26, "h": 16,
+      "tiles": 2, "title": "Montanhas ao amanhecer",
+      "framed": { "file": "art/framed/painting-mountains.png", "w": 32, "h": 22 }
+    },
+    {
+      "id": "poster-coffee", "kind": "poster", "variant": "coffee",
+      "file": "art/poster-coffee.png", "w": 12, "h": 16, "tiles": 1, "title": "Café"
+    }
   ],
   "og": "og-image.png"
 }
 ```
 
-Caminhos relativos a `/assets/`. `w`/`h` são do arquivo. `tiles` é a largura do vão na parede em
-tiles (pôster 1, pintura 2, pintura larga 4), útil para escolher a arte certa para cada moldura. Na ilustração, `scale` indica a ampliação
-NEAREST já aplicada (nativo = w/scale). `variant` dos pôsteres é o valor da variant do móvel `poster`
-em `client/src/art/api.ts` (`ship_it` incluso).
+Paths relative to `/assets/`. `w`/`h` are from the file. `tiles` is wall opening width in
+tiles (poster 1, painting 2, wide painting 4), useful for choosing right art for each frame. In illustration,
+`scale` indicates applied NEAREST scaling (native = w/scale). `variant` for posters is `poster` furniture variant
+value in `client/src/art/api.ts` (`ship_it` included).
 
-## Orçamento e log
+## Budget and Log
 
-32 requisições de 45 no log (25 Flash, 6 Pro, 1 GPT 5.4), nenhuma falha, ~US$ 2,58 informados pela
-API. O log não inclui as 10 tomadas descartadas do logo e da ilustração (ver "Direção de arte"); os
-números `n` foram renumerados em sequência. O detalhe está em `generation-log.json`. `picks` registra
-as tomadas adotadas a partir de comparações (`logo-mark@v2e`, `empty-office@v2a`,
-`painting-mountains@gemini31flash`). A entrada da tomada Flash de `painting-mountains` foi
-reconstruída (sem custo informado), porque duas execuções paralelas sobrescreveram o log; foi isso
-que motivou a trava. `specs.json` é a receita atual; o log guarda o prompt exato de cada tomada (as
-pinturas geradas antes do reforço de "sangria total" no estilo `wallart` usaram a versão anterior
-desse texto, e as tomadas `logo-mark@v2a` a `@v2c` usaram versões anteriores do prompt do logo).
+32 requests of 45 in the log (25 Flash, 6 Pro, 1 GPT 5.4), zero failures, ~$2.58 reported by
+the API. The log does not include the 10 discarded takes for logo and illustration (see "Art Direction");
+the numbers `n` were renumbered sequentially. Details in `generation-log.json`. `picks` records
+adopted takes from comparisons (`logo-mark@v2e`, `empty-office@v2a`, `painting-mountains@gemini31flash`).
+The entry for the Flash take of `painting-mountains` was reconstructed (no cost reported), because two
+parallel executions overwrote the log; this is what motivated the lock. `specs.json` is the current recipe;
+the log preserves the exact prompt of each take (paintings generated before the "full bleed" emphasis
+in `wallart` style used the earlier version of that text, and takes `logo-mark@v2a` through `@v2c` used
+earlier versions of the logo prompt).

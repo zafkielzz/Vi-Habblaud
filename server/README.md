@@ -1,555 +1,563 @@
-# Servidor do Habblaud
+# Habblaud Server
 
-Node puro (sem dependências de runtime). Observa as sessões **abertas** do Claude Code em todas as
-contas da máquina, mantém o modelo do escritório e transmite tudo via SSE.
+Pure Node (no runtime dependencies). Observes **open** Claude Code sessions across all accounts on the machine,
+maintains the office model, and streams everything via SSE.
 
 ```
-npm run dev      # servidor + Vite (middleware, HMR) em http://127.0.0.1:4747
-npm run build && npm start   # produção: serve dist/client
+npm run dev      # server + Vite (middleware, HMR) at http://127.0.0.1:4747
+npm run build && npm start   # production: serves dist/client
 ```
 
-## Fontes de dados (somente leitura)
+## Data sources (read-only)
 
-| O quê | Onde |
+| What | Where |
 | --- | --- |
-| Sessões abertas e status (ocupado/ocioso/esperando) | `<config>/sessions/<pid>.json` (+ PID vivo, fora do Docker) |
-| Atividades, tarefas, título, números | `<config>/projects/<cwd>/<sessionId>.jsonl` (lê o último ~1 MB no boot; o começo em segundo plano) |
-| Subagentes (inclusive de workflows) | `<config>/projects/<cwd>/<sessionId>/subagents/**/agent-*.jsonl` + `.meta.json` |
-| Conta (e-mail, organização) e cache de uso | `~/.claude.json` (conta padrão) ou `<config>/.claude.json` — só esses campos |
-| Uso ao vivo (5h e semanal) | `~/.habblaud/usage/<conta>.json`, gravado pelo mod do Habblaud (`npm run mod:install`) ou pelo `scripts/statusline-tap.mjs` (`npm run usage:install`) |
-| Atalho da conta (`c`, `d`...) | linhas `alias x='... claude ...'` de `~/.zshrc`, `~/.bashrc`, `~/.zprofile`, `~/.bash_profile` |
+| Open sessions and status (busy/idle/waiting) | `<config>/sessions/<pid>.json` (+ live PID, outside Docker) |
+| Activities, tasks, title, counts | `<config>/projects/<cwd>/<sessionId>.jsonl` (reads last ~1 MB on boot; start in background) |
+| Subagents (including workflows) | `<config>/projects/<cwd>/<sessionId>/subagents/**/agent-*.jsonl` + `.meta.json` |
+| Account (email, organization) and usage cache | `~/.claude.json` (default account) or `<config>/.claude.json` — only these fields |
+| Live usage (5h and weekly) | `~/.habblaud/usage/<conta>.json`, written by Habblaud mod (`npm run mod:install`) or `scripts/statusline-tap.mjs` (`npm run usage:install`) |
+| Account shortcut (`c`, `d`...) | `alias x='... claude ...'` lines from `~/.zshrc`, `~/.bashrc`, `~/.zprofile`, `~/.bash_profile` |
 
-**Forks** (subagentes que herdam o contexto do pai): o transcript começa com uma linha `fork-context-ref`, a
-cópia da chamada `Agent` do pai (mesmo `tool_use` id do `.meta.json`) e o resultado dela ("Fork started…") junto
-com a instrução do fork. O parser ignora essa cópia — senão o resultado herdado parece o fim do subagente e o fork
-nunca entra no escritório — e usa o texto depois de `</fork-boilerplate>` como o pedido dele.
+**Forks** (subagents inheriting parent context): the transcript begins with a `fork-context-ref` line, the copy of the
+parent `Agent` call (same `tool_use` id as `.meta.json`) and its result ("Fork started…") along with the fork
+instruction. The parser ignores this copy — otherwise the inherited result looks like the subagent ended and the fork
+never enters the office — and uses the text after `</fork-boilerplate>` as its prompt.
 
-## Esperando o shell
+## Waiting on shell
 
-O status `shell` (ver `shared/types.ts`) é o agente que terminou o turno com comando(s) rodando em segundo
-plano. Vem do registro (`"status": "shell"`, Claude Code 2.1.292+, que não conta monitores); em versões que
-não gravam `shell`, registro `idle` + Bash em segundo plano sem notificação há menos de 12 h vira `shell`.
+The `shell` status (see `shared/types.ts`) is an agent that ended its turn with command(s) running in the background.
+Comes from the record (`"status": "shell"`, Claude Code 2.1.292+, which does not count monitors); in versions that do
+not record `shell`, an `idle` record + background Bash without notification under 12 h becomes `shell`.
 
-`sources/shells.ts` rastreia, por sessão (principal e subagentes), os `ShellJob` publicados em `AgentInfo.shells`:
-Bash com `run_in_background` (o id passa a ser o `backgroundTaskId` do tool_result), Bash em primeiro plano ainda
-sem resultado (`background: false`; some do lugar enquanto a sessão espera aprovação) e `Monitor` (`kind: 'monitor'`).
-Término: `<task-notification>` (linha `queue-operation`/`enqueue`, mensagem user ou anexo) casando `task-id` ou
-`tool-use-id`; `TaskStop`/`KillShell`/`KillBash`; fim de turno/interrupção (primeiro plano); `/clear` ou sessão
-encerrada; jobs anteriores ao processo atual (sessão retomada) ou com mais de 24 h. O fim de um shell em segundo
-plano vira a atividade `tool: 'ShellDone'` (`error` = falhou/interrompido; o mundo comemora ou lamenta) e um aviso;
-enquanto o status é `shell`, o balão é "⏳ Esperando o shell: <rótulo>" (`tool: 'ShellWait'`).
+`sources/shells.ts` tracks, per session (primary and subagents), `ShellJob` entries published in `AgentInfo.shells`:
+Bash with `run_in_background` (the id becomes the `backgroundTaskId` from the tool_result), foreground Bash still
+without result (`background: false`; disappears from place while the session awaits approval), and `Monitor` (`kind:
+'monitor'`). Termination: `<task-notification>` (`queue-operation`/`enqueue` line, user message, or attachment) matching
+`task-id` or `tool-use-id`; `TaskStop`/`KillShell`/`KillBash`; turn end/interruption (foreground); `/clear` or
+terminated session; jobs predating the current process (resumed session) or older than 24 h. The end of a background
+shell becomes the activity `tool: 'ShellDone'` (`error` = failed/interrupted; the world celebrates or laments) and a
+notice; while the status is `shell`, the balloon is "⏳ Waiting on shell: <label>" (`tool: 'ShellWait'`).
 
-## GitHub no escritório
+## GitHub in the office
 
-`sources/github.ts` acha eventos do GitHub nos transcripts, sem token e sem rede (funciona no Docker): o parser guarda as
-chamadas que interessam (Bash com `git push`/`gh pr create|merge|checks`/`gh run watch|view`/`gh release create`, já sem
-heredocs e com os encadeamentos separados, e ferramentas de servidores MCP do GitHub) e lê o resultado delas:
+`sources/github.ts` finds GitHub events in transcripts, tokenless and without network (works in Docker): the parser
+keeps calls of interest (Bash with `git push`/`gh pr create|merge|checks`/`gh run watch|view`/`gh release create`,
+without heredocs and with separated chains, and GitHub MCP server tools) and reads their outcome:
 
-- **fonte preferida:** `toolUseResult.gitOperation`, gravado pelo próprio Claude Code (`{pr: {number, url, action:
+- **preferred source:** `toolUseResult.gitOperation`, recorded by Claude Code itself (`{pr: {number, url, action:
   'created'|'merged'}, push: {branch}}`);
-- **saída do comando:** URL `…/pull/<n>` do `gh pr create`; `gh pr merge` sem erro nem sinal de falha (e sem `--auto`);
-  linhas `abc..def  main -> main` / `* [new branch]` depois de `To <remoto>`; cabeçalho `✓|X <branch> <workflow> · <id>`
-  ou `completed with '<conclusão>'` de `gh run watch|view`, `--json`/`--jq` com a conclusão, `gh pr checks` (tabs, resumo
-  ou `--json`; pendente não conta); URL `…/releases/tag/<tag>` do `gh release create` (rascunho não conta); JSON do MCP;
-- **código de saída:** `gh run watch --exit-status` ou `gh pr checks` como último comando, sem pipe (senão o código é de
-  outro programa) — em primeiro plano ("Exit code N") ou em segundo plano (resumo da `<task-notification>`). ≥ 128
-  (morto) e 8 (`gh pr checks` pendente) não contam.
+- **command output:** URL `…/pull/<n>` from `gh pr create`; `gh pr merge` without error or failure signal (and without
+  `--auto`); lines `abc..def  main -> main` / `* [new branch]` after `To <remote>`; header `✓|X <branch> <workflow> ·
+  <id>` or `completed with '<conclusion>'` from `gh run watch|view`, `--json`/`--jq` with the conclusion, `gh pr checks`
+  (tabs, summary or `--json`; pending does not count); URL `…/releases/tag/<tag>` from `gh release create` (drafts do
+  not count); MCP JSON;
+- **exit code:** `gh run watch --exit-status` or `gh pr checks` as the last command, unpiped (otherwise exit code
+  belongs to another program) — in foreground ("Exit code N") or background (`<task-notification>` summary). ≥ 128
+  (killed) and 8 (pending `gh pr checks`) do not count.
 
-Comando com erro, bloqueado ou interrompido não gera evento (só o CI vermelho usa o erro). O sinal `github` vira
-`Office.githubEvent`: atividade `tool: 'GitHub'` (`shared/github.ts`) e, só ao vivo (nunca na carga inicial nem para
-linhas com mais de 2 min), aviso e efeito na sala, publicado em `RoomInfo.effect` (`{kind: 'party'|'alarm', text, at,
-until, agentId}`): festa (PR aberto/mergeado, release) por 12 s; alarme (CI vermelho) até um CI verde na sala (que vira
-festa) ou 10 min. Push só avisa. O mesmo CI visto de novo em 2 min não repete o aviso.
+Commands with errors, blocked, or interrupted do not produce an event (only red CI uses the error). The `github` signal
+becomes `Office.githubEvent`: activity `tool: 'GitHub'` (`shared/github.ts`) and, live only (never on initial load or
+for lines older than 2 min), a notice and room effect, published in `RoomInfo.effect` (`{kind: 'party'|'alarm', text,
+at, until, agentId}`): party (PR opened/merged, release) for 12 s; alarm (red CI) until green CI in the room (which
+turns into a party) or 10 min. Push only notifies. The same CI seen again within 2 min does not repeat the notice.
 
 ## API
 
-| Rota | Descrição |
+| Route | Description |
 | --- | --- |
-| `GET /api/stream` | SSE: eventos `snapshot`, `feed`, `notice` (ver `shared/types.ts`); ping a cada 15 s |
-| `GET /api/snapshot` | `OfficeSnapshot` atual |
-| `GET /api/agents/:id` | `AgentDetail` (histórico de até 200 atividades) |
-| `GET /api/agents/:id/terminal` | SSE do terminal: eventos `init` e `append` (`TerminalMessage`); só com bind local (ver abaixo) |
-| `PUT /api/agents/:id/character` | personagem do projeto: `{name, seed, parts}` (ver abaixo); `200 {ok}`, `400`, `404` (não é o principal de uma sessão aberta), `409` (nome em uso); só com acesso local |
-| `DELETE /api/agents/:id/character` | "Voltar ao sorteio": apaga o personagem da sala; `200 {ok}` ou `404`; só com acesso local |
-| `GET /api/sessions/recent` | `RecentSessionsResponse`: sessões dos últimos 7 dias de todas as contas (até 150); mesma trava do terminal |
-| `GET /api/sessions/:conta/:sessionId/terminal` | SSE da conversa de uma sessão do histórico (mesmo protocolo do terminal); mesma trava |
-| `GET /api/stats?day=AAAA-MM-DD&tz=<IANA>&source=real\|demo` | `DayStatsResponse` do "Meu dia" (ver abaixo); padrões: hoje, fuso do servidor, demo se ligado e o dia é hoje |
-| `GET /api/stats/days?tz=<IANA>` | `StatsDaysResponse`: dias com dados reais (e do demo, se ligado), mais recente primeiro |
-| `GET /api/timeline/days` | `{recording, days:[{day, bytes, from, to}]}`: dias gravados para o timelapse, do mais recente ao mais antigo |
-| `GET /api/timeline/:dia` | o arquivo do dia (`AAAA-MM-DD`) em JSONL (`application/x-ndjson`, gzip se aceito); 400 para dia inválido, 404 sem gravação |
+| `GET /api/stream` | SSE: events `snapshot`, `feed`, `notice` (see `shared/types.ts`); ping every 15 s |
+| `GET /api/snapshot` | Current `OfficeSnapshot` |
+| `GET /api/agents/:id` | `AgentDetail` (history of up to 200 activities) |
+| `GET /api/agents/:id/terminal` | Terminal SSE: `init` and `append` events (`TerminalMessage`); local bind only (see below) |
+| `PUT /api/agents/:id/character` | Project character: `{name, seed, parts}` (see below); `200 {ok}`, `400`, `404` (not the primary of an open session), `409` (name in use); local access only |
+| `DELETE /api/agents/:id/character` | "Back to random": removes character from room; `200 {ok}` or `404`; local access only |
+| `GET /api/sessions/recent` | `RecentSessionsResponse`: sessions from last 7 days across all accounts (up to 150); same terminal lock |
+| `GET /api/sessions/:conta/:sessionId/terminal` | SSE of conversation for a historical session (same terminal protocol); same lock |
+| `GET /api/stats?day=AAAA-MM-DD&tz=<IANA>&source=real\|demo` | `DayStatsResponse` of "My day" (see below); defaults: today, server timezone, demo if enabled and day is today |
+| `GET /api/stats/days?tz=<IANA>` | `StatsDaysResponse`: days with real data (and demo, if enabled), most recent first |
+| `GET /api/timeline/days` | `{recording, days:[{day, bytes, from, to}]}`: days recorded for timelapse, most recent to oldest |
+| `GET /api/timeline/:dia` | Day file (`AAAA-MM-DD`) in JSONL (`application/x-ndjson`, gzip if accepted); 400 for invalid day, 404 without recording |
 | `GET /api/health` | `{ok, version, demo, docker, terminal, permissions, messages, updates:{state, latest, available}, sources, accounts:[{id, usageStatus}]}` |
-| `POST /api/demo` | `{enabled: boolean}` liga/desliga agentes simulados (misturados aos reais) |
-| `GET /api/mod/summary?account=&session=` | `ModSummary` para o mod do Claude Code: `{version, agents, working, waiting:[{id, name, room, account, waitingFor, since, answerable}]}`, sem o demo e sem a sessão de quem pergunta (ver abaixo) |
-| `GET /api/updates` | `{version, ...UpdateStatus}`: versão em uso e o resultado da verificação de versão nova (ver abaixo) |
-| `POST /api/updates/check` | "Verificar agora": consulta o GitHub (no máximo uma vez a cada 30 s) e devolve `{version, ...UpdateStatus}` |
-| `/api/world/*` | Habblaud World (conta, personagem e prédio; ligado por padrão, `HABBLAUD_WORLD=0` desliga): só pela porta local com `Host` local; ver abaixo |
-| `POST /api/permissions` | (hook) registra um pedido de permissão: `201 {id, expiresAt}` ou `200 {skip}`; só com bind local (ver abaixo) |
-| `GET /api/permissions/:id/wait` | (hook) long-poll de até 25 s (`?timeout=` em segundos): `{status: 'pending' \| 'decided' \| 'released', ...}` |
-| `GET /api/permissions/:id` | (página) detalhe do pedido com os argumentos (`PermissionRequestInfo` com `input`) |
-| `POST /api/permissions/:id/decision` | (página) `PermissionDecision`: `{behavior: 'allow' \| 'deny' \| 'terminal' \| 'answer', message?, interrupt?, suggestion?, answers?}` |
-| `POST /api/messages` | (página) `{agentId, text}`: manda uma mensagem a um agente principal; `201 OutboxMessage`; só com bind local (ver abaixo) |
-| `GET /api/messages/:id` | (página) situação da mensagem (`OutboxMessage`: `queued` \| `sent` \| `delivered` \| `failed`) |
-| `POST /api/mod/inbox` | (plugin `habblaud-mensagens`) `{session, account?}`: marca a presença da sessão e entrega `{messages: InboxMessage[]}` |
-| `POST /api/mod/inbox/ack` | (plugin) `{session, results: [{id, ok, error?}]}`: confirma cada mensagem entregue (ou a falha) |
+| `POST /api/demo` | `{enabled: boolean}` enables/disables simulated agents (mixed with real ones) |
+| `GET /api/mod/summary?account=&session=` | `ModSummary` for Claude Code mod: `{version, agents, working, waiting:[{id, name, room, account, waitingFor, since, answerable}]}`, without demo and excluding caller session (see below) |
+| `GET /api/updates` | `{version, ...UpdateStatus}`: running version and result of new version check (see below) |
+| `POST /api/updates/check` | "Check now": queries GitHub (at most once every 30 s) and returns `{version, ...UpdateStatus}` |
+| `/api/world/*` | Habblaud World (account, character and building; enabled by default, `HABBLAUD_WORLD=0` disables): local port with local `Host` only; see below |
+| `POST /api/permissions` | (hook) registers a permission request: `201 {id, expiresAt}` or `200 {skip}`; local bind only (see below) |
+| `GET /api/permissions/:id/wait` | (hook) long-poll up to 25 s (`?timeout=` in seconds): `{status: 'pending' \| 'decided' \| 'released', ...}` |
+| `GET /api/permissions/:id` | (page) request detail with arguments (`PermissionRequestInfo` with `input`) |
+| `POST /api/permissions/:id/decision` | (page) `PermissionDecision`: `{behavior: 'allow' \| 'deny' \| 'terminal' \| 'answer', message?, interrupt?, suggestion?, answers?}` |
+| `POST /api/messages` | (page) `{agentId, text}`: sends a message to a primary agent; `201 OutboxMessage`; local bind only (see below) |
+| `GET /api/messages/:id` | (page) message status (`OutboxMessage`: `queued` \| `sent` \| `delivered` \| `failed`) |
+| `POST /api/mod/inbox` | (`habblaud-mensagens` plugin) `{session, account?}`: records session presence and delivers `{messages: InboxMessage[]}` |
+| `POST /api/mod/inbox/ack` | (plugin) `{session, results: [{id, ok, error?}]}`: acknowledges each delivered message (or failure) |
 
-O snapshot (SSE e `GET /api/snapshot`) leva só as últimas 8 atividades de cada agente em `recent`; o histórico
-de até 200 (inclusive o começo de transcripts longos, lido em segundo plano) vem de `GET /api/agents/:id`.
+The snapshot (SSE and `GET /api/snapshot`) carries only the last 8 activities of each agent in `recent`; history of up
+to 200 (including the beginning of long transcripts, read in background) comes from `GET /api/agents/:id`.
 
-Borda (`http/guard.ts`, vale para API, estáticos e Vite): `Host` precisa ser `localhost`/`*.localhost`, um IP
-ou um nome de `HABBLAUD_ALLOWED_HOSTS` (contra DNS rebinding) → senão 403; `POST` em `/api/*` exige
-`Content-Type: application/json` (415) e `Origin` da mesma origem ou local (403), contra CSRF. Respostas JSON
-saem com `nosniff` e `Cross-Origin-Resource-Policy: same-origin`, sem CORS.
+Edge (`http/guard.ts`, applies to API, statics, and Vite): `Host` must be `localhost`/`*.localhost`, an IP, or a name
+from `HABBLAUD_ALLOWED_HOSTS` (against DNS rebinding) → otherwise 403; `POST` on `/api/*` requires `Content-Type:
+application/json` (415) and same-origin or local `Origin` (403), against CSRF. JSON responses are sent with `nosniff`
+and `Cross-Origin-Resource-Policy: same-origin`, no CORS.
 
-## Versão nova
+## New version
 
-`updates/checker.ts` consulta `GET https://api.github.com/repos/<dono>/<nome>/releases/latest`, sem token, 5 s depois
-de subir e depois a cada 6 h (1 h depois de uma falha). O repositório vem do campo `repository` do `package.json`
-(um fork só precisa trocar esse campo). A consulta manda `If-None-Match` com o ETag da anterior, porque a resposta
-304 não gasta o limite de 60 consultas por hora sem token. O resultado (`repo`, `checkedAt`, `etag`, `latest`, `url`,
-`publishedAt`) fica em `<dataDir>/updates.json`, para um reinício não repetir a consulta antes da hora. A tag precisa
-seguir o semver (`v1.2.3` ou `1.2.3-beta.1`) e é comparada com a versão do `package.json`. Respostas: 404 = nenhuma
-release (`ok` sem `latest`); 403/429 = limite do GitHub (`error`). Numa falha, a última release conhecida continua
-valendo. O status vai no snapshot em `meta.updates` (`UpdateStatus` em `shared/types.ts`) e, quando muda, o snapshot é
-republicado. O link da release só passa se for do próprio repositório no GitHub. Uma versão nova encontrada é
-avisada uma vez no log. `HABBLAUD_UPDATE_CHECK=0` desliga (`state: 'off'`, nenhuma consulta).
+`updates/checker.ts` queries `GET https://api.github.com/repos/<owner>/<name>/releases/latest`, without token, 5 s after
+startup and every 6 h thereafter (1 h after a failure). The repository comes from the `repository` field of
+`package.json` (a fork only needs to change that field). The query sends `If-None-Match` with the previous ETag, since a
+304 response does not consume the 60 queries/hour limit without token. The result (`repo`, `checkedAt`, `etag`,
+`latest`, `url`, `publishedAt`) is saved in `<dataDir>/updates.json`, so a restart does not repeat queries prematurely.
+The tag must follow semver (`v1.2.3` or `1.2.3-beta.1`) and is compared against the `package.json` version. Responses:
+404 = no release (`ok` without `latest`); 403/429 = GitHub limit (`error`). On failure, the last known release remains
+valid. Status goes in the snapshot under `meta.updates` (`UpdateStatus` in `shared/types.ts`) and is republished when it
+changes. The release link is only passed if from the repository itself on GitHub. A newly found version is logged once.
+`HABBLAUD_UPDATE_CHECK=0` disables it (`state: 'off'`, no queries).
 
-Cada versão tem a sua seção no `CHANGELOG.md`; um teste falha se a versão do `package.json` não tiver seção, e o
-`npm run release` (`scripts/release.ts`) cria a tag e a release com o texto dela como notas.
+Each version has its section in `CHANGELOG.md`; a test fails if the `package.json` version lacks a section, and `npm run
+release` (`scripts/release.ts`) creates the tag and release using its section text as release notes.
 
 ## Terminal
 
-`GET /api/agents/:id/terminal` (`http/terminal.ts`) transmite a conversa da sessão — prompts, respostas,
-ferramentas e resultados, como o Claude Code mostra — montada do transcript por `sources/terminal.ts`, com
-segredos mascarados e textos truncados. Ao conectar (e a cada reconexão) vem um `init` com as últimas 500
-entradas dos ~4 MB finais do transcript (`truncated: true` se ficou conversa de fora); depois, polling de 400 ms
-manda `append` com as entradas novas. Transcript truncado/substituído ou trocado (`/clear` no mesmo processo) =
-`init` de novo; arquivo sumido = continua tentando. Agentes do demo não têm transcript: a conversa fictícia sai
-de `shared/demo/terminal.ts` (atualizada a cada 500 ms). Ping a cada 15 s, no máximo 8 terminais ao mesmo tempo,
-cliente com mais de 8 MB acumulados é desconectado. O que se digita no rodapé do terminal vai como mensagem (ver
-[Mensagens pelo escritório](#mensagens-pelo-escritório)); o stream continua só de leitura.
+`GET /api/agents/:id/terminal` (`http/terminal.ts`) streams the session conversation — prompts, responses, tools and
+results, as Claude Code displays them — assembled from the transcript by `sources/terminal.ts`, with masked secrets and
+truncated text. Upon connecting (and on each reconnection) comes an `init` with the last 500 entries of the final ~4 MB
+of the transcript (`truncated: true` if conversation was left out); afterwards, 400 ms polling sends `append` with new
+entries. Truncated/replaced or swapped transcript (`/clear` in the same process) = `init` again; missing file = keeps
+trying. Demo agents have no transcript: fictitious conversation comes from `shared/demo/terminal.ts` (updated every 500
+ms). Ping every 15 s, at most 8 terminals simultaneously, client with over 8 MB accumulated is disconnected. What is
+typed into the terminal footer is sent as a message (see [Messages from the office](#messages-from-the-office)); the
+stream remains read-only.
 
-O recurso só existe com **bind local** (`config.ts`, `terminalOffReason`), já que mostra a conversa inteira:
+This feature only exists with **local bind** (`config.ts`, `terminalOffReason`), since it reveals the full conversation:
 
-- Node: `HABBLAUD_HOST` loopback (127.0.0.0/8, `::1`, `localhost`); `0.0.0.0`, `::` ou IP de rede desligam;
-- Docker: o processo sempre escuta em `0.0.0.0` dentro do container, então vale a porta publicada no host,
-  `HABBLAUD_BIND` (o `docker-compose.yml` repassa o mesmo valor ao container): loopback liga; ausente, vazia ou
-  qualquer outra desliga;
-- `HABBLAUD_TERMINAL=0` desliga sempre; nenhuma variável liga o terminal com a porta exposta.
+- Node: loopback `HABBLAUD_HOST` (127.0.0.0/8, `::1`, `localhost`); `0.0.0.0`, `::` or network IP disables;
+- Docker: process always listens on `0.0.0.0` inside container, so the published port on host applies, `HABBLAUD_BIND`
+  (`docker-compose.yml` forwards the same value to the container): loopback enables; missing, empty, or any other
+  disables;
+- `HABBLAUD_TERMINAL=0` always disables; no variable enables the terminal with an exposed port.
 
-Além disso, cada requisição precisa de `Host` local (`localhost`, `*.localhost`, 127.x ou `[::1]`): IPs da rede e
-nomes de `HABBLAUD_ALLOWED_HOSTS` (proxies, túneis) recebem 403. O estado sai em `meta.terminal` do snapshot e em
-`terminal` no `/api/health`. Erros antes do stream respondem JSON `{error}`: 403 (desligado ou acesso que não é
-local), 404 (agente ou transcript desconhecido), 405 (método que não é `GET`), 429 (terminais demais) e 500
-(transcript ilegível).
+In addition, each request requires a local `Host` (`localhost`, `*.localhost`, 127.x or `[::1]`): network IPs and names
+from `HABBLAUD_ALLOWED_HOSTS` (proxies, tunnels) receive 403. Status appears in `meta.terminal` of the snapshot and in
+`terminal` under `/api/health`. Errors before the stream respond with JSON `{error}`: 403 (disabled or non-local
+access), 404 (unknown agent or transcript), 405 (method not `GET`), 429 (too many terminals), and 500 (unreadable
+transcript).
 
-## Linha do tempo (timelapse)
+## Timeline (timelapse)
 
-`history/timeline.ts` grava o escritório para o timelapse do cliente em `<HABBLAUD_DATA_DIR>/timeline/AAAA-MM-DD.jsonl`
-(dia local do servidor; no Docker, `/data/timeline`). Formato e reconstrução em `shared/timeline.ts`; um registro por linha:
+`history/timeline.ts` records the office for client timelapse in `<HABBLAUD_DATA_DIR>/timeline/AAAA-MM-DD.jsonl` (server
+local day; in Docker, `/data/timeline`). Format and reconstruction in `shared/timeline.ts`; one record per line:
 
-- `{"t":"k", at, v, every, boot?, rooms, agents, accounts}`: **keyframe**, o estado completo. Abre cada arquivo, se
-  repete a cada 5 min (`every`) e marca o boot do servidor;
-- `{"t":"d", at, rooms?, agents?, accounts?}`: **delta**, só o que mudou (`[id, objeto | null]` para salas e contas;
-  `[id, campos alterados | null]` para agentes, com `null` = campo ou agente que saiu);
-- `{"t":"end", at, reason?}`: o servidor parou (`SIGTERM`/`SIGINT`) ou o dia chegou ao limite (`reason: "limit"`).
+- `{"t":"k", at, v, every, boot?, rooms, agents, accounts}`: **keyframe**, the full state. Opens each file, repeats
+  every 5 min (`every`), and marks server boot;
+- `{"t":"d", at, rooms?, agents?, accounts?}`: **delta**, only what changed (`[id, object | null]` for rooms and
+  accounts; `[id, changed fields | null]` for agents, with `null` = removed field or agent);
+- `{"t":"end", at, reason?}`: server stopped (`SIGTERM`/`SIGINT`) or the day reached its limit (`reason: "limit"`).
 
-Entra cada snapshot novo do `Hub` (`hub.onSnapshot`, ou seja, cada commit do `Office` com mudança), com throttle de
-1 s e só quando muda algo que o player desenha. Por agente: id, kind, parentId, sala, nome, look, papel, conta,
-status (com `statusSince`), waitingFor, atividade (`kind`, `icon`, `text`, `at`, `tool`, `error`), semente,
-background, título e shells resumidos (sem o comando); agentes, salas e contas do modo demonstração (`demo:`) levam
-`demo: true`. Contas sem e-mail, organização nem pasta. Nada de transcript: é a mesma exposição do `/api/snapshot`,
-por isso as rotas valem com qualquer bind.
+Every new snapshot from `Hub` (`hub.onSnapshot`, i.e., each `Office` commit with changes) enters, throttled to 1 s and
+only when something the player renders changes. Per agent: id, kind, parentId, room, name, look, role, account, status
+(with `statusSince`), waitingFor, activity (`kind`, `icon`, `text`, `at`, `tool`, `error`), seed, background, title, and
+summarized shells (without command); demo mode agents, rooms, and accounts (`demo:`) have `demo: true`. Accounts lack
+email, organization, and folder. No transcripts: same exposure as `/api/snapshot`, so routes work with any bind.
 
-- **Limites:** acima de 20 MB no dia, delta a cada 15 s e keyframe a cada 15 min; acima de 30 MB, para até a virada.
-- **Retenção:** os últimos 7 dias (contando hoje); só arquivos `AAAA-MM-DD.jsonl` são apagados.
-- **Falhas de disco:** nunca derrubam o servidor: um aviso no log, nova tentativa em 1 min, recomeçando com keyframe.
-- **Lacunas:** sem nenhum registro por mais de ~1,5× `every` (ou depois de um `end`), o player mostra "sem dados".
-- `HABBLAUD_TIMELINE=0` desliga a gravação (as rotas continuam servindo os dias gravados).
+- **Limits:** above 20 MB in a day, delta every 15 s and keyframe every 15 min; above 30 MB, stops until midnight.
+- **Retention:** last 7 days (including today); only `AAAA-MM-DD.jsonl` files are deleted.
+- **Disk failures:** never crash the server: warning in log, retry in 1 min, restarting with keyframe.
+- **Gaps:** without any record for more than ~1.5× `every` (or after `end`), player displays "no data".
+- `HABBLAUD_TIMELINE=0` disables recording (routes continue serving recorded days).
 
-O dia na URL só é aceito como `AAAA-MM-DD` de uma data válida e o caminho do arquivo é montado só a partir dele
-(nada de `..`, barras codificadas ou bytes nulos). `scripts/demo-timeline.ts` (`npm run demo:timeline`) usa o mesmo
-gravador, com relógio simulado e o `DemoSimulator`, para gerar dias inteiros só com dados fictícios.
-## Meu dia (estatísticas do dia)
+The day in the URL is only accepted as `AAAA-MM-DD` of a valid date and the file path is built strictly from it (no
+`..`, encoded slashes, or null bytes). `scripts/demo-timeline.ts` (`npm run demo:timeline`) uses the same recorder, with
+simulated clock and `DemoSimulator`, to generate entire days with fictitious data.
 
-`history/daystats.ts` amostra o snapshot do escritório a cada 1 s e passa os agentes ao rastreador puro de
-`shared/daystats.ts`, que integra, por agente, o tempo desde a amostra anterior no status em que ele estava
-(`working`, `waiting`, `shell`, `idle`; `done` e `offline` não contam), partindo o intervalo em `statusSince`.
-Intervalos de mais de 2 min entre amostras (servidor parado, computador dormindo) não contam. Esperas por você são
-episódios de `waiting` contínuo (os de menos de 3 s ficam de fora do ranking); "tempo de relógio com alguém
-esperando" une os intervalos de todos os agentes.
+## My day (day stats)
 
-- **Contagens:** `AgentStats` é cumulativo por agente, então conta o que passa do maior valor já visto (releitura de
-  transcript regravado não conta de novo). Agente que já existia (boot, `/resume`) vira linha de base nos primeiros
-  20 s (90 s no boot, enquanto o começo dos transcripts longos é lido em segundo plano); subagente que nasce durante a
-  observação e sessão nova (ou `/clear`) contam do zero. Salto impossível numa amostra (mais de 60 ferramentas ou 5 M
-  de tokens) é tratado como releitura. Custo que aparece num agente antigo é o total da sessão: só vira referência.
-  Prompts saem das atividades `prompt` posteriores ao início do servidor; tarefas, do que sobe no nº de concluídas.
-  Agente que some e volta mantém a linha de base por 6 h.
-- **Baldes de 1 hora alinhados em UTC** (por sala, por conta e quem esteve presente: sessões e subagentes), guardados
-  por dia de arquivo no fuso do servidor. O dia pedido é montado na consulta, no fuso `tz` do navegador: no Docker
-  (UTC) o dia do painel continua começando à meia-noite do usuário.
-- **Arquivos:** `<dataDir>/stats/AAAA-MM-DD.json` (`StatsDayFile`, versão 1), gravados a cada 30 s e ao encerrar
-  (temporário + `rename`); no boot carrega ontem e hoje, indexa os demais e apaga os de mais de 30 dias (de novo a
-  cada virada do dia). Arquivo ilegível vira `.corrupt` e o dia recomeça; erros de disco só geram aviso no log.
-- **Demo:** agentes com id `demo:` nunca entram nos dados reais. Com o demo ligado há um balde separado, só em
-  memória, semeado com um histórico fictício de ontem até agora (`shared/demo/daystats.ts`) e alimentado ao vivo.
-- **Exposição:** só números agregados e nomes de projeto, conta e agente (o mesmo que o `/api/snapshot`), então a rota
-  não tem a trava de bind local do terminal. Erros: 400 (`day` fora do formato `AAAA-MM-DD`, data inexistente, dia no
-  futuro, parâmetro repetido, `tz` ou `source` inválidos), 404 (sem dados, fora da retenção ou demo desligado), 405.
+`history/daystats.ts` samples the office snapshot every 1 s and passes agents to the pure tracker in
+`shared/daystats.ts`, which integrates, per agent, time elapsed since the previous sample in its current status
+(`working`, `waiting`, `shell`, `idle`; `done` and `offline` do not count), splitting intervals at `statusSince`.
+Intervals over 2 min between samples (stopped server, sleeping computer) do not count. Waits for you are episodes of
+continuous `waiting` (those under 3 s are excluded from rankings); "wall clock time with someone waiting" unions
+intervals across all agents.
 
-Estáticos (`http/static.ts`): `/bundle/*` (saída do Vite com hash, `build.assetsDir`) com cache `immutable` de
-1 ano; o resto (`index.html`, `client/public` em `/assets/*`) com `no-cache` + `ETag`/`Last-Modified` (304).
+- **Counts:** `AgentStats` is cumulative per agent, counting increments beyond the highest seen value (rereading
+  rewritten transcript does not recount). Pre-existing agents (boot, `/resume`) become baseline during first 20 s (90 s
+  on boot, while long transcript starts are read in background); subagents created during observation and new sessions
+  (or `/clear`) count from zero. An impossible jump in a sample (over 60 tools or 5M tokens) is treated as a reread.
+  Cost appearing on an old agent is total session cost: reference only. Prompts come from `prompt` activities after
+  server startup; tasks from increases in completed count. Agents that disappear and return retain baseline for 6 h.
+- **1-hour buckets aligned to UTC** (by room, account, and present participants: sessions and subagents), stored by file
+  day in server timezone. Requested day is assembled on query, in browser `tz`: in Docker (UTC) the dashboard day still
+  starts at user midnight.
+- **Files:** `<dataDir>/stats/AAAA-MM-DD.json` (`StatsDayFile`, version 1), written every 30 s and on shutdown
+  (temporary + `rename`); on boot loads yesterday and today, indexes others and deletes those older than 30 days (again
+  at midnight rollover). Unreadable file becomes `.corrupt` and day restarts; disk errors only log a warning.
+- **Demo:** agents with `demo:` id never enter real data. When demo is enabled, a separate in-memory-only bucket is
+  seeded with fictitious history from yesterday to now (`shared/demo/daystats.ts`) and fed live.
+- **Exposure:** only aggregated numbers and project, account, and agent names (same as `/api/snapshot`), so the route
+  does not have the terminal's local bind lock. Errors: 400 (`day` not in `AAAA-MM-DD` format, nonexistent date, future
+  day, repeated parameter, invalid `tz` or `source`), 404 (no data, past retention, or demo off), 405.
 
-## Histórico de sessões
+Statics (`http/static.ts`): `/bundle/*` (Vite output with hash, `build.assetsDir`) with 1-year `immutable` cache; the
+rest (`index.html`, `client/public` under `/assets/*`) with `no-cache` + `ETag`/`Last-Modified` (304).
 
-`sources/history.ts` lista, sob demanda, os transcripts de primeiro nível `<config>/projects/*/<sessionId>.jsonl` de
-cada conta (nome com formato de UUID; subagentes ficam de fora) modificados nos últimos 7 dias, os 150 mais recentes.
-De cada arquivo lê só os primeiros 64 KB (projeto = `cwd` da primeira linha que o traz, primeira atividade, o primeiro
-prompt) e os últimos 64 KB (título e última atividade; sem nenhuma linha de título ali, procura nos últimos 512 KB),
-com leitura assíncrona e um cache por caminho válido enquanto mtime e tamanho não mudam. O título segue o do agente
-(`custom-title`/`custom-title.json` > `agent-name` > `ai-title` > `last-prompt`) e, sem nenhum, é o primeiro prompt.
-Sessão aberta (agente principal da conta e do `sessionId` no escritório) sai com `open: true` e `agentId`; uma
-encerrada sem nenhuma linha com horário é omitida. A lista sai da atividade mais recente para a mais antiga.
+## Session history
 
-`GET /api/sessions/:conta/:sessionId/terminal` (`http/sessions.ts`) usa o mesmo leitor do terminal do agente
-(`TerminalStreams.attachSession`: `init` com as últimas 500 entradas dos ~4 MB finais, depois `append`, com polling de
-2 s para o caso de a sessão ser retomada) e conta no limite de 8 terminais. Validação: a conta precisa ser uma das
-conhecidas (404), o id precisa ter formato de UUID (400) e o arquivo, com links resolvidos (`realpath`), precisa ficar
-dentro da pasta `projects/` da conta (404); segmentos que não decodificam respondem 400. As duas rotas exigem a mesma
-trava do terminal (recurso ligado e `Host` local, senão 403) e só aceitam `GET` (a lista, também `HEAD`; senão 405).
-## Responder pelo escritório
+`sources/history.ts` lists, on demand, top-level transcripts `<config>/projects/*/<sessionId>.jsonl` of each account
+(UUID-formatted name; subagents excluded) modified in the last 7 days, up to 150 most recent. From each file it reads
+only the first 64 KB (project = `cwd` of first line containing it, first activity, first prompt) and the last 64 KB
+(title and last activity; without a title line there, searches last 512 KB), with async reading and a cache by valid
+path as long as mtime and size do not change. The title follows agent rules (`custom-title`/`custom-title.json` >
+`agent-name` > `ai-title` > `last-prompt`) and, if none exist, is the first prompt. An open session (primary agent of
+account and `sessionId` in office) returns `open: true` and `agentId`; a closed session without timestamp lines is
+omitted. The list is returned from most recent activity to oldest.
 
-O hook `PermissionRequest` do Claude Code (`mod/habblaud-permissoes/hooks/permission-hook.mjs`, com `matcher: "*"`:
-pelo plugin `habblaud-permissoes` no Claude Code 2.1.287+ ou instalado em `<conta>/settings.json` por
-`npm run hooks:install`) roda **junto** com o diálogo de permissão do terminal: vale o que
-responder primeiro. Em subagentes em segundo plano o Claude Code roda o hook antes e só mostra o diálogo depois que
-ele sai. O hook manda o pedido (`session_id`, `agent_id`/`agent_type`, `cwd`, `tool_name`, `tool_input` com textos
-cortados, `permission_suggestions` e o próprio `timeout_ms`) e espera; com `decided` imprime
-`hookSpecificOutput.decision` (`allow`, com `updatedPermissions` = a sugestão original escolhida, ou `deny` com
-`message`/`interrupt`); com `released`, erro ou tempo esgotado sai sem imprimir nada (vale o terminal).
+`GET /api/sessions/:conta/:sessionId/terminal` (`http/sessions.ts`) uses the same agent terminal reader
+(`TerminalStreams.attachSession`: `init` with last 500 entries of final ~4 MB, then `append`, with 2 s polling in case
+session is resumed) and counts toward the 8 terminals limit. Validation: account must be known (404), id must be UUID
+format (400), and the file, with resolved links (`realpath`), must remain inside the account's `projects/` directory
+(404); undecodable segments respond 400. Both routes require the same terminal lock (enabled feature and local `Host`,
+otherwise 403) and only accept `GET` (the list also accepts `HEAD`; otherwise 405).
 
-Perguntas (`AskUserQuestion`) passam pelo mesmo caminho. O pedido leva `questions` (mascaradas e cortadas, com a
-posição original de cada pergunta e opção em `index`; vão também no snapshot) e a página responde com
-`{behavior: 'answer', answers: [{question, options?, other?}]}`, por posição. O registro confere contra o formato
-original guardado (cada pergunta uma vez; sem `multiSelect`, uma opção ou o texto livre; `other` até 2.000
-caracteres) e entrega `{status: 'decided', behavior: 'answer', answers}`; o hook troca as posições pelos textos
-originais do stdin e imprime `allow` com `updatedInput` = a entrada original mais `answers` (`{pergunta: "Rótulo A,
-Rótulo B, texto livre"}`, como a documentação dos hooks manda responder o `AskUserQuestion`). `allow` simples numa
-pergunta é recusado (400); `deny` vale. Pergunta que o escritório não consegue mostrar inteira (mais de 4, ou
-nenhuma válida) não é desviada (`unsupported-tool`).
+## Answering from the office
+
+The Claude Code `PermissionRequest` hook (`mod/habblaud-permissoes/hooks/permission-hook.mjs`, with `matcher: "*"`: via
+the `habblaud-permissoes` plugin in Claude Code 2.1.287+ or installed in `<conta>/settings.json` via `npm run
+hooks:install`) runs **alongside** the terminal permission dialog: whichever answers first wins. In background
+subagents, Claude Code runs the hook first and only shows the dialog after it finishes. The hook sends the request
+(`session_id`, `agent_id`/`agent_type`, `cwd`, `tool_name`, `tool_input` with truncated text, `permission_suggestions`
+and its own `timeout_ms`) and waits; upon `decided` it prints `hookSpecificOutput.decision` (`allow`, with
+`updatedPermissions` = selected original suggestion, or `deny` with `message`/`interrupt`); on `released`, error, or
+timeout it exits without printing (terminal wins).
+
+Questions (`AskUserQuestion`) follow the same path. The request includes `questions` (masked and truncated, with the
+original position of each question and option in `index`; also sent in snapshot) and the page responds with `{behavior:
+'answer', answers: [{question, options?, other?}]}`, by position. The registry validates against the stored original
+format (each question once; without `multiSelect`, a single option or freeform text; `other` up to 2,000 characters) and
+delivers `{status: 'decided', behavior: 'answer', answers}`; the hook substitutes positions with the original stdin
+texts and prints `allow` with `updatedInput` = original input plus `answers` (`{pergunta: "Label A, Label B, freeform
+text"}`, as hook documentation specifies for responding to `AskUserQuestion`). A plain `allow` on a question is rejected
+(400); `deny` is accepted. Questions the office cannot display completely (more than 4, or none valid) are not
+intercepted (`unsupported-tool`).
 
 `permissions/registry.ts` (`PermissionRegistry`):
 
-- só aceita o pedido com alguma página conectada por `Host` local (`Hub.localSize`) e com a sessão conhecida
-  (principal pelo `session_id`; subagente por `<session_id>:<agent_id>`, ou o principal com `subagent` = tipo);
-  senão `{skip: 'no-viewers' | 'unknown-session' | 'unsupported-tool' | 'too-many'}` (máx. 32 abertos);
-- publica o pedido mais antigo de cada agente em `AgentInfo.permission` (sem `input`, que só sai pelo detalhe;
-  `queued` = quantos esperam depois) e põe o agente como `waiting`; atividade `PermissionRequest` no feed e aviso
-  "pede permissão" (dedupe do "precisa de você"); aprovar/recusar viram atividades também;
-- libera o hook (`released`) quando: `terminal` na página, tempo limite do hook + 5 s (`expired`), nenhum hook
-  esperando por 8 s (`orphan`), agente que saiu (`gone`) ou resposta no próprio terminal (`answered`): o Claude Code
-  não encerra o hook quando você responde lá, então o registro acha a chamada no fim do transcript
-  (`permissions/transcript.ts`: nome + assinatura dos argumentos, a mais recente sem resultado) e espera o
-  `tool_result` dela; sem a chamada, um principal que esteve `waiting` no registro de sessões e saiu dele há 3 s;
-- decisões não buscadas ficam guardadas por 30 s; pedidos do demo (`demo:perm-…`) vão para o simulador.
+- only accepts the request if a page is connected via local `Host` (`Hub.localSize`) and the session is known (primary
+  by `session_id`; subagent by `<session_id>:<agent_id>`, or primary with `subagent` = type); otherwise `{skip:
+  'no-viewers' | 'unknown-session' | 'unsupported-tool' | 'too-many'}` (max 32 open);
+- publishes the oldest request for each agent in `AgentInfo.permission` (without `input`, only returned in detail;
+  `queued` = how many waiting after) and sets agent to `waiting`; `PermissionRequest` activity in feed and notice
+  "asking for permission" (dedupes with "needs you"); approvals/rejections also become activities;
+- releases the hook (`released`) on: `terminal` in page, hook timeout + 5 s (`expired`), no hook waiting for 8 s
+  (`orphan`), departed agent (`gone`), or response in terminal itself (`answered`): Claude Code does not terminate the
+  hook when you answer in terminal, so the registry finds the call at transcript end (`permissions/transcript.ts`: name
+  + argument signature, most recent without result) and waits for its `tool_result`; without the call, a primary that
+  was `waiting` in session registry and left it 3 s ago;
+- unretrieved decisions are kept for 30 s; demo requests (`demo:perm-…`) go to the simulator.
 
-As rotas (`permissions/http.ts`) seguem a trava do terminal: sem `ServerConfig.terminal` → 403 em
-todas; `Host` que não é local → 403. O guard já exige JSON e `Origin` local nos `POST`. Erros: 400 (corpo, sugestão
-ou resposta inválidos), 404 (pedido desconhecido, já entregue ou expirado), 405, 409 (já respondido).
+Routes (`permissions/http.ts`) follow the terminal lock: without `ServerConfig.terminal` → 403 on all; non-local `Host`
+→ 403. Guard requires JSON and local `Origin` on `POST`. Errors: 400 (invalid body, suggestion, or answer), 404 (unknown
+request, already delivered or expired), 405, 409 (already answered).
 
-## Mensagens pelo escritório
+## Messages from the office
 
-A página manda texto a um agente principal (`POST /api/messages`, pela gaveta do agente ou pelo rodapé do terminal) e
-o plugin `habblaud-mensagens` da sessão o busca (`POST /api/mod/inbox`, a cada 2 s) e o entrega com
-`$.prompt.submit({ text, asUser: true })`: o modelo lê como se você tivesse digitado. Depois confirma
-(`POST /api/mod/inbox/ack`). Detalhes do plugin em [`mod/README.md`](../mod/README.md).
+The page sends text to a primary agent (`POST /api/messages`, via agent drawer or terminal footer) and the session's
+`habblaud-mensagens` plugin polls for it (`POST /api/mod/inbox`, every 2 s) and delivers it via `$.prompt.submit({ text,
+asUser: true })`: the model reads it as if you typed it. It then acknowledges (`POST /api/mod/inbox/ack`). Plugin
+details in [`mod/README.md`](../mod/README.md).
 
 `messages/registry.ts` (`MessageRegistry`):
 
-- **presença:** cada pergunta do plugin marca a sessão (o principal com aquele `sessionId`, e a `account` igual se
-  vier); vista há até 10 s, o agente sai no snapshot com `canMessage: true`. O snapshot só muda quando a presença muda;
-- **fila:** até 5 mensagens em aberto por agente (429) e 20.000 caracteres por mensagem; o texto vai como foi digitado,
-  nunca aparece nas respostas para a página nem no log, e é descartado quando a mensagem se resolve;
-- **estados:** `queued` → `sent` (o plugin buscou) → `delivered` ou `failed`. `queued` sem ser buscada em 60 s, `sent`
-  sem confirmação em 30 s ou agente que saiu = `failed`, com o motivo. `delivered` = entrou na sessão ou na fila dela
-  (com o agente ocupado, entra quando ele terminar o turno). Resolvidas ficam 10 min para o `GET`;
-- entregue: atividade ✉️ "Mensagem pelo Habblaud" no agente (o detalhe mascarado e cortado); agentes do demo recebem
-  mensagens fictícias, entregues em ~1 s, sem sessão real.
+- **presence:** each plugin poll marks the session (the primary with that `sessionId`, matching `account` if provided);
+  seen within 10 s, the agent appears in snapshot with `canMessage: true`. Snapshot only changes when presence changes;
+- **queue:** up to 5 open messages per agent (429) and 20,000 characters per message; text is sent verbatim, never
+  appears in responses to the page or logs, and is discarded when message resolves;
+- **states:** `queued` → `sent` (plugin fetched it) → `delivered` or `failed`. `queued` without being fetched in 60 s,
+  `sent` unacknowledged in 30 s, or departed agent = `failed`, with reason. `delivered` = entered session or its queue
+  (if agent is busy, enters when it finishes turn). Resolved messages kept 10 min for `GET`;
+- delivered: ✉️ "Message via Habblaud" activity on agent (detail masked and truncated); demo agents receive fictitious
+  messages, delivered in ~1 s, without real session.
 
-As rotas (`messages/http.ts`) seguem a trava do terminal e mais uma chave: `ServerConfig.messages` = terminal ligado e
-`HABBLAUD_MENSAGENS` não desligado (`0`, `false`, `off`, `no`). Desligado ou `Host` que não é local → 403 em todas.
-Erros de `POST /api/messages`: 400 (corpo inválido, texto vazio ou longo demais), 404 (agente desconhecido), 409 (o
-agente não recebe: subagente, saiu ou sessão sem o plugin conectado) e 429. O estado sai em `meta.messages` do
-snapshot e em `messages` no `/api/health`.
+Routes (`messages/http.ts`) follow the terminal lock plus one flag: `ServerConfig.messages` = terminal enabled and
+`HABBLAUD_MENSAGENS` not disabled (`0`, `false`, `off`, `no`). Disabled or non-local `Host` → 403 on all. Errors on
+`POST /api/messages`: 400 (invalid body, empty or overly long text), 404 (unknown agent), 409 (agent cannot receive:
+subagent, departed, or session without connected plugin), and 429. Status appears in `meta.messages` of snapshot and in
+`messages` under `/api/health`.
 
-Qualquer processo local consegue chamar essas rotas (como as de permissão): ligar as mensagens é aceitar que um
-programa da própria máquina possa digitar nas sessões que têm o plugin.
+Any local process can call these routes (like permissions): enabling messages accepts that a program on the machine can
+type into sessions running the plugin.
 
-## Personagem do projeto
+## Project character
 
-`PUT /api/agents/:id/character` (`http/app.ts`, regras em `Office.setCharacter`) escolhe o nome e a aparência do agente
-principal `:id` e grava como o personagem da sala dele (o cwd normalizado), em `names.json` › `rooms`:
-`{name, look, seed, parts?, owner?, at}`.
+`PUT /api/agents/:id/character` (`http/app.ts`, rules in `Office.setCharacter`) sets the name and appearance of primary
+agent `:id` and saves it as the character of its room (the normalized cwd), in `names.json` › `rooms`: `{name, look,
+seed, parts?, owner?, at}`.
 
-O corpo tem três campos:
+The body has three fields:
 
-- `name`: de 1 a 24 caracteres, em NFC, com os espaços repetidos juntados e sem caracteres de controle;
-- `seed`: inteiro de 0 a 4294967295;
-- `parts`: peças de `shared/appearance.ts`, com os estilos dos enums e as cores em `#rrggbb`. O cliente aplica as peças
-  por cima de `appearanceFromSeed(seed, {look})`.
+- `name`: 1 to 24 characters, in NFC, with collapsed consecutive spaces and without control characters;
+- `seed`: integer from 0 to 4294967295;
+- `parts`: parts from `shared/appearance.ts`, with enum styles and colors in `#rrggbb`. The client applies parts on top
+  of `appearanceFromSeed(seed, {look})`.
 
-Regras:
+Rules:
 
-- Quando um principal chega a uma sala que tem personagem, e o nome está livre, ele nasce com `name`, `look`, `seed`,
-  `parts` e `custom: true`. Quem está saindo não conta, porque costuma ser a mesma sessão reaberta. Se o nome não
-  estiver livre, vale o sorteio de sempre.
-- O personagem tem dono (`owner`, o `sessionId` de quem o recebeu ou salvou por último; o `/clear` passa o dono para a
-  sessão nova): uma sessão que não é a dona e já tem nome guardado mantém o dela, para que um reinício do Habblaud
-  não troque identidades nem mude o personagem de uma sessão no meio dela.
-- Os nomes escolhidos ficam reservados: o sorteio não os entrega, sem diferenciar maiúsculas. O `PUT` responde `409`
-  para o nome de alguém presente (inclusive do demo) ou o de outra sala.
-- O `/clear` mantém o personagem e não grava o nome escolhido como o nome sorteado da sessão nova.
-- O `DELETE` apaga o personagem da sala, e o agente volta ao nome sorteado da sessão e à seed do id.
-- Trava: a mesma do terminal (bind local e `Host` local). Sem ela, `403`. Subagente, demo ou agente desconhecido dão
+- When a primary agent enters a room that has a character, and the name is available, it spawns with `name`, `look`,
+  `seed`, `parts`, and `custom: true`. Departing agents do not count, as they are usually the same reopened session. If
+  the name is taken, the standard random draw applies.
+- Characters have an owner (`owner`, the `sessionId` that received or saved it last; `/clear` transfers ownership to the
+  new session): a non-owner session that already has a saved name keeps its own, ensuring a Habblaud restart neither
+  swaps identities nor alters a session's character mid-run.
+- Chosen names remain reserved: random draw will not assign them, case-insensitively. `PUT` returns `409` for a name of
+  someone present (including demo) or from another room.
+- `/clear` retains the character and does not record the chosen name as the new session's randomly drawn name.
+- `DELETE` removes the room character, and the agent returns to the session's randomly drawn name and id seed.
+- Lock: same as terminal (local bind and local `Host`). Without it, `403`. Subagent, demo, or unknown agent return
   `404`.
-- Personagem sem uso há 60 dias some, como os nomes.
+- Unused character after 60 days expires, like names.
 
 ## Codex
 
-Fontes de agentes (`sources/source.ts`): `SourceSet` junta a do Claude Code (`ClaudeWatcher`) e, quando há pastas do
-Codex, a do Codex (`sources/codex/`); o histórico idem (`HistorySet`). Agentes, contas, fontes e sessões do histórico
-do Codex levam `provider: 'codex'` (ausente = Claude Code). Ids: `<conta>:<threadId>`, `sessionId` = threadId.
+Agent sources (`sources/source.ts`): `SourceSet` combines Claude Code (`ClaudeWatcher`) and, when Codex directories
+exist, Codex (`sources/codex/`); same for history (`HistorySet`). Codex agents, accounts, sources, and history sessions
+carry `provider: 'codex'` (absent = Claude Code). IDs: `<conta>:<threadId>`, `sessionId` = threadId.
 
-- **Contas** (`sources/codex/accounts.ts`): `HABBLAUD_CODEX_DIRS` (substitui) ou `CODEX_HOME` e `~/.codex*` com cara
-  de Codex (`isCodexHome`: `thread-writer-locks/`, `archived_sessions/`, `config.toml`, `auth.json` ou
-  `sessions/AAAA/`, sem `projects/`, que só o Claude Code cria). Uma pasta do Codex nunca vira conta do Claude Code.
-  `auth.json` e `config.toml` nunca são lidos; o plano vem de `rate_limits.plan_type`.
-- **Sessões abertas** (`sources/codex/files.ts`, `source.ts`): `thread-writer-locks/<threadId>.lock` existindo há 3 s
-  (os locks rápidos de manutenção ficam de fora; o lock nunca é aberto). Lock sem rollout = sessão aberta e vazia: o
-  lock não diz a pasta, então o principal só entra quando o rollout (criado no 1º prompt) ou um hook disser o cwd.
-  Lock e rollout parados há 12 h, sem evento de hook = lock de crash. Sem a
-  pasta de locks: rollout modificado nos últimos 30 min. Evento de hook segura a presença por 60 s.
-- **Rollout** (`sources/codex/rollout.ts`): `sessions/AAAA/MM/DD/rollout-*-<threadId>.jsonl` (a pasta é a data de
-  criação; sessão retomada continua no arquivo antigo) e `archived_sessions/`, lidos com `FileTail`. Formatos
-  "paginated" (padrão) e "legacy"; `.zst` é ignorado com aviso. Status por `task_started`/`task_complete`/
-  `turn_aborted`; atividades por `item_completed` (`CommandExecution` como o Bash, `FileChange`, `McpToolCall`,
-  mensagens e raciocínio); tokens sem somar o cache de novo (no Codex ele já está dentro da entrada); sem custo; uso do
-  plano por `token_count.rate_limits` (janela de 300 min = 5 h, 10080 = semana; `primary` nulo com
-  `rate_limit_reached_type` = `noQuota`), empurrado com `accounts.setUsage`. Subagentes = threads com
-  `source.subagent.thread_spawn.parent_thread_id`; threads internos (guardian, review, compact, memory) ficam de fora.
-- **Terminal e histórico** (`sources/codex/terminal.ts`, `history.ts`): o parser do terminal é escolhido por agente
+- **Accounts** (`sources/codex/accounts.ts`): `HABBLAUD_CODEX_DIRS` (replaces) or `CODEX_HOME` and `~/.codex*` looking
+  like Codex (`isCodexHome`: `thread-writer-locks/`, `archived_sessions/`, `config.toml`, `auth.json`, or
+  `sessions/AAAA/`, without `projects/`, which only Claude Code creates). A Codex directory never becomes a Claude Code
+  account. `auth.json` and `config.toml` are never read; plan comes from `rate_limits.plan_type`.
+- **Open sessions** (`sources/codex/files.ts`, `source.ts`): `thread-writer-locks/<threadId>.lock` existing for 3 s
+  (quick maintenance locks excluded; the lock is never opened). Lock without rollout = open empty session: lock does not
+  specify folder, so primary agent only joins when rollout (created on 1st prompt) or a hook reports the cwd. Lock and
+  rollout idle for 12 h, without hook event = crash lock. Without locks folder: rollout modified in last 30 min. Hook
+  event retains presence for 60 s.
+- **Rollout** (`sources/codex/rollout.ts`): `sessions/AAAA/MM/DD/rollout-*-<threadId>.jsonl` (directory is creation
+  date; resumed session continues in old file) and `archived_sessions/`, read with `FileTail`. "paginated" (default) and
+  "legacy" formats; `.zst` is ignored with a warning. Status by `task_started`/`task_complete`/`turn_aborted`;
+  activities by `item_completed` (`CommandExecution` like Bash, `FileChange`, `McpToolCall`, messages, and reasoning);
+  tokens without recounting cache (in Codex it is already inside input); no cost; plan usage from
+  `token_count.rate_limits` (window of 300 min = 5 h, 10080 = week; null `primary` with `rate_limit_reached_type` =
+  `noQuota`), pushed with `accounts.setUsage`. Subagents = threads with `source.subagent.thread_spawn.parent_thread_id`;
+  internal threads (guardian, review, compact, memory) are excluded.
+- **Terminal and history** (`sources/codex/terminal.ts`, `history.ts`): terminal parser is chosen per agent
   (`SourceSet.parserFor`).
-- **Eventos dos hooks** (`POST /api/codex/events`, `codex/http.ts`; o hook é `mod/habblaud-codex/hook.mjs`): só com
-  `Host` local e conexão pelo loopback (fora do Docker). Vão para `CodexLive.applyHookEvent` da fonte: casam por conta
-  (pela pasta `codexHome`) e `agent_id ?? session_id` (no Codex, `session_id` é o thread RAIZ). SessionStart faz o
-  agente aparecer, UserPromptSubmit/PreToolUse = trabalhando (com a atividade de agora), PermissionRequest = esperando
-  ("aprovar um comando"), Stop = ocioso, SessionEnd fecha.
-- **Aprovar pelo escritório** (`permissions/*`, `permissions/codex.ts`): o mesmo `POST /api/permissions` com
-  `provider: 'codex'`, `account` e `codexHome`; sem sugestões, sem perguntas, sem a busca no transcript; `interrupt` ou
-  `suggestion` num pedido do Codex = 400. O hook espera até `permissionTimeoutS` de `~/.habblaud/codex-hook.json`
-  (padrão 25 s) e imprime só `allow` ou `deny` (+`message`). O Codex só mostra a aprovação no terminal depois que o hook
-  termina.
-- **Mensagens** (`messages/*`, `messages/codex.ts`): para agentes do Codex, `codex queue --thread=<id> --message=<texto>`
-  com `CODEX_HOME` = pasta da conta (no host). Fora do Docker o servidor roda o comando (`HABBLAUD_CODEX_BIN` ou `codex`
-  do PATH); no Docker, o auxiliar do host (`npm run codex:bridge`) busca em `POST /api/codex/bridge/poll` e confirma em
-  `/ack` (mesma trava das mensagens). `canMessage` = há entregador (binário achado, ou auxiliar visto há até 10 s).
-  Retorno 0 = entrou na fila da sessão (`delivered`); o Codex consome a fila a cada ~10 s, quando a sessão fica ociosa.
+- **Hook events** (`POST /api/codex/events`, `codex/http.ts`; hook is `mod/habblaud-codex/hook.mjs`): local `Host` and
+  loopback connection only (outside Docker). Forwarded to source's `CodexLive.applyHookEvent`: matched by account (via
+  `codexHome` directory) and `agent_id ?? session_id` (in Codex, `session_id` is the ROOT thread). SessionStart makes
+  agent appear, UserPromptSubmit/PreToolUse = working (with current activity), PermissionRequest = waiting ("approving a
+  command"), Stop = idle, SessionEnd closes.
+- **Approving from office** (`permissions/*`, `permissions/codex.ts`): same `POST /api/permissions` with `provider:
+  'codex'`, `account`, and `codexHome`; no suggestions, no questions, no transcript search; `interrupt` or `suggestion`
+  on a Codex request = 400. Hook waits up to `permissionTimeoutS` from `~/.habblaud/codex-hook.json` (default 25 s) and
+  prints only `allow` or `deny` (+`message`). Codex only shows approval in terminal after hook finishes.
+- **Messages** (`messages/*`, `messages/codex.ts`): for Codex agents, `codex queue --thread=<id> --message=<texto>` with
+  `CODEX_HOME` = account folder (on host). Outside Docker the server runs the command (`HABBLAUD_CODEX_BIN` or `codex`
+  in PATH); in Docker, the host bridge helper (`npm run codex:bridge`) polls `POST /api/codex/bridge/poll` and
+  acknowledges at `/ack` (same messages lock). `canMessage` = deliverer present (binary found, or helper seen within 10
+  s). Exit code 0 = queued in session (`delivered`); Codex consumes the queue every ~10 s when session becomes idle.
 
 ## Habblaud World
 
-Ligado por padrão, apontando para `server.habblaud.com` (`DEFAULT_WORLD_URL` em `config.ts`); nada sai do computador
-antes de a pessoa criar a conta e entrar, e `HABBLAUD_WORLD=0` desliga tudo (o que sai do computador:
-`docs/world/privacidade.md`; como mexer: `shared/world/README.md`). O protocolo com o servidor do mundo é `shared/world/protocol.ts` (fonte da verdade, com
-`schema.json`). Do lado daqui, `world/`:
+Enabled by default, pointing to `server.habblaud.com` (`DEFAULT_WORLD_URL` in `config.ts`); nothing leaves the computer
+before the user creates an account and logs in, and `HABBLAUD_WORLD=0` disables everything (what leaves the computer:
+`docs/world/privacidade.md`; how to contribute: `shared/world/README.md`). The protocol with the world server is
+`shared/world/protocol.ts` (source of truth, with `schema.json`). On this side, `world/`:
 
-- `settings.ts`: `<dataDir>/world.json` `{deviceId, token, email, access, player?, paused?, left?, updatedAt, theme?}`, modo 600
-  e gravação atômica. O token do dispositivo só sai daqui no cabeçalho `Authorization: Bearer` das chamadas ao servidor
-  do mundo e no `hello` do WebSocket: nunca no navegador, no snapshot, no log ou na URL. `theme` (a escolha de
-  Aparência, `auto` por padrão) fica mesmo sem sessão (o arquivo vira só `{theme}`); `paused` e `left` (saiu do mundo,
-  sempre com `paused`) são da sessão.
-- `client.ts`: as rotas `/v1/*` com o `fetch` nativo (prazo de 15 s, sem seguir redirecionamento, resposta de até
-  256 KB copiada campo a campo; a exportação dos dados, até 8 MB e como veio). Erro do servidor do mundo volta como
-  `{status, code}` (a manutenção, `503 maintenance`); rede, prazo e resposta fora do formato ganham
-  `world_unreachable`, `world_timeout` e `world_bad_response`.
-- `altcha.ts`: o desafio anti-robô do cadastro e dos pedidos de e-mail, resolvido aqui por força bruta (SHA-256), em
-  lotes de 5.000 tentativas que devolvem a vez ao event loop.
-- `service.ts`: a conta (uma operação por vez). `/v1/me` é relido no máximo a cada 30 s (ou com `?refresh=1`) e, na
-  lista de espera, sozinho a cada 30 min (`waitingPollMs`; timer que não segura o processo), para a aprovação chegar ao
-  snapshot sem ninguém clicar; um 401 do servidor do mundo numa rota com token apaga a sessão daqui (`lastError:
-  session_expired`); entrar de novo revoga o dispositivo anterior; sair apaga o `world.json` mesmo sem resposta do
-  servidor. O `lastError` leva só códigos conhecidos (`worldLastError` em `shared/world/api.ts`): rede e prazo viram
-  `network`, o resto que a interface não conhece vira `unknown`. Pausa, retomada e saída do mundo vão ao servidor do
-  mundo numa fila (na ordem pedida); a retomada sem resposta (rede, prazo, 429, 5xx) tenta de novo com a espera da
-  reconexão do uplink (2 s a 60 s), até dar certo ou o prédio ser pausado de novo. Excluir a conta (Fase 6): o código
-  vem de `POST /v1/me/delete`; com `POST /v1/me/delete/confirm` aceito (ou um `goodbye: deleted`), fecha o uplink e
-  espera, apaga o `world.json` inteiro (tema junto, `store.erase`) e a última remessa, e o status fica sem conta com
-  `lastError: account_deleted`. Exportar os dados (`GET /v1/me/export`) só repassa o JSON.
-- `uplink.ts`: o prédio no mundo, por WebSocket (o `WebSocket` global do Node) em `<HABBLAUD_WORLD_URL>/v1/socket`
-  (`wss://`; `ws://127.0.0.1` e `ws://host.docker.internal` só no modo dev). Conecta só com a conta aprovada, o personagem criado e a trava do
-  terminal; pausado ou fora do mundo, só enquanto a cena Mundo está aberta (o viewer avisa por `cityChanged`) e sem
-  nenhum `uplink` (nem o do `welcome`): só `hello`, `ping`/`pong` e os comandos da cena. Manda o `hello` (`{v, version, build: {commit, dirty}, locale, token}`) e, a cada `welcome`, o
-  pacote inteiro; depois, a cada mudança do escritório (`Office.onChange`) ou a cada minuto, projeta
-  (`shared/world/projection.ts`) e manda se mudou: 3 s desde a primeira mudança, no máximo uma remessa a cada 5 s.
-  `{t: 'ping'}` a cada 30 s (sem resposta por 75 s, reconecta). Reconexão de 2 s a 60 s (dobra, ±25 %). `goodbye`:
-  `deploy` reconecta (na manutenção do mundo, `deploy` a cada `hello`: a espera cresce até o teto e só zera com um
-  `welcome`); `banned`, `suspended`, `update` e `other-device` param até retomar (ou reabrir); `waiting`, `no_player`
-  e `unauthorized` param até a sessão mudar e avisam a conta (`service.goodbye`); `deleted` para e a conta apaga a
-  sessão. Do `welcome` guarda, só em memória e só para o status, o id da conta (`me.id`, no assunto do recurso por
-  e-mail) e o selo "não verificado" do próprio prédio (`building.unverified`, que a `area`/`area.patch` da cena
-  também atualiza). `uplink.ack {error:
-  'left'}` (a conta saiu do mundo, aqui ou em outro computador) e o `left: true` do `/v1/me` gravam `left` e `paused`
-  (`service.leftElsewhere`): nenhum pacote até o join (a conexão só fica com a cena aberta). A última remessa
-  `{at, bytes, uplink, ack}` fica em memória e em `<dataDir>/world-last-uplink.json` (modo 600; só da mesma sessão,
-  apagado ao sair). Avisa o snapshot (`markDirty`) ao conectar, cair, pausar, retomar e a cada ack. Tarefas e
-  compactações (`signals.ts`) são observadas pelo mesmo `Office.onChange`, no máximo uma vez por segundo, com ou sem
-  conexão; durante o boot do escritório (`Office.isBooting`) nada é observado nem enviado.
-- `ids.ts`: os ids do mundo, só em memória (`f_` + 10 hex por sala, `a_` + 8 hex por agente, `crypto.randomBytes`),
-  cada um com vida de 24 h ± 6 h sorteada por id; quem some e volta (ou o Habblaud reiniciado) ganha id novo.
-- `tokens.ts`: tokens do prédio (entrada + saída) de hoje e dos 7 dias corridos, do "Meu dia" com a fonte `real` (o
-  demo nunca entra), arredondados a 2 algarismos; os dias passados ficam guardados, o de hoje é relido a cada 15 s.
-- `theme.ts`: o tema escolhido resolvido para o pacote (o automático segue o calendário do escritório, pela data local
-  do servidor: no Docker, UTC). `signals.ts`: tarefas concluídas no dia por agente e compactações novas (o `/clear`
-  não conta).
-- `http.ts`: as rotas `/api/world/*` (lista e formatos em `shared/world/api.ts`). `http/app.ts` só as entrega pela
-  porta local com `Host` local (a porta do celular recebe 403 `local_only`, nem com login); tudo, menos o `status`, exige
-  a trava do terminal (403 `terminal_off`); com `HABBLAUD_WORLD_URL` recusada, 409 `not_configured`; `HABBLAUD_WORLD=0`, 404.
-  Erros: `{error: {code, message?, retryAfter?}}`, com o status e o código do servidor do mundo quando vêm de lá.
-  Do prédio: `PUT /api/world/theme` `{theme}` (com ou sem conta), `POST /api/world/pause` (para o envio antes de
-  responder, fechando o uplink se a cena Mundo não está aberta, e avisa `POST /v1/me/building/pause`),
-  `POST /api/world/resume` (avisa `/resume` e reconecta, ou manda o pacote inteiro pela conexão da cena),
-  `POST /api/world/leave` ("Sair do mundo": grava `left` e `paused`, para o envio como a pausa e responde depois do
-  `DELETE /v1/me/building`; sem resposta boa, fica só pausado e devolve o erro), `POST /api/world/join` ("Voltar ao
-  mundo": `POST /v1/me/building/join` e, só com a resposta boa, tira `left` e `paused` e reabre o uplink; o 404 aqui
-  não conta como feito; o `/resume` fora do mundo passa por ele e, sem ter saído, ele é o `/resume`) e
-  `GET /api/world/last-uplink` (`{at, bytes, uplink, ack?}` ou `{}`, sem a trava do terminal, como o status). O
-  `GET /api/world/status` ganha `building` (conta aprovada com personagem) e `theme`; sem `?refresh=1` responde da
-  memória e relê `/v1/me` em segundo plano quando venceu. Da conta (Fase 6): `POST /api/world/delete-account` (`202
-  {}`: o código vai ao e-mail), `POST /api/world/delete-account/confirm` `{code}` (responde o status sem conta depois de
-  fechar o prédio e apagar o `world.json`), `GET /api/world/export` (o JSON como anexo `habblaud-world-dados.json`;
-  como o stream, só pela própria página, porque gasta a cota do dia; `HEAD` não chama o servidor do mundo) e o
-  `notifyInactivity` opcional no `PUT /api/world/visibility`.
+- `settings.ts`: `<dataDir>/world.json` `{deviceId, token, email, access, player?, paused?, left?, updatedAt, theme?}`,
+  mode 600 with atomic write. The device token only leaves here in `Authorization: Bearer` headers of world server calls
+  and WebSocket `hello`: never in browser, snapshot, logs, or URLs. `theme` (Appearance choice, `auto` by default)
+  persists even without a session (file becomes just `{theme}`); `paused` and `left` (left the world, always with
+  `paused`) belong to session.
+- `client.ts`: `/v1/*` routes with native `fetch` (15 s timeout, no redirect following, responses up to 256 KB copied
+  field by field; data export up to 8 MB as-is). World server errors return `{status, code}` (maintenance is `503
+  maintenance`); network, timeout, and malformed responses become `world_unreachable`, `world_timeout`, and
+  `world_bad_response`.
+- `altcha.ts`: anti-robot challenge for registration and email requests, solved here via brute force (SHA-256), in
+  batches of 5,000 attempts yielding to the event loop.
+- `service.ts`: the account (one operation at a time). `/v1/me` is re-read at most every 30 s (or with `?refresh=1`)
+  and, on the waitlist, automatically every 30 min (`waitingPollMs`; unref'd timer), so approval reaches snapshot
+  without manual clicking; a 401 from world server on authenticated route wipes local session (`lastError:
+  session_expired`); logging in again revokes previous device; logout deletes `world.json` even without server response.
+  `lastError` carries only known codes (`worldLastError` in `shared/world/api.ts`): network and timeout become
+  `network`, unrecognized codes become `unknown`. Pause, resume, and leaving the world are queued to the world server
+  (in order); unacknowledged resume (network, timeout, 429, 5xx) retries with uplink reconnect backoff (2 s to 60 s),
+  until success or building is paused again. Account deletion (Phase 6): code comes from `POST /v1/me/delete`; once
+  `POST /v1/me/delete/confirm` is accepted (or `goodbye: deleted`), closes uplink, waits, erases entire `world.json`
+  (theme included, `store.erase`) and last packet, leaving status accountless with `lastError: account_deleted`. Data
+  export (`GET /v1/me/export`) relays JSON directly.
+- `uplink.ts`: the building in the world, via WebSocket (Node global `WebSocket`) at `<HABBLAUD_WORLD_URL>/v1/socket`
+  (`wss://`; `ws://127.0.0.1` and `ws://host.docker.internal` in dev mode only). Connects only with approved account,
+  created character, and terminal lock; paused or outside the world, connects only while World scene is open (viewer
+  signals via `cityChanged`) and without uplink packets (not even `welcome` uplink): only `hello`, `ping`/`pong`, and
+  scene commands. Sends `hello` (`{v, version, build: {commit, dirty}, locale, token}`) and, on each `welcome`, the full
+  packet; afterwards, on every office change (`Office.onChange`) or every minute, projects
+  (`shared/world/projection.ts`) and sends if changed: 3 s after first change, at most one payload every 5 s. `{t:
+  'ping'}` every 30 s (no response for 75 s reconnects). Reconnect backoff 2 s to 60 s (doubles, ±25%). `goodbye`:
+  `deploy` reconnects (during world maintenance, `deploy` on every `hello`: backoff grows to cap and only resets on
+  `welcome`); `banned`, `suspended`, `update`, and `other-device` stop until resumed (or reopened); `waiting`,
+  `no_player`, and `unauthorized` stop until session changes and notify account (`service.goodbye`); `deleted` stops and
+  account clears session. From `welcome` it retains in memory only for status: account id (`me.id`, in appeal email
+  subject) and "unverified" badge of building (`building.unverified`, also updated by scene `area`/`area.patch`).
+  `uplink.ack {error: 'left'}` (account left the world, here or on another computer) and `left: true` from `/v1/me`
+  record `left` and `paused` (`service.leftElsewhere`): no packets until rejoining (connection remains only with open
+  scene). Last dispatch `{at, bytes, uplink, ack}` is kept in memory and in `<dataDir>/world-last-uplink.json` (mode
+  600; same session only, deleted on logout). Notifies snapshot (`markDirty`) on connect, drop, pause, resume, and each
+  ack. Tasks and compactions (`signals.ts`) are monitored by the same `Office.onChange`, at most once per second, with
+  or without connection; during office boot (`Office.isBooting`) nothing is monitored or sent.
+- `ids.ts`: world IDs, in memory only (`f_` + 10 hex per room, `a_` + 8 hex per agent, `crypto.randomBytes`), each with
+  a lifespan of 24 h ± 6 h randomized per ID; agents that vanish and return (or restarted Habblaud) receive new IDs.
+- `tokens.ts`: building tokens (in + out) for today and 7 rolling days, from "My day" with `real` source (demo never
+  included), rounded to 2 significant figures; past days are cached, today is re-read every 15 s.
+- `theme.ts`: selected theme resolved for payload (automatic follows office calendar via server local date: in Docker,
+  UTC). `signals.ts`: completed tasks today per agent and new compactions (`/clear` excluded).
+- `http.ts`: `/api/world/*` routes (list and formats in `shared/world/api.ts`). `http/app.ts` serves them only over
+  local port with local `Host` (mobile port receives 403 `local_only`, even with login); everything except `status`
+  requires terminal lock (403 `terminal_off`); rejected `HABBLAUD_WORLD_URL` gives 409 `not_configured`;
+  `HABBLAUD_WORLD=0` gives 404. Errors: `{error: {code, message?, retryAfter?}}`, carrying status and code from world
+  server when originating there. Building: `PUT /api/world/theme` `{theme}` (with or without account), `POST
+  /api/world/pause` (stops transmission before replying, closing uplink if World scene is not open, and notifies `POST
+  /v1/me/building/pause`), `POST /api/world/resume` (notifies `/resume` and reconnects, or sends full packet over scene
+  connection), `POST /api/world/leave` ("Leave world": writes `left` and `paused`, stops transmission like pause, and
+  responds after `DELETE /v1/me/building`; without valid response, stays paused and returns error), `POST
+  /api/world/join` ("Rejoin world": `POST /v1/me/building/join` and, only on valid response, clears `left` and `paused`
+  and reopens uplink; a 404 here does not count as success; `/resume` outside world goes through it and, without having
+  left, acts as `/resume`), and `GET /api/world/last-uplink` (`{at, bytes, uplink, ack?}` or `{}`, without terminal
+  lock, like status). `GET /api/world/status` includes `building` (approved account with character) and `theme`; without
+  `?refresh=1` serves from memory and re-reads `/v1/me` in background when expired. Account (Phase 6): `POST
+  /api/world/delete-account` (`202 {}`: code sent to email), `POST /api/world/delete-account/confirm` `{code}` (returns
+  accountless status after closing building and deleting `world.json`), `GET /api/world/export` (JSON as attachment
+  `habblaud-world-dados.json`; like the stream, only via origin page since it consumes daily quota; `HEAD` does not call
+  world server), and optional `notifyInactivity` on `PUT /api/world/visibility`.
 
-O estado vai no snapshot em `meta.world` (`{enabled, configured, state, building?, scene?}`, nada da conta; `building` =
-`{connected, paused, floors, agents, lastUplinkAt?, left?, stopped?}`, com `connected` = aceso e mandando (a conexão
-só da cena, pausado, não conta) e `stopped: true` sem o motivo, que só vai no status; `scene` = `{available}` com a
-conta aprovada e o personagem, `available` com a trava do terminal e sem parada de `banned`, `suspended`, `update`,
-`other-device` ou `deleted`: o botão Mundo da barra) e em `GET /api/access` (`world`). O build grava
-`dist/build.json` (`{commit, dirty, builtAt}`, `scripts/build-info.mjs`; sem git, `unknown`;
-`HABBLAUD_BUILD_COMMIT`/`HABBLAUD_BUILD_DIRTY` substituem o git), lido por `readBuildInfo()` (`build.ts`) a cada conexão
-do uplink: o `hello` leva só `{commit, dirty}`.
+State is published in snapshot under `meta.world` (`{enabled, configured, state, building?, scene?}`, no account data;
+`building` = `{connected, paused, floors, agents, lastUplinkAt?, left?, stopped?}`, with `connected` = lit and sending
+(scene-only connection while paused does not count) and `stopped: true` without reason, which is only in status; `scene`
+= `{available}` with approved account and character, `available` with terminal lock and not stopped by `banned`,
+`suspended`, `update`, `other-device`, or `deleted`: World button on toolbar) and in `GET /api/access` (`world`). The
+build writes `dist/build.json` (`{commit, dirty, builtAt}`, `scripts/build-info.mjs`; without git, `unknown`;
+`HABBLAUD_BUILD_COMMIT`/`HABBLAUD_BUILD_DIRTY` override git), read by `readBuildInfo()` (`build.ts`) on each uplink
+connection: `hello` carries only `{commit, dirty}`.
 
-### Cena do mundo: stream e comandos
+### World scene: stream and commands
 
-A cidade (Fase 3) desce pela mesma conexão do prédio e só com a cena Mundo aberta no navegador. `world/viewer.ts` é
-o "viewer"; o estado e as regras ficam em `shared/world/scene.ts` (puro, o navegador pode usar o mesmo), e a geometria
-em `shared/world/city.ts` (fonte da verdade; o servidor do mundo guarda a cópia exata).
+The city (Phase 3) streams over the same building connection and only with World scene open in browser.
+`world/viewer.ts` is the "viewer"; state and rules live in `shared/world/scene.ts` (pure, browser can use the same), and
+geometry in `shared/world/city.ts` (source of truth; world server keeps exact copy).
 
-- `GET /api/world/stream` (SSE, as mesmas travas das rotas da conta, e só pela própria página: `Origin` de outro host
-  ou `Sec-Fetch-Site` cross-site/same-site recebem 403 `local_only`). No máximo 4 abertos (429 `too_many_streams`).
-  Eventos: `world.snapshot` (`WorldSceneSnapshot` de `shared/world/api.ts`: `{stream, connected, viewing, district?,
-  me?, pos?, afk, chunks: [{chunk, rev, buildings}], players, minimap}`) ao conectar e a cada recomeço (conexão aberta
-  ou caída, `view` de novo): o navegador troca o estado inteiro; depois `world` com cada mensagem da cidade como veio
-  (`area`, `area.patch`, `players`, `player.join`, `player.leave`, `pos`, `minimap`, `afk`, `profile`, `notice`,
-  `like.update`, `greeting`, `building`, `building.patch`), na ordem e já sem salto de `rev`; `: ping` a cada 15 s.
-  Cliente com mais de 1 MB acumulado é desconectado (o EventSource reconecta).
-- O primeiro stream (com a conexão aceita) manda `view`; o último que fecha manda `view.off`. A cada `welcome` com
-  stream aberto, `view` de novo; a cada queda, a cidade daqui é esquecida e sai um snapshot com `connected: false`.
-  Pausado ou fora do mundo, a conexão só existe com a cena aberta: abrir o primeiro stream conecta (`hello`, `view`) e
-  fechar o último manda `view.off` e fecha; nenhum `uplink` sai por ela.
-- Regras do estado: `area` substitui o chunk e o `rev` (mesmo menor); `area.patch` só com `rev` = último + 1 (item
-  com `lot` substitui o prédio, sem `lot` mescla, `removed` tira); salto, chunk desconhecido ou item parcial de prédio
-  que não está aqui pedem `resync {chunk}` (no máximo um a cada 5 s por chunk) e o patch não passa; ficam só os 3×3
-  chunks em volta da minha posição (o último `pos`, o meu id num `players` ou o último `move`); `players` só mexe em
-  quem já está (por id); `player.join` substitui o perfil; `afk` vale até andar ou virar, `view` ou `profile`. Tudo só
-  em memória, nada no log.
-- `POST /api/world/cmd` `{stream, cmds}` → `202 {sent}`: 1 a 20 comandos, só `move`, `profile`, `resync`, `view`,
-  `view.off`, `enter`, `leave`, `like`, `unlike`, `greet`, `block`, `unblock` e `report`, refeitos campo a campo
-  (`parseSceneCommand`; `hello`, `uplink` e `ping` nunca: 400 `invalid`); de cada lote só o último `move`. Até 5 lotes
-  por segundo por stream (balde de 5, recarga de 5/s: um lote a cada 200 ms nunca é recusado; 429 `rate_limited` com
-  `Retry-After: 1`). Stream que não está aberto: 409 `no_stream`; sem a conexão: 409 `not_connected`. `view` e
-  `view.off` dizem se aquele stream quer a cidade (o viewer decide o que vai ao mundo; `view` com a cidade aberta
-  recomeça tudo).
-- No navegador, `client/src/net/world-stream.ts`: `createWorldStream({mock})` com `on`, `send` (fila e um lote a cada
-  200 ms) e `close`; no modo demonstração, `FakeWorldStream` (20 prédios com o meu no lote (3,1), 5 pessoas andando
-  nas calçadas e uma sentada num banco da praça, minimapa, `afk` depois de 60 s; `?perf=N` enche N lotes).
+- `GET /api/world/stream` (SSE, same locks as account routes, origin page only: cross-host `Origin` or
+  cross-site/same-site `Sec-Fetch-Site` get 403 `local_only`). At most 4 open (429 `too_many_streams`). Events:
+  `world.snapshot` (`WorldSceneSnapshot` in `shared/world/api.ts`: `{stream, connected, viewing, district?, me?, pos?,
+  afk, chunks: [{chunk, rev, buildings}], players, minimap}`) on connect and on restart (connection opened or dropped,
+  `view` again): browser replaces entire state; followed by `world` with each city message as received (`area`,
+  `area.patch`, `players`, `player.join`, `player.leave`, `pos`, `minimap`, `afk`, `profile`, `notice`, `like.update`,
+  `greeting`, `building`, `building.patch`), in order and without `rev` gaps; `: ping` every 15 s. Client accumulating >
+  1 MB is disconnected (EventSource reconnects).
+- The first stream (with accepted connection) sends `view`; the last closing stream sends `view.off`. On each `welcome`
+  with an open stream, `view` again; on each disconnect, local city state is discarded and a snapshot with `connected:
+  false` is emitted. Paused or outside the world, the connection only exists while scene is open: opening the first
+  stream connects (`hello`, `view`) and closing the last sends `view.off` and closes; no uplink payloads are sent over
+  it.
+- State rules: `area` replaces chunk and `rev` (even if lower); `area.patch` requires `rev` = last + 1 (item with `lot`
+  replaces building, without `lot` merges, `removed` deletes); gaps, unknown chunks, or partial building items not
+  present locally request `resync {chunk}` (at most once every 5 s per chunk) and patch is dropped; only 3×3 chunks
+  around local position are retained (last `pos`, own ID in `players`, or last `move`); `players` modifies only existing
+  players (by ID); `player.join` replaces profile; `afk` lasts until movement, turning, `view`, or `profile`. All
+  in-memory only, nothing in logs.
+- `POST /api/world/cmd` `{stream, cmds}` → `202 {sent}`: 1 to 20 commands, only `move`, `profile`, `resync`, `view`,
+  `view.off`, `enter`, `leave`, `like`, `unlike`, `greet`, `block`, `unblock`, and `report`, rebuilt field by field
+  (`parseSceneCommand`; `hello`, `uplink`, and `ping` never: 400 `invalid`); from each batch only the last `move`. Up to
+  5 batches per second per stream (bucket of 5, refill 5/s: one batch every 200 ms is never refused; 429 `rate_limited`
+  with `Retry-After: 1`). Closed stream: 409 `no_stream`; disconnected: 409 `not_connected`. `view` and `view.off`
+  indicate if that stream wants city data (viewer decides what goes to world; `view` with city open restarts
+  everything).
+- In browser, `client/src/net/world-stream.ts`: `createWorldStream({mock})` with `on`, `send` (queue and one batch every
+  200 ms) and `close`; in demo mode, `FakeWorldStream` (20 buildings with local one in lot (3,1), 5 people walking on
+  sidewalks and one sitting on a park bench, minimap, `afk` after 60 s; `?perf=N` fills N batches).
 
-## Variáveis de ambiente
+## Environment variables
 
-| Variável | Padrão | Uso |
+| Variable | Default | Usage |
 | --- | --- | --- |
-| `HABBLAUD_PORT` | `4747` | porta HTTP |
-| `HABBLAUD_HOST` | `127.0.0.1` | interface (o Docker usa `0.0.0.0`); fora do loopback, o terminal (e as permissões e mensagens) fica desligado |
-| `HABBLAUD_BIND` | — (Compose: `127.0.0.1`) | só Docker: interface do host onde a porta é publicada, repassada ao container; só loopback liga o terminal |
-| `HABBLAUD_TERMINAL` | — | `0` desliga o terminal, as permissões e as mensagens pelo escritório (não liga com a porta exposta) |
-| `HABBLAUD_CODEX` | ligado | `0` desliga a fonte do Codex |
-| `HABBLAUD_CODEX_DIRS` | — | pastas do Codex separadas por vírgula; substitui a detecção (`CODEX_HOME` e `~/.codex*`) |
-| `HABBLAUD_CODEX_BIN` | `codex` do PATH | binário do Codex para o `codex queue` (modo Node e `npm run codex:bridge`) |
-| `HABBLAUD_MENSAGENS` | ligado (com o terminal) | `0`, `false`, `off` ou `no` desligam só as mensagens pelo escritório |
-| `HABBLAUD_CLAUDE_DIRS` | — | config dirs separados por vírgula; substitui a detecção (`~/.claude*` com `projects/` ou `sessions/` + `CLAUDE_CONFIG_DIR`) |
-| `HABBLAUD_DATA_DIR` | `~/.habblaud` (Docker: `/data`) | estado do Habblaud (nomes e personagens dos projetos persistidos em `names.json`, linha do tempo em `timeline/`, estatísticas do Meu dia em `stats/`, última verificação de versão em `updates.json`) |
-| `HABBLAUD_TIMELINE` | ligado | `0` desliga a gravação da linha do tempo do timelapse |
-| `HABBLAUD_UPDATE_CHECK` | ligado | `0` desliga a verificação de versão nova (releases do repositório do `package.json` no GitHub, a cada 6 h) |
-| `HABBLAUD_LANG` | idioma do sistema (`LC_ALL`/`LANG`/Intl) | idioma dos textos montados pelo servidor: `pt-BR` ou `fr` (shared/i18n.ts) |
-| `HABBLAUD_DEMO` | desligado | `1` liga o modo demonstração ao iniciar |
-| `HABBLAUD_IN_DOCKER` | auto (`/.dockerenv`) | `1` = não confere PIDs (são do host) |
-| `HABBLAUD_ACCOUNTS` | — | JSON com metadados das contas vindos do host (Docker): `[{id, configDir, mountDir, short, name, email, organization, plan, color, cachedUsage}]`, casados por `id`, `mountDir` ou `configDir` |
-| `HABBLAUD_USAGE_DIR` | `~/.habblaud/usage` (Docker: `/usage`) | pasta do uso capturado pelo tap de statusline ou pelo mod do Claude Code, relida a cada 5 s |
-| `HABBLAUD_ALLOWED_HOSTS` | — | nomes extras aceitos no `Host`/`Origin` (vírgula); `localhost`, `*.localhost` e IPs sempre valem |
-| `HABBLAUD_WORLD_URL` | `https://server.habblaud.com` | servidor do Habblaud World: só `https://` ou `wss://`, sem caminho; `http://127.0.0.1:*` só no modo dev (recusada, o World fica desligado). O prédio sobe pelo WebSocket na mesma origem (`/v1/socket`) |
-| `HABBLAUD_WORLD` | ligado | `0` (`false`, `off`, `no`) desliga o Habblaud World: rotas 404, nada na interface e nada sai |
-| `HABBLAUD_WORLD_DEV` | desligado (`--dev` liga) | `1` aceita o servidor do mundo em `http://127.0.0.1` ou `ws://127.0.0.1` |
+| `HABBLAUD_PORT` | `4747` | HTTP port |
+| `HABBLAUD_HOST` | `127.0.0.1` | Interface (Docker uses `0.0.0.0`); outside loopback, terminal (and permissions/messages) is disabled |
+| `HABBLAUD_BIND` | — (Compose: `127.0.0.1`) | Docker only: host interface where port is published, passed to container; loopback only enables terminal |
+| `HABBLAUD_TERMINAL` | — | `0` disables terminal, permissions, and office messages (will not enable on exposed port) |
+| `HABBLAUD_CODEX` | enabled | `0` disables Codex source |
+| `HABBLAUD_CODEX_DIRS` | — | Comma-separated Codex directories; overrides detection (`CODEX_HOME` and `~/.codex*`) |
+| `HABBLAUD_CODEX_BIN` | `codex` in PATH | Codex binary for `codex queue` (Node mode and `npm run codex:bridge`) |
+| `HABBLAUD_MENSAGENS` | enabled (with terminal) | `0`, `false`, `off`, or `no` disables office messages only |
+| `HABBLAUD_CLAUDE_DIRS` | — | Comma-separated config dirs; overrides detection (`~/.claude*` with `projects/` or `sessions/` + `CLAUDE_CONFIG_DIR`) |
+| `HABBLAUD_DATA_DIR` | `~/.habblaud` (Docker: `/data`) | Habblaud state (project names and characters persisted in `names.json`, timeline in `timeline/`, My day stats in `stats/`, last version check in `updates.json`) |
+| `HABBLAUD_TIMELINE` | enabled | `0` disables timelapse timeline recording |
+| `HABBLAUD_UPDATE_CHECK` | enabled | `0` disables new version checks (releases from `package.json` repo on GitHub, every 6 h) |
+| `HABBLAUD_LANG` | system language (`LC_ALL`/`LANG`/Intl) | Language of server-assembled texts: `pt-BR` or `fr` (shared/i18n.ts) |
+| `HABBLAUD_DEMO` | disabled | `1` enables demo mode on startup |
+| `HABBLAUD_IN_DOCKER` | auto (`/.dockerenv`) | `1` = skip PID checks (they belong to host) |
+| `HABBLAUD_ACCOUNTS` | — | JSON with account metadata from host (Docker): `[{id, configDir, mountDir, short, name, email, organization, plan, color, cachedUsage}]`, matched by `id`, `mountDir` or `configDir` |
+| `HABBLAUD_USAGE_DIR` | `~/.habblaud/usage` (Docker: `/usage`) | Directory for usage captured by statusline tap or Claude Code mod, re-read every 5 s |
+| `HABBLAUD_ALLOWED_HOSTS` | — | Extra allowed names in `Host`/`Origin` (comma-separated); `localhost`, `*.localhost` and IPs always allowed |
+| `HABBLAUD_WORLD_URL` | `https://server.habblaud.com` | Habblaud World server: `https://` or `wss://` only, no path; `http://127.0.0.1:*` in dev mode only (rejected leaves World disabled). Building connects via WebSocket on same origin (`/v1/socket`) |
+| `HABBLAUD_WORLD` | enabled | `0` (`false`, `off`, `no`) disables Habblaud World: routes 404, nothing in UI, nothing outbound |
+| `HABBLAUD_WORLD_DEV` | disabled (`--dev` enables) | `1` accepts world server on `http://127.0.0.1` or `ws://127.0.0.1` |
 
-No hook de permissão (ambiente do Claude Code; os argumentos `--port`/`--timeout` gravados pelo instalador têm
-preferência): `HABBLAUD_PORT` (porta do Habblaud, padrão `4747`), `HABBLAUD_PERMISSION_TIMEOUT` (segundos de espera
-pela resposta no Habblaud, padrão `300`, entre 5 e 1800) e `HABBLAUD_HOOK_DEBUG=1` (conta no stderr o que fez).
+In permission hook (Claude Code environment; installer arguments `--port`/`--timeout` take precedence): `HABBLAUD_PORT`
+(Habblaud port, default `4747`), `HABBLAUD_PERMISSION_TIMEOUT` (seconds to wait for Habblaud response, default `300`,
+between 5 and 1800), and `HABBLAUD_HOOK_DEBUG=1` (reports actions to stderr).
 
-## Uso do plano (5h e semanal)
+## Plan usage (5h and weekly)
 
-Duas fontes, ambas arquivos locais (nada de credenciais nem chamadas de rede); vale a de números mais recentes
-(`fetchedAt`):
+Two sources, both local files (no credentials or network calls); source with freshest numbers (`fetchedAt`) takes
+precedence:
 
-- `statusline` (**recomendada**, `accounts/statusline.ts`): o Claude Code envia ao comando de statusline um JSON
-  com `rate_limits` (`five_hour`/`seven_day`: `used_percentage` e `resets_at` em segundos). O
-  `scripts/statusline-tap.mjs`, instalado na frente do statusline de cada conta por `npm run usage:install`,
-  grava só esses números em `~/.habblaud/usage/<conta>.json` (casado com a conta pelo `configDir`; senão pelo
-  `accountId`). No Claude Code 2.1.287+ o mod do Habblaud grava o mesmo arquivo (ver abaixo);
-- `cache`: o `cachedUsageUtilization` que o próprio Claude Code grava ao rodar `/usage`, relido a cada 60 s.
+- `statusline` (**recommended**, `accounts/statusline.ts`): Claude Code sends statusline command a JSON object with
+  `rate_limits` (`five_hour`/`seven_day`: `used_percentage` and `resets_at` in seconds). `scripts/statusline-tap.mjs`,
+  installed in front of each account's statusline via `npm run usage:install`, writes only these numbers to
+  `~/.habblaud/usage/<conta>.json` (matched to account by `configDir`; otherwise by `accountId`). In Claude Code
+  2.1.287+ the Habblaud mod writes the same file (see below);
+- `cache`: `cachedUsageUtilization` that Claude Code itself writes when running `/usage`, re-read every 60 s.
 
-Sem nenhuma das duas, a conta fica `disabled` ("sem dados de uso"). Números com mais de 30 min aparecem como
-`stale`. Uma janela cujo reinício já passou desde a coleta é omitida (a interface mostra "—") até chegarem
-números novos — nunca um 0% inventado.
+Without either, the account is marked `disabled` ("no usage data"). Numbers older than 30 min appear as `stale`. A
+window whose reset time has passed since collection is omitted (the UI shows "—") until new numbers arrive — never an
+invented 0%.
 
-## Mod do Claude Code
+## Claude Code mod
 
-O repositório é também um marketplace de plugins do Claude Code (`.claude-plugin/marketplace.json`, detalhes em
-[`mod/README.md`](../mod/README.md)). Do lado do servidor, o mod `habblaud` usa duas coisas:
+The repository is also a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`, details in
+[`mod/README.md`](../mod/README.md)). On the server side, the `habblaud` mod uses two things:
 
-- **o arquivo de uso:** em cada `session.start` e `session.measure` ele grava `<HABBLAUD_USAGE_DIR>/<conta>.json`
-  no formato do tap (`{accountId, configDir, fetchedAt, five_hour, seven_day}`, `resets_at` em segundos, a partir de
-  `$.session.usage().rateLimits`) mais `source: "mod"`, que o leitor ignora: para o servidor continua sendo a fonte
-  `statusline`. O mod escreve com `$.fs.write`, que não é atômico; por isso `StatuslineUsageReader` ignora uma
-  leitura vazia ou pela metade, fica com o último registro bom daquele arquivo e o relê no ciclo seguinte;
-- **`GET /api/mod/summary`** (`modSummary` em `http/app.ts`), perguntado a cada 5 s por sessão que desenha (30 s com
-  o Habblaud fora do ar) e pelo comando `/habblaud`: só contagens e quem espera, montado do snapshot atual. Ficam de
-  fora os agentes do demo (que vivem só no snapshot, não no `Office`), quem já encerrou ou entregou e, com
-  `?session=` (e `?account=`, se vier), a sessão de quem pergunta: o principal com esse `sessionId` e os subagentes
-  dela (o `sessionId` deles é o da sessão que os disparou; por garantia, também quem tem um ancestral dela).
-  `answerable` = há pedido de permissão para responder pelo escritório (`AgentInfo.permission`). Sem parâmetros,
-  nada é excluído (é o que o `/habblaud` usa, para os números baterem com a tela). Só `GET`/`HEAD` (senão 405).
+- **the usage file:** on each `session.start` and `session.measure` it writes `<HABBLAUD_USAGE_DIR>/<conta>.json` in tap
+  format (`{accountId, configDir, fetchedAt, five_hour, seven_day}`, `resets_at` in seconds, from
+  `$.session.usage().rateLimits`) plus `source: "mod"`, which the reader ignores: for the server it remains the
+  `statusline` source. The mod writes using `$.fs.write`, which is not atomic; therefore `StatuslineUsageReader` ignores
+  an empty or partial read, keeps the last known good record from that file, and re-reads it on the next cycle;
+- **`GET /api/mod/summary`** (`modSummary` in `http/app.ts`), polled every 5 s per rendering session (30 s when Habblaud
+  is down) and by the `/habblaud` command: counts and waiting agents only, assembled from current snapshot. Excluded are
+  demo agents (living only in snapshot, not in `Office`), agents already finished or delivered, and, with `?session=`
+  (and `?account=`, if present), the caller's session: primary with that `sessionId` and its subagents (their
+  `sessionId` is that of the triggering session; as a precaution, also any agent with an ancestor in it). `answerable` =
+  permission request pending response from office (`AgentInfo.permission`). Without parameters, nothing is excluded
+  (what `/habblaud` uses, so numbers match the screen). `GET`/`HEAD` only (otherwise 405).
 
-## Estrutura
+## Structure
 
-- `config.ts`, `log.ts`, `index.ts` — configuração, logs curtos (nunca conteúdo de conversas) e entrada.
-- `accounts/` — detecção de contas (`detect.ts`, também usado pelo `docker-up`), uso (`usage.ts`), tap de statusline (`statusline.ts`), serviço (`service.ts`).
-- `sources/` — registro de sessões, leitura incremental (`tail.ts`), parser de transcripts (atividades em `transcript.ts`; conversa do terminal em `terminal.ts`; eventos do GitHub em `github.ts`), subagentes, o histórico de sessões (`history.ts`) e o orquestrador (`watcher.ts`).
-- `model/` — escritório (`office.ts`), salas/slots (`rooms.ts`), nomes persistidos (`names.ts`).
-- `http/` — proteções de borda (`guard.ts`), rotas (`app.ts`), SSE (`sse.ts`), terminal (`terminal.ts`) e o histórico dele (`sessions.ts`), timelapse (`timeline.ts`), Meu dia (`stats.ts`), estáticos (`static.ts`).
-- `history/` — gravador da linha do tempo do timelapse (`timeline.ts`) e as estatísticas do Meu dia: amostragem, persistência e retenção (`daystats.ts`; o acumulador puro fica em `shared/daystats.ts`).
-- `permissions/` — responder pelo escritório (permissões e perguntas): registro dos pedidos (`registry.ts`), rotas (`http.ts`) e a busca da chamada no transcript (`transcript.ts`).
-- `messages/` — mensagens pelo escritório: fila, presença das sessões e prazos (`registry.ts`) e rotas (`http.ts`).
-- `updates/` — verificação de versão nova nas releases do GitHub (`checker.ts`).
-- `world/` — Habblaud World: sessão em `world.json` (`settings.ts`), cliente do servidor do mundo (`client.ts`), ALTCHA (`altcha.ts`), a conta (`service.ts`), as rotas `/api/world/*` (`http.ts`) e o prédio no mundo (`uplink.ts`, com `ids.ts`, `tokens.ts`, `theme.ts` e `signals.ts`).
+- `config.ts`, `log.ts`, `index.ts` — configuration, short logs (never conversation contents), and entry point.
+- `accounts/` — account detection (`detect.ts`, also used by `docker-up`), usage (`usage.ts`), statusline tap
+  (`statusline.ts`), service (`service.ts`).
+- `sources/` — session registry, incremental reading (`tail.ts`), transcript parser (activities in `transcript.ts`;
+  terminal conversation in `terminal.ts`; GitHub events in `github.ts`), subagents, session history (`history.ts`), and
+  orchestrator (`watcher.ts`).
+- `model/` — office (`office.ts`), rooms/slots (`rooms.ts`), persisted names (`names.ts`).
+- `http/` — edge guard (`guard.ts`), routes (`app.ts`), SSE (`sse.ts`), terminal (`terminal.ts`) and its history
+  (`sessions.ts`), timelapse (`timeline.ts`), My day (`stats.ts`), statics (`static.ts`).
+- `history/` — timelapse timeline recorder (`timeline.ts`) and My day statistics: sampling, persistence, and retention
+  (`daystats.ts`; pure accumulator is in `shared/daystats.ts`).
+- `permissions/` — answering from office (permissions and questions): request registry (`registry.ts`), routes
+  (`http.ts`), and transcript call search (`transcript.ts`).
+- `messages/` — messages from office: queue, session presence, and timeouts (`registry.ts`) and routes (`http.ts`).
+- `updates/` — new version checks on GitHub releases (`checker.ts`).
+- `world/` — Habblaud World: session in `world.json` (`settings.ts`), world server client (`client.ts`), ALTCHA
+  (`altcha.ts`), account (`service.ts`), `/api/world/*` routes (`http.ts`), and building in world (`uplink.ts`, with
+  `ids.ts`, `tokens.ts`, `theme.ts`, and `signals.ts`).
 
-Testes: `npx vitest run server shared` (fixtures sintéticas em `server/test/fixtures.ts`; os scripts do host —
-tap de statusline, hook de permissão (rodado como processo contra um servidor de teste), instaladores e
-`docker-up` — são testados em `server/test/` com HOME e config dirs falsos).
+Tests: `npx vitest run server shared` (synthetic fixtures in `server/test/fixtures.ts`; host scripts — statusline tap,
+permission hook (run as process against a test server), installers, and `docker-up` — are tested in `server/test/` with
+mock HOME and config dirs).

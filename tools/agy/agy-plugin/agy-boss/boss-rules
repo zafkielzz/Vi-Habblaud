@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""SessionStart hook of the agy-boss plugin: in an agy started as an office's boss (AGY_BOSS=1, AGY_OFFICE=<id>, set
+by Habblaud), injects the boss rules (tools/agy/boss/AGENTS.md) and the office it leads; anywhere else, nothing."""
+import json, os, sys
+
+out = {}
+if os.environ.get("AGY_BOSS") == "1":
+    here = os.path.dirname(os.path.realpath(__file__))
+    try:
+        with open(os.path.join(here, "..", "..", "boss", "AGENTS.md")) as f:
+            rules = f.read()
+    except OSError as e:
+        rules = f"You are the boss of a team (the boss rules file is missing: {e}). Run `agy-ask team` first."
+    office = os.environ.get("AGY_OFFICE") or ""
+    if office:
+        home = os.path.expanduser("~")  # agy-as sets HOME to the boss's profile, ~/.agy_profiles/<acc>
+        root = os.environ.get("HABBLAUD_AGY_PROFILES") or \
+            (os.path.dirname(home) if os.path.basename(os.path.dirname(home)) == ".agy_profiles" else f"{home}/.agy_profiles")
+        name, folder = office, ""
+        try:
+            with open(os.path.join(root, "team.json")) as f:
+                o = next((o for o in json.load(f).get("offices") or [] if o.get("id") == office), {})
+            name, folder = o.get("name") or office, o.get("folder") or ""
+        except (OSError, ValueError, AttributeError):
+            pass
+        rules += f"\n\n## Your office\nYou are the boss of the office {name} (id {office})" + \
+                 (f", project folder {folder}" if folder else "") + "."
+    out = {"injectSteps": [{"systemMessage": {"systemMessage": rules}}]}
+json.dump(out, sys.stdout)

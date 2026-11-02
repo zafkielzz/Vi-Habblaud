@@ -1,8 +1,8 @@
-// Anexos do "Novo agente" (imagens e arquivos que o celular manda junto com o pedido). O link do app do Claude só leva
-// texto, então os arquivos são gravados no computador do app, em ~/.habblaud/attachments/<data>-<id>/, e o pedido ganha
-// a lista dos caminhos para o agente ler. Quem grava é quem abre o link: o servidor no modo Node, o auxiliar do host
-// (scripts/codex-bridge.ts) no Docker. Os arquivos chegam como JSON base64 (o guard exige JSON em todo POST: CSRF).
-// Node puro e sem dependências: também é importado pelo auxiliar do host (via tsx).
+// "New agent" attachments (images and files sent from mobile alongside request). Claude app link only carries
+// text, so files are saved on the app's computer at ~/.habblaud/attachments/<date>-<id>/, and the request gets
+// the list of paths for the agent to read. Saved by whoever opens the link: server in Node mode, host helper
+// (scripts/codex-bridge.ts) in Docker. Files arrive as base64 JSON (guard requires JSON on all POSTs: CSRF).
+// Pure Node without dependencies: also imported by host helper (via tsx).
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -11,11 +11,11 @@ import { tr } from '../../shared/i18n';
 
 export const ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
 export const ATTACHMENTS_PER_SPAWN = 8;
-/** Corpo de POST /api/spawn/attachments: o arquivo em base64 (4/3) e um pouco de folga para o JSON. */
+/** POST /api/spawn/attachments body: file in base64 (4/3) plus some margin for JSON. */
 export const ATTACHMENT_BODY_MAX = Math.ceil((ATTACHMENT_MAX_BYTES * 4) / 3) + 64 * 1024;
-/** Anexos enviados e ainda não usados expiram; o total guardado em memória tem teto. */
+/** Uploaded and unused attachments expire; total stored in memory is capped. */
 export const ATTACHMENT_TTL_MS = 30 * 60_000;
-/** Teto da memória dos anexos: os esperando o pedido e os já tirados por pedidos que ainda não abriram (`held`). */
+/** Attachment memory cap: those awaiting request and those claimed by requests not yet opened (`held`). */
 export const STORE_MAX_BYTES = 120 * 1024 * 1024;
 const NAME_MAX = 120;
 
@@ -25,7 +25,7 @@ export interface Attachment {
   data: Buffer;
 }
 
-/** Nome seguro para gravar: só a última parte, sem controles nem separadores, sem começar com ponto. */
+/** Safe filename for saving: last segment only, no controls or separators, not starting with a dot. */
 export function safeFileName(raw: string): string {
   const base = raw.split(/[\\/]/).pop() ?? '';
   let name = base
@@ -43,23 +43,23 @@ export function safeFileName(raw: string): string {
   return name;
 }
 
-/** Confere o corpo de POST /api/spawn/attachments: {name, type?, data (base64)}. */
+/** Validates POST /api/spawn/attachments body: {name, type?, data (base64)}. */
 export function parseAttachment(raw: unknown): Attachment | { error: string } {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const name = typeof r.name === 'string' ? safeFileName(r.name) : 'arquivo';
   const type = typeof r.type === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(r.type) ? r.type : 'application/octet-stream';
-  if (typeof r.data !== 'string' || !r.data) return { error: tr('arquivo vazio') };
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) return { error: tr('arquivo ilegível (base64)') };
+  if (typeof r.data !== 'string' || !r.data) return { error: tr('empty file') };
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) return { error: tr('unreadable file (base64)') };
   const data = Buffer.from(r.data, 'base64');
-  if (!data.length) return { error: tr('arquivo vazio') };
-  if (data.length > ATTACHMENT_MAX_BYTES) return { error: tr('o arquivo passa de {0} MB', [ATTACHMENT_MAX_BYTES / 1024 / 1024]) };
+  if (!data.length) return { error: tr('empty file') };
+  if (data.length > ATTACHMENT_MAX_BYTES) return { error: tr('the file exceeds {0} MB', [ATTACHMENT_MAX_BYTES / 1024 / 1024]) };
   return { name, type, data };
 }
 
-/** Anexos enviados, esperando o pedido do agente novo (em memória; o id volta para o navegador). */
+/** Uploaded attachments awaiting new agent request (in memory; id returned to browser). */
 export class AttachmentStore {
   private readonly items = new Map<string, Attachment & { at: number }>();
-  /** Bytes tirados por take() e ainda em memória (pedido na fila); quem tirou devolve com release(). */
+  /** Bytes taken by take() still in memory (queued request); caller returns them with release(). */
   private held = 0;
 
   constructor(
@@ -72,22 +72,22 @@ export class AttachmentStore {
     this.prune();
     let total = a.data.length + this.held;
     for (const it of this.items.values()) total += it.data.length;
-    if (total > this.maxBytes) return { error: tr('anexos demais esperando: envie o pedido ou tente de novo daqui a pouco') };
+    if (total > this.maxBytes) return { error: tr('too many attachments waiting: send the request or try again shortly') };
     const id = this.newId();
     this.items.set(id, { ...a, at: this.now() });
     return { id };
   }
 
-  /** Tira os anexos do depósito (cada um só serve a um pedido). Ids desconhecidos ou vencidos = erro. */
+  /** Takes attachments from store (each serves only one request). Unknown or expired ids = error. */
   take(ids: unknown): Attachment[] | { error: string } {
     this.prune();
     if (ids === undefined) return [];
-    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) return { error: tr('anexos inválidos') };
-    if (ids.length > ATTACHMENTS_PER_SPAWN) return { error: tr('no máximo {0} anexos por pedido', [ATTACHMENTS_PER_SPAWN]) };
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) return { error: tr('invalid attachments') };
+    if (ids.length > ATTACHMENTS_PER_SPAWN) return { error: tr('at most {0} attachments per request', [ATTACHMENTS_PER_SPAWN]) };
     const out: Attachment[] = [];
     for (const id of ids as string[]) {
       const it = this.items.get(id);
-      if (!it) return { error: tr('um anexo expirou: anexe de novo') };
+      if (!it) return { error: tr('an attachment expired: attach it again') };
       out.push({ name: it.name, type: it.type, data: it.data });
     }
     for (const id of ids as string[]) this.items.delete(id);
@@ -95,7 +95,7 @@ export class AttachmentStore {
     return out;
   }
 
-  /** Os anexos tirados por take() saíram da memória (gravados, entregues ao auxiliar ou descartados). */
+  /** Attachments taken by take() freed from memory (written to disk, handed to helper, or discarded). */
   release(bytes: number): void {
     this.held = Math.max(0, this.held - bytes);
   }
@@ -115,7 +115,7 @@ function stamp(at: Date): string {
   return `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
 }
 
-/** Grava os anexos numa pasta nova (700; arquivos 600), com nomes únicos. Devolve os caminhos, na ordem. */
+/** Writes attachments to a new directory (700; files 600), with unique names. Returns paths in order. */
 export function writeAttachments(root: string, spawnId: string, files: readonly Attachment[], at = new Date()): string[] {
   if (!files.length) return [];
   const dir = join(root, `${stamp(at)}-${spawnId.replace(/[^\w-]/g, '').slice(0, 8) || 'pedido'}`);
@@ -138,10 +138,10 @@ export function writeAttachments(root: string, spawnId: string, files: readonly 
   });
 }
 
-/** O pedido com a lista dos anexos no fim (o agente lê os arquivos pelos caminhos). */
+/** Prompt with list of attachments appended (agent reads files from paths). */
 export function promptWithAttachments(prompt: string, paths: readonly string[]): string {
   if (!paths.length) return prompt;
   const list = paths.map((p) => `- ${p}`).join('\n');
-  const head = paths.length === 1 ? tr('Anexo enviado pelo Habblaud (leia antes de começar):') : tr('Anexos enviados pelo Habblaud (leia antes de começar):');
+  const head = paths.length === 1 ? tr('Attachment sent via Habblaud (read it before starting):') : tr('Attachments sent via Habblaud (read them before starting):');
   return `${prompt.trim() ? `${prompt.trimEnd()}\n\n` : ''}${head}\n${list}`;
 }

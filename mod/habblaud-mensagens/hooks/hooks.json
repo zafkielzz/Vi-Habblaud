@@ -1,4 +1,4 @@
 {
-  "description": "Módulo de hooks do plugin de mensagens do Habblaud (busca as mensagens digitadas no escritório e as manda à sessão como suas)",
+  "description": "Hook module for the Habblaud messages plugin (fetches messages typed in the office and sends them to the session as yours)",
   "modules": ["./register.ts"]
 }

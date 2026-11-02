@@ -1,58 +1,58 @@
 #!/usr/bin/env node
-// Hook do Habblaud para o OpenAI Codex (CLI `codex` e o app desktop, que gravam no mesmo CODEX_HOME): mostra no
-// escritório o que as sessões do Codex fazem e deixa aprovar ou recusar pelo escritório os pedidos de aprovação
-// (PermissionRequest). `npm run codex:install` acrescenta em <CODEX_HOME>/hooks.json, no FIM da lista de cada evento,
-// um grupo que roda:
+// Habblaud hook for OpenAI Codex (the `codex` CLI and desktop app, which write to the same CODEX_HOME): shows in
+// the office what Codex sessions are doing and lets you approve or deny approval requests (PermissionRequest)
+// from the office. `npm run codex:install` adds to <CODEX_HOME>/hooks.json, at the END of each event list,
+// a group that runs:
 //
-//   node "/caminho/do/habblaud/mod/habblaud-codex/hook.mjs"
+//   node "/path/to/habblaud/mod/habblaud-codex/hook.mjs"
 //
-// O comando nunca leva opções: o Codex guarda a confiança de cada hook (aprovada por você em /hooks) num hash que
-// inclui o comando. Porta e espera ficam em ~/.habblaud/codex-hook.json ({port, permissionTimeoutS}, gravado pelo
-// instalador); HABBLAUD_PORT vale como reserva (o ambiente do hook é o do processo que subiu o daemon do Codex, então
-// variáveis exportadas no seu shell nem sempre chegam aqui).
+// The command never takes flags: Codex stores trust for each hook (approved by you in /hooks) in a hash that
+// includes the command string. Port and timeout live in ~/.habblaud/codex-hook.json ({port, permissionTimeoutS},
+// written by the installer); HABBLAUD_PORT acts as fallback (the hook environment comes from the process that
+// launched the Codex daemon, so variables exported in your shell might not reach here).
 //
-// O hook:
-// 1. lê do stdin o JSON do evento (session_id, hook_event_name, cwd, transcript_path...);
-// 2. manda o evento, com os textos cortados, para POST http://127.0.0.1:<porta>/api/codex/events (prazo curto), com
-//    a conta (basename do CODEX_HOME, como o servidor calcula) e o caminho do CODEX_HOME;
-// 3. só no PermissionRequest: registra o pedido em POST /api/permissions (provider "codex") e espera a decisão em
-//    GET /api/permissions/:id/wait até a espera do arquivo (padrão 25 s, entre 5 e 120). Aprovado: imprime a decisão
-//    allow; recusado: deny com o motivo. Qualquer outra coisa ("responder no terminal", tempo esgotado, Habblaud fora
-//    do ar ou sem página aberta): sai sem imprimir nada e o Codex segue a aprovação normal. Atenção: o Codex só mostra
-//    a aprovação no terminal DEPOIS que o hook termina (enquanto isso, o terminal mostra o statusMessage do hook).
+// The hook:
+// 1. reads event JSON from stdin (session_id, hook_event_name, cwd, transcript_path...);
+// 2. sends the event with trimmed text to POST http://127.0.0.1:<port>/api/codex/events (short deadline), with
+//    the account (basename of CODEX_HOME, as calculated by the server) and CODEX_HOME path;
+// 3. on PermissionRequest only: registers the request via POST /api/permissions (provider "codex") and waits for
+//    a decision via GET /api/permissions/:id/wait up to the configured timeout (default 25 s, between 5 and 120).
+//    Approved: prints allow decision; denied: deny with reason. Anything else ("answer in the terminal", timeout,
+//    Habblaud offline, or no open page): exits without printing anything, and Codex proceeds with normal approval.
+//    Note: Codex only shows terminal approval AFTER the hook finishes (meanwhile terminal shows hook statusMessage).
 //
-// Regras: Node puro (22+), só `node:*`, sem dependências; nunca trava nem quebra a sessão: todo erro = sair com 0 e
-// sem saída (nunca com 2, que no Codex recusa o pedido). Nunca imprime updatedInput, updatedPermissions nem interrupt
-// (o Codex não os aceita: o hook "falha" sem decidir). Nos eventos de observação, nada vai para o stdout (no
-// UserPromptSubmit e no SessionStart ele viraria contexto do modelo). Só fala com 127.0.0.1.
-// HABBLAUD_HOOK_DEBUG=1 escreve o que acontece no stderr.
+// Rules: Pure Node (22+), only `node:*`, no dependencies; never hangs or breaks the session: any error = exit 0
+// with no output (never 2, which in Codex denies the request). Never prints updatedInput, updatedPermissions, or
+// interrupt (Codex rejects them: the hook "fails" undecided). For observation events, nothing goes to stdout
+// (in UserPromptSubmit and SessionStart it would become model context). Speaks only with 127.0.0.1.
+// HABBLAUD_HOOK_DEBUG=1 logs details to stderr.
 import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_PORT = 4747;
-/** Espera padrão por uma decisão no escritório (segundos). */
+/** Default wait for a decision in the office (seconds). */
 export const DEFAULT_WAIT_S = 25;
 export const MIN_WAIT_S = 5;
 export const MAX_WAIT_S = 120;
-/** Arquivo de configuração, em ~/.habblaud (o instalador grava). */
+/** Configuration file in ~/.habblaud (written by the installer). */
 export const CONFIG_FILE = 'codex-hook.json';
-/** Eventos mandados ao Habblaud (o PermissionRequest também, antes de registrar o pedido). */
+/** Events sent to Habblaud (PermissionRequest too, before registering the request). */
 export const OBSERVED = new Set(['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStart', 'SubagentStop', 'PermissionRequest']);
-/** Prazo do envio de um evento: o Habblaud responde na hora (e o hook não pode atrasar o Codex). */
+/** Event send timeout: Habblaud responds immediately (and the hook cannot delay Codex). */
 const EVENT_TIMEOUT_MS = 1_500;
-/** O SessionEnd tem só 1 s no Codex (e roda sempre em primeiro plano). */
+/** SessionEnd has only 1 s in Codex (and always runs in the foreground). */
 const SESSION_END_TIMEOUT_MS = 600;
-/** Registrar o pedido: se o Habblaud não responder nisso, ele está fora do ar (ou travado). */
+/** Register request: if Habblaud does not respond in this time, it is offline (or stuck). */
 const REGISTER_TIMEOUT_MS = 2_000;
-/** Espera máxima de cada long-poll (o servidor responde "pending" e o hook pergunta de novo). */
+/** Maximum wait for each long-poll (server replies "pending" and hook polls again). */
 const POLL_S = 25;
 const STDIN_TIMEOUT_MS = 5_000;
 const MAX_STDIN = 8 * 1024 * 1024;
-/** Textos do evento e dos argumentos mandados ao Habblaud (o servidor só mostra prévias). */
+/** Event and argument strings sent to Habblaud (the server only displays previews). */
 const MAX_STRING = 8_000;
-/** Corpo do pedido (o servidor recusa acima de 256 KB). */
+/** Request body (server rejects above 256 KB). */
 const MAX_BODY = 200_000;
 
 const debug = process.env.HABBLAUD_HOOK_DEBUG === '1' ? (msg) => process.stderr.write(`[habblaud-codex] ${msg}\n`) : () => {};
@@ -60,15 +60,15 @@ const debug = process.env.HABBLAUD_HOOK_DEBUG === '1' ? (msg) => process.stderr.
 const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const validPort = (p) => Number.isInteger(p) && p > 0 && p < 65_536;
 
-/** Caminho absoluto, com `~`/`$HOME` expandidos e sem barra final (como o servidor normaliza as pastas das contas). */
+/** Absolute path, with `~`/`$HOME` expanded and no trailing slash (how the server normalizes account directories). */
 function expandHome(p, home) {
   const abs = resolve(p.trim().replace(/^~(?=[\\/]|$)/, home).replace(/\$\{HOME\}|\$HOME\b/g, home));
   return abs.length > 1 ? abs.replace(/[\\/]+$/, '') : abs;
 }
 
 /**
- * Porta e espera: ~/.habblaud/codex-hook.json ({port, permissionTimeoutS}); sem porta no arquivo, HABBLAUD_PORT;
- * senão os padrões. Arquivo ausente ou ilegível = padrões.
+ * Port and wait: ~/.habblaud/codex-hook.json ({port, permissionTimeoutS}); if missing in file, HABBLAUD_PORT;
+ * otherwise defaults. Missing or unreadable file = defaults.
  */
 export function readConfig(env = process.env) {
   const home = env.HOME || homedir();
@@ -89,8 +89,8 @@ export function readConfig(env = process.env) {
 }
 
 /**
- * CODEX_HOME da sessão: a variável, se veio; senão a pasta acima de sessions/AAAA/MM/DD/ (ou de archived_sessions/)
- * no transcript_path; senão ~/.codex.
+ * Session CODEX_HOME: env var if present; else directory above sessions/YYYY/MM/DD/ (or archived_sessions/)
+ * in transcript_path; otherwise ~/.codex.
  */
 export function codexHomeOf(env, input) {
   const home = env.HOME || homedir();
@@ -102,12 +102,12 @@ export function codexHomeOf(env, input) {
   return join(home, '.codex');
 }
 
-/** Id da conta = basename do CODEX_HOME (como o servidor dá ids às contas; colisões ele resolve pelo caminho). */
+/** Account id = basename of CODEX_HOME (how the server ids accounts; collisions resolved by path). */
 export function accountOf(codexHome) {
   return basename(codexHome) || codexHome;
 }
 
-/** Corta textos longos (saída de comando, patch enorme...). */
+/** Trims long text (command output, huge patch...). */
 export function trimInput(v, max = MAX_STRING, depth = 0) {
   if (typeof v === 'string') return v.length > max ? v.slice(0, max) : v;
   if (depth > 8 || v === null || typeof v !== 'object') return v;
@@ -117,7 +117,7 @@ export function trimInput(v, max = MAX_STRING, depth = 0) {
   return out;
 }
 
-/** O valor com os textos cortados; se ainda ficar grande demais no corpo, corta mais curto. */
+/** Value with trimmed text; if still too large for body, trims shorter. */
 function fitted(v, size) {
   let out = v;
   for (const max of [MAX_STRING, 1_000, 200]) {
@@ -127,14 +127,14 @@ function fitted(v, size) {
   return out;
 }
 
-/** Corpo de POST /api/codex/events: o stdin do hook inteiro, com os textos cortados. */
+/** Body of POST /api/codex/events: entire hook stdin, with text trimmed. */
 export function eventBody(input, account, codexHome) {
   const body = { account, codexHome, event: input };
   body.event = fitted(input, (event) => JSON.stringify({ ...body, event }).length);
   return body;
 }
 
-/** Corpo de POST /api/permissions: só o que o Habblaud usa (nada do transcript_path). */
+/** Body of POST /api/permissions: only what Habblaud uses (no transcript_path). */
 export function permissionBody(input, account, codexHome, timeoutMs) {
   const body = { provider: 'codex', account, codexHome, session_id: input.session_id, tool_name: input.tool_name, tool_input: {}, timeout_ms: timeoutMs };
   for (const k of ['agent_id', 'agent_type', 'cwd', 'turn_id']) if (typeof input[k] === 'string') body[k] = input[k];
@@ -142,7 +142,7 @@ export function permissionBody(input, account, codexHome, timeoutMs) {
   return body;
 }
 
-/** Saída do hook para uma decisão do Habblaud (undefined = sair sem decidir). Só allow e deny (+ message). */
+/** Hook output for a Habblaud decision (undefined = exit undecided). Only allow and deny (+ message). */
 export function decisionOutput(result) {
   if (!result || result.status !== 'decided') return undefined;
   if (result.behavior === 'allow') return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } };
@@ -173,7 +173,7 @@ function readStdin() {
   });
 }
 
-/** Requisição ao Habblaud local; null = fora do ar, tempo esgotado ou resposta ilegível. */
+/** Request to local Habblaud; null = offline, timed out, or unreadable response. */
 async function call(base, method, path, body, timeoutMs) {
   try {
     const res = await fetch(`${base}${path}`, {
@@ -191,12 +191,12 @@ async function call(base, method, path, body, timeoutMs) {
     }
     return { status: res.status, json };
   } catch (err) {
-    debug(`${method} ${path}: ${err?.name ?? 'erro'} ${err?.message ?? ''}`);
+    debug(`${method} ${path}: ${err?.name ?? 'error'} ${err?.message ?? ''}`);
     return null;
   }
 }
 
-/** Manda o evento e, no PermissionRequest, decide o pedido (ou não). Devolve a saída a imprimir, ou undefined. Nunca lança. */
+/** Sends the event and, on PermissionRequest, decides the request (or not). Returns output to print or undefined. Never throws. */
 export async function run(env = process.env, stdinText) {
   const startedAt = Date.now();
   try {
@@ -217,47 +217,46 @@ export async function run(env = process.env, stdinText) {
     const account = accountOf(codexHome);
     const base = `http://127.0.0.1:${cfg.port}`;
     const sent = await call(base, 'POST', '/api/codex/events', eventBody(input, account, codexHome), event === 'SessionEnd' ? SESSION_END_TIMEOUT_MS : EVENT_TIMEOUT_MS);
-    debug(`${event}: ${sent ? `${sent.status} ${JSON.stringify(sent.json ?? null)}` : 'Habblaud fora do ar'}`);
+    debug(`${event}: ${sent ? `${sent.status} ${JSON.stringify(sent.json ?? null)}` : 'Habblaud offline'}`);
     if (event !== 'PermissionRequest' || typeof input.tool_name !== 'string' || !input.tool_name) return undefined;
-    // Sem resposta nem ao evento: o Habblaud está fora do ar (ou travado); a aprovação segue no terminal.
+    // No response even to event: Habblaud is offline (or stuck); approval continues in terminal.
     if (!sent) return undefined;
 
-    // A espera conta desde o início do hook (o Codex só mostra a aprovação no terminal quando ele termina).
+    // Wait time counts from hook start (Codex only shows terminal approval when it terminates).
     const deadline = startedAt + cfg.waitMs;
     const reg = await call(base, 'POST', '/api/permissions', permissionBody(input, account, codexHome, Math.max(0, deadline - Date.now())), REGISTER_TIMEOUT_MS);
     if (!reg || reg.status !== 201 || typeof reg.json?.id !== 'string') {
-      debug(`sem desvio (${reg ? `${reg.status} ${JSON.stringify(reg.json ?? null)}` : 'Habblaud fora do ar'})`);
+      debug(`no bypass (${reg ? `${reg.status} ${JSON.stringify(reg.json ?? null)}` : 'Habblaud offline'})`);
       return undefined;
     }
     const id = encodeURIComponent(reg.json.id);
     for (;;) {
       const left = deadline - Date.now();
       if (left <= 0) {
-        debug('tempo esgotado: vale o terminal');
+        debug('timed out: terminal takes precedence');
         return undefined;
       }
       const waitS = Math.max(0.05, Math.min(POLL_S, left / 1_000));
       const r = await call(base, 'GET', `/api/permissions/${id}/wait?timeout=${waitS}`, undefined, waitS * 1_000 + 5_000);
       if (!r || r.status !== 200) return undefined;
       if (r.json?.status === 'pending') continue;
-      debug(`resposta: ${JSON.stringify(r.json)}`);
+      debug(`response: ${JSON.stringify(r.json)}`);
       return decisionOutput(r.json);
     }
   } catch (err) {
-    debug(`erro: ${err?.message ?? err}`);
+    debug(`error: ${err?.message ?? err}`);
     return undefined;
   }
 }
 
 export async function main() {
   const { waitMs } = readConfig();
-  // Rede de segurança: nada mantém o processo vivo além da espera (o Codex também tem o tempo limite do hook).
+  // Safety net: nothing keeps the process alive past timeout (Codex also has hook timeout).
   setTimeout(() => process.exit(0), waitMs + 15_000).unref();
   const out = await run();
-  // Sem process.exit() logo depois do fetch: no Windows (Node 23 até 24.19) ele derruba o processo com 0xC0000409
-  // enquanto o V8 ainda compila em segundo plano o parser do fetch (nodejs/node#56645). O processo sai sozinho quando
-  // o loop esvazia, o que também espera a escrita da decisão no pipe; se algo ainda segurar o loop, o process.exit
-  // vem 1 s depois.
+  // No process.exit() right after fetch: on Windows (Node 23 to 24.19) it crashes with 0xC0000409 while V8
+  // still compiles fetch parser in the background (nodejs/node#56645). Process exits on its own once loop
+  // empties, waiting for decision pipe write; if anything holds the loop, process.exit fires 1 s later.
   const finish = () => setTimeout(() => process.exit(0), 1_000).unref();
   if (out) process.stdout.write(`${JSON.stringify(out)}\n`, finish);
   else finish();

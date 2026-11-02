@@ -3,18 +3,18 @@ import { fileURLToPath } from 'node:url';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
-// Cliente do Habblaud. Em `npm run dev` o servidor usa este config em middleware mode;
-// `npm run dev:client` sobe só o Vite (use ?mock=1 para dados simulados no navegador).
+// Habblaud client. In `npm run dev` server uses this config in middleware mode;
+// `npm run dev:client` starts Vite only (use ?mock=1 for simulated browser data).
 export default defineConfig({
   root: r('./client'),
-  // No navegador vai só o dicionário do idioma ativo (client/src/main.ts), não os três: ver shared/locales/all.ts.
+  // Only the active language's dictionary goes to the browser (client/src/main.ts): see shared/locales/all.ts.
   resolve: { alias: [{ find: /^\.\/locales\/all$/, replacement: r('./shared/locales/none.ts') }] },
   publicDir: r('./client/public'),
   build: {
     outDir: r('./dist/client'),
     emptyOutDir: true,
-    // Arquivos gerados com hash vão para /bundle/ (cache immutable no servidor); /assets/ fica só
-    // para client/public (nomes fixos, revalidados a cada acesso). Ver server/http/static.ts.
+    // Hashed output bundles go to /bundle/ (immutable server cache); /assets/ is reserved for
+    // client/public (fixed names, revalidated on each request). See server/http/static.ts.
     assetsDir: 'bundle',
     assetsInlineLimit: 0,
     rollupOptions: { input: { main: r('./client/index.html') } },

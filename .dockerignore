@@ -1,5 +1,5 @@
-# Contexto mínimo para o build: tudo fica de fora, exceto o que a compilação precisa.
-# (Evita mandar para o daemon node_modules, dist, caches de geração de arte e arquivos locais.)
+# Minimal build context: everything is excluded except what compilation needs.
+# (Avoids sending node_modules, dist, art generation caches, and local files to the daemon.)
 *
 !package.json
 !package-lock.json
@@ -11,7 +11,7 @@
 !scripts/build-server.mjs
 !scripts/build-info.mjs
 
-# Mesmo dentro das pastas incluídas: nada de lixo local.
+# Even inside included folders: no local clutter.
 **/node_modules
 **/.DS_Store
 **/*.log

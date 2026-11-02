@@ -1,6 +1,6 @@
-// Auxiliar das mensagens ao Codex no Docker (scripts/codex-bridge.ts) contra as rotas de verdade (guard, app e
-// /api/codex/bridge/*): a trava das mensagens (recurso ligado + Host local), a rodada completa página → auxiliar →
-// codex queue (binário falso) → confirmação, e a conferência de cada mensagem antes de rodar o comando.
+// Codex message helper in Docker (scripts/codex-bridge.ts) against real routes (guard, app and
+// /api/codex/bridge/*): message gate (feature enabled + local Host), full round page → helper →
+// codex queue (fake binary) → ack, and check of each message before running the command.
 import http from 'node:http';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -41,7 +41,7 @@ afterEach(async () => {
   tmp.cleanup();
 });
 
-/** Office + Hub + rotas de verdade, com um agente do Codex e o registro das mensagens SEM o modo Node (como no Docker). */
+/** Office + Hub + real routes, with a Codex agent and message registry WITHOUT Node mode (as in Docker). */
 async function serve(enabled = true): Promise<{ base: string; port: number; office: Office; registry?: MessageRegistry }> {
   const late: { registry?: MessageRegistry } = {};
   const office = new Office({
@@ -67,7 +67,7 @@ async function serve(enabled = true): Promise<{ base: string; port: number; offi
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   const port = (server.address() as AddressInfo).port;
-  office.addMain({ id: MAIN, provider: 'codex', account: '.codex', sessionId: THREAD, cwd: '/p/loja', role: 'Agente principal', startedAt: Date.now(), status: 'idle' });
+  office.addMain({ id: MAIN, provider: 'codex', account: '.codex', sessionId: THREAD, cwd: '/p/loja', role: 'Main agent', startedAt: Date.now(), status: 'idle' });
   close = () =>
     new Promise((ok) => {
       registry?.stop();
@@ -78,8 +78,8 @@ async function serve(enabled = true): Promise<{ base: string; port: number; offi
   return { base: `http://127.0.0.1:${port}`, port, office, registry };
 }
 
-describe('rotas do auxiliar do Codex', () => {
-  it('seguem a trava das mensagens: desligadas = 403; Host que não é local = 403; GET = 405; sem JSON = 415', async () => {
+describe('Codex helper routes', () => {
+  it('follow message gate: disabled = 403; non-local Host = 403; GET = 405; non-JSON = 415', async () => {
     let s = await serve(false);
     expect((await request(s.base, '/api/codex/bridge/poll', { method: 'POST', body: {} })).status).toBe(403);
     await close!();
@@ -91,43 +91,43 @@ describe('rotas do auxiliar do Codex', () => {
     expect(await request(s.base, '/api/codex/bridge/poll', { method: 'POST', body: {} })).toMatchObject({ status: 200, json: { messages: [] } });
   });
 
-  it.runIf(FAKE_CODEX_RUNS)('fluxo: o auxiliar conecta (canMessage) → página manda → rodada roda o codex queue → confirma → delivered', async () => {
+  it.runIf(FAKE_CODEX_RUNS)('flow: helper connects (canMessage) → page sends → round runs codex queue → acks → delivered', async () => {
     const s = await serve();
     const bin = writeFakeCodex(tmp.dir);
     const log = join(tmp.dir, 'chamadas.log');
     const run = createCodexQueueRunner(bin, { env: { PATH: process.env.PATH, FAKE_CODEX_LOG: log } });
     const post = httpPost(s.port);
-    // Antes do auxiliar: o Codex não recebe.
-    expect((await request(s.base, '/api/messages', { method: 'POST', body: { agentId: MAIN, text: 'oi' } })).status).toBe(409);
+    // Before helper: Codex does not receive.
+    expect((await request(s.base, '/api/messages', { method: 'POST', body: { agentId: MAIN, text: 'hi' } })).status).toBe(409);
     expect(await round(post, run)).toEqual({ state: 'ok', results: [] });
     expect(s.office.commit().snapshot.agents.find((a) => a.id === MAIN)!.canMessage).toBe(true);
-    const r = await request(s.base, '/api/messages', { method: 'POST', body: { agentId: MAIN, text: '--message=x e o resto' } });
+    const r = await request(s.base, '/api/messages', { method: 'POST', body: { agentId: MAIN, text: '--message=x and the rest' } });
     expect(r.status).toBe(201);
     const id = (r.json as { id: string }).id;
     const lines: string[] = [];
     expect(await round(post, run, (l) => lines.push(l))).toEqual({ state: 'ok', results: [{ id, ok: true }] });
-    expect(fakeCodexCalls(log)).toEqual([{ args: ['queue', `--thread=${THREAD}`, '--message=--message=x e o resto'], codexHome }]);
+    expect(fakeCodexCalls(log)).toEqual([{ args: ['queue', `--thread=${THREAD}`, '--message=--message=x and the rest'], codexHome }]);
     expect((await request(s.base, `/api/messages/${id}`)).json).toMatchObject({ status: 'delivered' });
-    // O texto nunca vai para a tela do auxiliar.
-    expect(lines.join('\n')).not.toContain('o resto');
+    // The text never goes to helper screen.
+    expect(lines.join('\n')).not.toContain('and the rest');
   });
 
-  it('Habblaud fora do ar ou recusando: a rodada só informa (nada roda)', async () => {
+  it('Habblaud down or refusing: round only reports (nothing runs)', async () => {
     const run = async () => ({ ok: true as const });
     expect(await round(httpPost(1), run)).toEqual({ state: 'down' });
     const s = await serve(false);
     expect(await round(httpPost(s.port), run)).toMatchObject({ state: 'refused', status: 403 });
   });
 
-  it('confirma cada resultado antes de rodar a próxima mensagem do lote', async () => {
+  it('acks each result before running next message in batch', async () => {
     const s = await serve();
     const thread = '0199b0c0-0000-7abc-8def-0123456789ab';
     const other = `.codex:${thread}`;
-    s.office.addMain({ id: other, provider: 'codex', account: '.codex', sessionId: thread, cwd: '/p/api', role: 'Agente principal', startedAt: Date.now(), status: 'idle' });
+    s.office.addMain({ id: other, provider: 'codex', account: '.codex', sessionId: thread, cwd: '/p/api', role: 'Main agent', startedAt: Date.now(), status: 'idle' });
     const post = httpPost(s.port);
     await round(post, async () => ({ ok: true }));
-    const a = await request(s.base, '/api/messages', { method: 'POST', body: { agentId: MAIN, text: 'um' } });
-    const b = await request(s.base, '/api/messages', { method: 'POST', body: { agentId: other, text: 'dois' } });
+    const a = await request(s.base, '/api/messages', { method: 'POST', body: { agentId: MAIN, text: 'one' } });
+    const b = await request(s.base, '/api/messages', { method: 'POST', body: { agentId: other, text: 'two' } });
     const idA = (a.json as { id: string }).id;
     const idB = (b.json as { id: string }).id;
     const before: string[] = [];
@@ -135,26 +135,26 @@ describe('rotas do auxiliar do Codex', () => {
       if (job.thread === thread) {
         const message = await request(s.base, `/api/messages/${idA}`);
         before.push((message.json as { status: string }).status);
-        return { ok: false, error: 'Error: recusado' };
+        return { ok: false, error: 'Error: refused' };
       }
       return { ok: true };
     });
     expect(before).toEqual(['delivered']);
-    expect(result).toEqual({ state: 'ok', results: [{ id: idA, ok: true }, { id: idB, ok: false, error: 'Error: recusado' }] });
-    expect((await request(s.base, `/api/messages/${idB}`)).json).toMatchObject({ status: 'failed', error: 'Error: recusado' });
+    expect(result).toEqual({ state: 'ok', results: [{ id: idA, ok: true }, { id: idB, ok: false, error: 'Error: refused' }] });
+    expect((await request(s.base, `/api/messages/${idB}`)).json).toMatchObject({ status: 'failed', error: 'Error: refused' });
   });
 
-  it('checkMessage: thread, texto e uma pasta do Codex que existe (nunca uma do Claude Code)', () => {
-    const ok = { id: 'm1', account: '.codex', codexHome, thread: THREAD, text: 'oi' };
+  it('checkMessage: thread, text and existing Codex folder (never Claude Code folder)', () => {
+    const ok = { id: 'm1', account: '.codex', codexHome, thread: THREAD, text: 'hi' };
     expect(checkMessage(ok)).toEqual(ok);
-    expect(checkMessage({ ...ok, thread: 'nome' })).toEqual({ id: 'm1', error: 'id de thread do Codex inválido' });
-    expect(checkMessage({ ...ok, text: ' ' })).toEqual({ id: 'm1', error: 'mensagem vazia' });
-    expect(checkMessage({ ...ok, codexHome: join(tmp.dir, 'nao-existe') })).toMatchObject({ id: 'm1', error: expect.stringMatching(/não existe/) });
-    expect(checkMessage({ ...ok, codexHome: 'relativo' })).toMatchObject({ error: expect.stringMatching(/não existe/) });
+    expect(checkMessage({ ...ok, thread: 'nome' })).toEqual({ id: 'm1', error: 'invalid Codex thread id' });
+    expect(checkMessage({ ...ok, text: ' ' })).toEqual({ id: 'm1', error: 'empty message' });
+    expect(checkMessage({ ...ok, codexHome: join(tmp.dir, 'nao-existe') })).toMatchObject({ id: 'm1', error: expect.stringMatching(/doesn't exist/) });
+    expect(checkMessage({ ...ok, codexHome: 'relativo' })).toMatchObject({ error: expect.stringMatching(/doesn't exist/) });
     const claude = join(tmp.dir, '.claude');
     mkdirSync(join(claude, 'projects'), { recursive: true });
-    expect(checkMessage({ ...ok, codexHome: claude })).toMatchObject({ error: expect.stringMatching(/não existe/) });
-    expect(checkMessage({ text: 'x' })).toEqual({ error: 'mensagem sem id' });
+    expect(checkMessage({ ...ok, codexHome: claude })).toMatchObject({ error: expect.stringMatching(/doesn't exist/) });
+    expect(checkMessage({ text: 'x' })).toEqual({ error: 'message without id' });
   });
 
   it('parseArgs', () => {
@@ -163,17 +163,17 @@ describe('rotas do auxiliar do Codex', () => {
     expect(parseArgs([], { HABBLAUD_PORT: '4848' })).toEqual({ port: 4848, once: false });
     expect(parseArgs(['-h'], {})).toBe('help');
     expect(() => parseArgs(['--port', 'x'], {})).toThrow(/--port/);
-    expect(() => parseArgs(['--xyz'], {})).toThrow(/desconhecida/);
+    expect(() => parseArgs(['--xyz'], {})).toThrow(/unknown option/);
   });
 });
 
-describe('spawnRound com anexos e dictationRound', () => {
-  it('grava os anexos aqui e o link leva os caminhos; anexo ilegível recusa o pedido', async () => {
+describe('spawnRound with attachments and dictationRound', () => {
+  it('saves attachments here and link carries paths; unreadable attachment rejects request', async () => {
     const post: Post = async (path) =>
       path === '/api/host/spawn/poll'
         ? { status: 200, json: { spawns: [
-            { id: 'a', folder: '/ok', prompt: 'veja', files: [{ name: '../print.png', type: 'image/png', data: Buffer.from('png').toString('base64') }] },
-            { id: 'b', folder: '/ok', prompt: '', files: [{ name: 'x', data: 'não é base64!' }] },
+            { id: 'a', folder: '/ok', prompt: 'see', files: [{ name: '../print.png', type: 'image/png', data: Buffer.from('png').toString('base64') }] },
+            { id: 'b', folder: '/ok', prompt: '', files: [{ name: 'x', data: 'not base64!' }] },
           ] } }
         : { status: 200, json: { ok: true } };
     const opened: string[] = [];
@@ -182,42 +182,42 @@ describe('spawnRound com anexos e dictationRound', () => {
       files.map((f) => (wrote.push(`${id}:${f.name}:${f.data.toString()}`), `/h/att/${f.name}`)),
     );
     expect(wrote).toEqual(['a:print.png:png']);
-    expect(new URL(opened[0]).searchParams.get('q')).toBe('veja\n\nAnexo enviado pelo Habblaud (leia antes de começar):\n- /h/att/print.png');
-    expect(r).toEqual({ state: 'ok', results: [{ id: 'a', ok: true, how: 'app' }, { id: 'b', ok: false, error: 'anexo ilegível' }] });
+    expect(new URL(opened[0]).searchParams.get('q')).toBe('see\n\nAttachment sent via Habblaud (read it before starting):\n- /h/att/print.png');
+    expect(r).toEqual({ state: 'ok', results: [{ id: 'a', ok: true, how: 'app' }, { id: 'b', ok: false, error: 'unreadable attachment' }] });
   });
 
-  it('dictationRound transcreve e devolve texto e idioma; erro vira resultado', async () => {
+  it('dictationRound transcribes and returns text and language; error becomes result', async () => {
     const calls: Array<[string, unknown]> = [];
     const post: Post = async (path, body) => {
       calls.push([path, body]);
       return path === '/api/host/dictation/poll'
-        ? { status: 200, json: { dictations: [{ id: 'd1', type: 'audio/mp4', data: Buffer.from('ok').toString('base64') }, { id: 'd2', type: 'audio/mp4', data: Buffer.from('ruim').toString('base64') }] } }
+        ? { status: 200, json: { dictations: [{ id: 'd1', type: 'audio/mp4', data: Buffer.from('ok').toString('base64') }, { id: 'd2', type: 'audio/mp4', data: Buffer.from('bad').toString('base64') }] } }
         : { status: 200, json: { ok: true } };
     };
     const r = await dictationRound(post, async (buf) => {
-      if (buf.toString() === 'ruim') throw new Error('o Whisper falhou (x)');
-      return { text: 'crie um agente', lang: 'pt' };
+      if (buf.toString() === 'bad') throw new Error('Whisper failed (x)');
+      return { text: 'create an agent', lang: 'en' };
     });
-    expect(r).toEqual({ state: 'ok', results: [{ id: 'd1', ok: true, text: 'crie um agente', lang: 'pt' }, { id: 'd2', ok: false, error: 'o Whisper falhou (x)' }] });
+    expect(r).toEqual({ state: 'ok', results: [{ id: 'd1', ok: true, text: 'create an agent', lang: 'en' }, { id: 'd2', ok: false, error: 'Whisper failed (x)' }] });
     expect(calls[1][0]).toBe('/api/host/dictation/ack');
     expect(await dictationRound(async () => null, async () => ({ text: '', lang: '' }))).toEqual({ state: 'down' });
   });
 });
 
-describe('filesRound (arquivos das entregas pelo auxiliar)', () => {
-  it('lê só o que passa na checagem e devolve base64; recusa com motivo', async () => {
+describe('filesRound (delivery files via helper)', () => {
+  it('reads only what passes check and returns base64; rejects with reason', async () => {
     let acked: unknown;
     const post: Post = async (path, body) => {
       if (path === '/api/host/files/poll') return { status: 200, json: { files: [{ id: 'f1', path: '/ok/a.png' }, { id: 'f2', path: '/Users/a/.ssh/id.png' }] } };
       acked = body;
       return { status: 200, json: { ok: true } };
     };
-    const r = await filesRound(post, () => {}, () => Buffer.from('png'), (p) => (p.includes('.ssh') ? { error: 'arquivo protegido' } : { path: p, size: 3 }));
-    expect(r).toEqual({ state: 'ok', results: [{ id: 'f1', ok: true }, { id: 'f2', ok: false, error: 'arquivo protegido' }] });
-    expect(acked).toEqual({ results: [{ id: 'f1', ok: true, data: Buffer.from('png').toString('base64') }, { id: 'f2', ok: false, error: 'arquivo protegido' }] });
+    const r = await filesRound(post, () => {}, () => Buffer.from('png'), (p) => (p.includes('.ssh') ? { error: 'protected file' } : { path: p, size: 3 }));
+    expect(r).toEqual({ state: 'ok', results: [{ id: 'f1', ok: true }, { id: 'f2', ok: false, error: 'protected file' }] });
+    expect(acked).toEqual({ results: [{ id: 'f1', ok: true, data: Buffer.from('png').toString('base64') }, { id: 'f2', ok: false, error: 'protected file' }] });
   });
 
-  it('fora das pastas que pode ler (inside): recusa sem ler; com espera, pede a rodada com ?wait=1', async () => {
+  it('outside allowed folders (inside): rejects without reading; with wait, requests round with ?wait=1', async () => {
     const paths: string[] = [];
     let reads = 0;
     const post: Post = async (path) => {
@@ -226,19 +226,19 @@ describe('filesRound (arquivos das entregas pelo auxiliar)', () => {
       return { status: 200, json: { ok: true } };
     };
     const r = await filesRound(post, () => {}, () => (reads++, Buffer.from('x')), (p) => ({ path: p, size: 1 }), { inside: (p) => p.startsWith('/proj/'), wait: true });
-    expect(r).toEqual({ state: 'ok', results: [{ id: 'f1', ok: false, error: 'fora das pastas de projeto conhecidas' }] });
+    expect(r).toEqual({ state: 'ok', results: [{ id: 'f1', ok: false, error: 'outside the known project folders' }] });
     expect(reads).toBe(0);
     expect(paths[0]).toBe('/api/host/files/poll?wait=1');
   });
 });
 
-describe('spawnRound (agentes novos pelo auxiliar)', () => {
-  it('com o claude: roda em segundo plano; pasta não confiável cai no app e diz por quê', async () => {
+describe('spawnRound (new agents via helper)', () => {
+  it('with claude: runs in background; untrusted folder falls back to app and explains why', async () => {
     const calls: Array<[string, unknown]> = [];
     const post: Post = async (path, body) => {
       calls.push([path, body]);
       return path === '/api/host/spawn/poll'
-        ? { status: 200, json: { spawns: [{ id: 'a', folder: '/conhecida', prompt: 'oi' }, { id: 'b', folder: '/nova', prompt: 'oi' }] } }
+        ? { status: 200, json: { spawns: [{ id: 'a', folder: '/conhecida', prompt: 'hi' }, { id: 'b', folder: '/nova', prompt: 'hi' }] } }
         : { status: 200, json: { ok: true } };
     };
     const opened: string[] = [];
@@ -253,13 +253,13 @@ describe('spawnRound (agentes novos pelo auxiliar)', () => {
       async (req) => (ran.push(req.folder), req.folder === '/conhecida' ? { ok: true, id: 'x1' } : { ok: false, error: 'Workspace not trusted. Run `claude` in /nova once' }),
     );
     expect(ran).toEqual(['/conhecida', '/nova']);
-    expect(opened).toEqual([spawnUrl({ folder: '/nova', prompt: 'oi' })]);
-    expect(r).toMatchObject({ state: 'ok', results: [{ id: 'a', ok: true, how: 'cli' }, { id: 'b', ok: true, how: 'app', note: expect.stringMatching(/confiável/) }] });
+    expect(opened).toEqual([spawnUrl({ folder: '/nova', prompt: 'hi' })]);
+    expect(r).toMatchObject({ state: 'ok', results: [{ id: 'a', ok: true, how: 'cli' }, { id: 'b', ok: true, how: 'app', note: expect.stringMatching(/trusted/) }] });
     expect(calls[1]).toEqual(['/api/host/spawn/ack', { results: (r as { results: unknown }).results }]);
-    expect(lines[0]).toMatch(/segundo plano em \/conhecida/);
+    expect(lines[0]).toMatch(/running in the background/);
   });
 
-  it('monta o link ele mesmo, recusa pasta que não existe e confirma tudo numa chamada', async () => {
+  it('builds link itself, rejects non-existent folder and acks all in one call', async () => {
     const calls: Array<[string, unknown]> = [];
     const post: Post = async (path, body) => {
       calls.push([path, body]);
@@ -269,13 +269,13 @@ describe('spawnRound (agentes novos pelo auxiliar)', () => {
       return { status: 200, json: { ok: true } };
     };
     const opened: string[] = [];
-    const r = await spawnRound(post, async (url) => (opened.push(url), { ok: true }), () => {}, (f) => (f === '/ok' ? undefined : 'pasta não encontrada neste computador'));
+    const r = await spawnRound(post, async (url) => (opened.push(url), { ok: true }), () => {}, (f) => (f === '/ok' ? undefined : 'folder not found on this computer'));
     expect(opened).toEqual([spawnUrl({ folder: '/ok', prompt: 'p' })]);
-    expect(r).toEqual({ state: 'ok', results: [{ id: 'a', ok: true, how: 'app' }, { id: 'b', ok: false, error: 'pasta não encontrada neste computador' }] });
+    expect(r).toEqual({ state: 'ok', results: [{ id: 'a', ok: true, how: 'app' }, { id: 'b', ok: false, error: 'folder not found on this computer' }] });
     expect(calls[1]).toEqual(['/api/host/spawn/ack', { results: r.state === 'ok' ? r.results : [] }]);
   });
 
-  it('Habblaud fora do ar ou recusando', async () => {
+  it('Habblaud down or refusing', async () => {
     expect(await spawnRound(async () => null, async () => ({ ok: true }))).toEqual({ state: 'down' });
     expect(await spawnRound(async () => ({ status: 403, json: { error: 'x' } }), async () => ({ ok: true }))).toEqual({ state: 'refused', status: 403 });
   });

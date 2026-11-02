@@ -1,23 +1,23 @@
-// Cumprimentos na cidade (Fase 5): a roda com os 10 cumprimentos da lista (só ids; o texto sai traduzido para quem
-// lê), quem recebe (o jogador selecionado no cartão ou o mais perto), os balões sobre as cabeças por 5 s e o limite do
-// lado de cá (1 a cada 3 s, 20 por minuto: o servidor fecha a conexão depois de 3 recusas num minuto).
-// Os modelos são puros (testados); a roda é DOM (classes `ui-city-wheel*` de city/social.css).
+// City greetings (Phase 5): wheel with 10 greetings from the list (ids only; text is translated for the
+// viewer), recipient (player selected in card or closest), overhead balloons for 5 s, and client-side rate limit
+// (1 every 3 s, 20 per minute: server closes connection after 3 rejections in a minute).
+// Models are pure (tested); wheel is DOM (`ui-city-wheel*` classes from city/social.css).
 import { tr } from '../../../../shared/i18n';
 import { GREETINGS, greetingIcon, greetingLabel } from '../../../../shared/world/social-labels';
 import { GREETING_IDS, type GreetingId } from '../../../../shared/world/protocol';
 import { h, setText } from '../../ui/dom';
 
-/** Quanto tempo o balão fica sobre a cabeça (o servidor também diz 5 s; o relógio daqui é o que vale). */
+/** How long balloon stays overhead (server also says 5 s; local clock takes precedence). */
 export const BALLOON_MS = 5_000;
-/** Até onde (tiles) a roda procura alguém para cumprimentar. */
+/** Range (tiles) within which the wheel searches for someone to greet. */
 export const GREET_RANGE = 12;
-/** Quem me cumprimentou há menos disto é o primeiro da roda (para responder). */
+/** Whoever greeted me within this window is first in the wheel (for replying). */
 export const REPLY_WINDOW_MS = 10_000;
 
-/** A ordem da roda (a do protocolo). */
+/** Wheel order (matches protocol). */
 export const WHEEL: readonly GreetingId[] = GREETING_IDS;
 
-/** Posição de cada item na roda: o primeiro em cima, no sentido do relógio (px a partir do centro). */
+/** Position of each wheel item: first at top, clockwise (px from center). */
 export function wheelLayout(n: number, radius: number): Array<{ x: number; y: number; angle: number }> {
   const out: Array<{ x: number; y: number; angle: number }> = [];
   for (let i = 0; i < n; i++) {
@@ -27,12 +27,12 @@ export function wheelLayout(n: number, radius: number): Array<{ x: number; y: nu
   return out;
 }
 
-/** Tecla de atalho de cada item da roda: 1–9 e 0 (o 10º). */
+/** Shortcut key for each wheel item: 1–9 and 0 (10th). */
 export function wheelKey(i: number): string {
   return i === 9 ? '0' : String(i + 1);
 }
 
-/** O item da roda de uma tecla ("1".."9", "0"), ou -1. */
+/** Wheel index for a key ("1".."9", "0"), or -1. */
 export function wheelIndexOfKey(key: string): number {
   if (!/^[0-9]$/.test(key)) return -1;
   const i = key === '0' ? 9 : Number(key) - 1;
@@ -40,8 +40,8 @@ export function wheelIndexOfKey(key: string): number {
 }
 
 /**
- * Para quem vai o cumprimento: quem acabou de me cumprimentar (para responder), o jogador selecionado no cartão (se
- * ainda está aqui) ou o mais perto até `range` tiles. null = ninguém.
+ * Who receives the greeting: whoever just greeted me (for replying), the player selected in the card (if
+ * still here), or the closest within `range` tiles. null = nobody.
  */
 export function pickGreetTarget(
   me: { x: number; y: number },
@@ -65,7 +65,7 @@ export function pickGreetTarget(
   return best;
 }
 
-/** Os balões ativos (por jogador), cada um por BALLOON_MS a partir de quando chegou aqui. */
+/** Active balloons (per player), each for BALLOON_MS from when it arrived locally. */
 export class BalloonBook {
   private readonly map = new Map<string, { id: GreetingId; at: number }>();
 
@@ -73,7 +73,7 @@ export class BalloonBook {
     this.map.set(playerId, { id: greetingId, at: now });
   }
 
-  /** O balão de um jogador agora (`t`: 0..1 do tempo de vida), ou null. */
+  /** Player's balloon right now (`t`: 0..1 of lifetime), or null. */
   get(playerId: string, now: number): { id: GreetingId; t: number; age: number } | null {
     const b = this.map.get(playerId);
     if (!b) return null;
@@ -98,7 +98,7 @@ export class BalloonBook {
   }
 }
 
-/** Limite do lado de cá: no máximo um a cada `gapMs` e `perMinute` por minuto. */
+/** Client-side rate gate: at most one every `gapMs` and `perMinute` per minute. */
 export class RateGate {
   private readonly times: number[] = [];
 
@@ -107,7 +107,7 @@ export class RateGate {
     private readonly gapMs = 0,
   ) {}
 
-  /** Quanto falta (ms) para poder de novo; 0 = pode agora. */
+  /** Time remaining (ms) before allowing again; 0 = allowed now. */
   wait(now: number): number {
     while (this.times.length && now - this.times[0]! >= 60_000) this.times.shift();
     const last = this.times[this.times.length - 1];
@@ -116,7 +116,7 @@ export class RateGate {
     return w;
   }
 
-  /** Tenta usar: true (e conta) se pode agora. */
+  /** Attempts to take: true (and counts) if allowed now. */
   take(now: number): boolean {
     if (this.wait(now) > 0) return false;
     this.times.push(now);
@@ -124,7 +124,7 @@ export class RateGate {
   }
 }
 
-/** Uma resposta que combina com o cumprimento recebido (sugestão: a primeira da roda ao responder). */
+/** Matching reply suggestion for the received greeting (first in wheel when replying). */
 export function suggestedReply(got: GreetingId): GreetingId {
   switch (got) {
     case 'hello':
@@ -146,7 +146,7 @@ export function suggestedReply(got: GreetingId): GreetingId {
   }
 }
 
-// ====================================================================== DOM: a roda
+// ====================================================================== DOM: greeting wheel
 
 export interface WheelTarget {
   id: string;
@@ -154,8 +154,8 @@ export interface WheelTarget {
 }
 
 /**
- * A roda de cumprimentos: 10 botões em círculo em volta do meu personagem, o nome de quem recebe no meio e uma seta
- * apontando para a pessoa. Clique, toque ou 1–9/0 escolhem; setas mudam o destaque; Esc fecha.
+ * Greeting wheel: 10 buttons in a circle around local character, recipient's name in middle, and an arrow
+ * pointing to the person. Click, tap, or 1–9/0 chooses; arrow keys move focus; Esc closes.
  */
 export class GreetingWheel {
   readonly el: HTMLElement;
@@ -173,8 +173,8 @@ export class GreetingWheel {
     this.to = h('strong', { class: 'ui-city-wheel__to' });
     this.hint = h('span', { class: 'ui-city-wheel__hint' });
     this.arrow = h('span', { class: 'ui-city-wheel__arrow', attrs: { 'aria-hidden': 'true' } });
-    this.center = h('div', { class: 'ui-city-wheel__center' }, h('span', { class: 'ui-city-wheel__label', text: tr('Cumprimentar') }), this.to, this.hint);
-    this.ring = h('div', { class: 'ui-city-wheel__ring', role: 'menu', attrs: { 'aria-label': tr('Cumprimentos') } });
+    this.center = h('div', { class: 'ui-city-wheel__center' }, h('span', { class: 'ui-city-wheel__label', text: tr('Greet') }), this.to, this.hint);
+    this.ring = h('div', { class: 'ui-city-wheel__ring', role: 'menu', attrs: { 'aria-label': tr('Greetings') } });
     const layout = wheelLayout(WHEEL.length, 96);
     WHEEL.forEach((id, i) => {
       const p = layout[i]!;
@@ -200,7 +200,7 @@ export class GreetingWheel {
     });
     this.el = h('div', { class: 'ui-city-wheel', hidden: true }, this.arrow, this.ring, this.center);
     this.el.addEventListener('pointerdown', (e) => {
-      // tocar fora dos botões fecha
+      // tapping outside buttons closes
       if (e.target === this.el) this.close();
     });
   }
@@ -213,7 +213,7 @@ export class GreetingWheel {
     return this.target?.id ?? null;
   }
 
-  /** Abre centrada em `at` (px da janela), apontando para `toward` (px da janela, opcional). */
+  /** Opens centered at `at` (window px), pointing toward `toward` (window px, optional). */
   show(target: WheelTarget, at: { x: number; y: number }, toward: { x: number; y: number } | null, first: GreetingId | null, onPick: (id: GreetingId) => void): void {
     this.target = target;
     this.pick = onPick;
@@ -244,7 +244,7 @@ export class GreetingWheel {
     this.pick = null;
   }
 
-  /** Tecla com a roda aberta: true se usou. */
+  /** Key handling while wheel is open: true if handled. */
   key(e: KeyboardEvent): boolean {
     if (!this.open) return false;
     const i = wheelIndexOfKey(e.key);

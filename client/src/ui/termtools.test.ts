@@ -22,39 +22,39 @@ const result = (id: string, toolUseId: string, text = 'ok'): TerminalEntry => ({
 const think = (id: string): TerminalEntry => ({ kind: 'thinking', id, at: 5, text: 'hmm' });
 const sys = (id: string): TerminalEntry => ({ kind: 'system', id, at: 6, text: 'Contexto compactado', detail: 'resumo' });
 
-/** Itens na ordem da tela, como o painel os vê (ferramentas já com o resultado). */
+// Items in display order, as panel sees them (tools already with result).
 function items(...entries: TerminalEntry[]): TerminalItem[] {
   const log = new TerminalLog();
   log.push(entries);
   return [...log.values()];
 }
 
-/** O texto que um trecho [a, b) do original marca. */
+// Text matched by a slice [a, b) from original.
 const cut = (text: string, query: string) => findMatches(text, foldQuery(query)).map(([a, b]) => text.slice(a, b));
 
-describe('busca: casamentos', () => {
-  it('sem diferenciar maiúsculas nem acentos, nos dois sentidos', () => {
+describe('search: matches', () => {
+  it('case- and accent-insensitive in both directions', () => {
     expect(cut('Ação e ACAO e acao', 'ação')).toEqual(['Ação', 'ACAO', 'acao']);
     expect(cut('Configuração do São João', 'sao joao')).toEqual(['São João']);
     expect(cut('npm test && NPM TEST', 'npm test')).toEqual(['npm test', 'NPM TEST']);
   });
 
-  it('posições no original mesmo com acentos e emojis antes do trecho', () => {
+  it('positions in original even with accents and emojis before match', () => {
     const text = '🙂 é preciso rodar os TESTES';
     const [[a, b]] = findMatches(text, foldQuery('testes'));
     expect(text.slice(a, b)).toBe('TESTES');
-    // Acento decomposto (e + U+0301) também casa e é destacado inteiro.
+    // Decomposed accent (e + U+0301) also matches and is highlighted as a whole.
     expect(cut('café pronto', 'café')).toEqual(['café']);
   });
 
-  it('sem sobreposição, termo vazio ou só espaços não busca', () => {
+  it('no overlap, empty term or spaces only does not search', () => {
     expect(cut('aaaa', 'aa')).toEqual(['aa', 'aa']);
     expect(findMatches('qualquer coisa', foldQuery('   '))).toEqual([]);
     expect(findMatches('', foldQuery('x'))).toEqual([]);
     expect(foldQuery('  Olá ')).toBe('  ola ');
   });
 
-  it('foldText: ASCII sem mapa; com acentos, mapa de posições', () => {
+  it('foldText: ASCII without map; with accents, position map', () => {
     expect(foldText('ABC')).toEqual({ text: 'abc' });
     const f = foldText('Ãb');
     expect(f.text).toBe('ab');
@@ -63,14 +63,14 @@ describe('busca: casamentos', () => {
   });
 });
 
-describe('busca: navegação', () => {
+describe('search: navigation', () => {
   const counts: [string, number][] = [
     ['user:u1', 2],
     ['assistant:a1', 0],
     ['tool:t1', 3],
   ];
 
-  it('stepMatch dá a volta e começa do primeiro (ou do último, para trás)', () => {
+  it('stepMatch wraps around and starts from first (or last, backwards)', () => {
     expect(stepMatch(-1, 5, 1)).toBe(0);
     expect(stepMatch(-1, 5, -1)).toBe(4);
     expect(stepMatch(4, 5, 1)).toBe(0);
@@ -80,7 +80,7 @@ describe('busca: navegação', () => {
     expect(stepMatch(0, 0, 1)).toBe(-1);
   });
 
-  it('globalIndex e refAt convertem entre "3/17" e (linha, destaque)', () => {
+  it('globalIndex and refAt convert between "3/17" and (line, highlight)', () => {
     expect(globalIndex(counts, { key: 'user:u1', index: 1 })).toBe(1);
     expect(globalIndex(counts, { key: 'tool:t1', index: 0 })).toBe(2);
     expect(globalIndex(counts, { key: 'tool:t1', index: 5 })).toBe(-1);
@@ -90,28 +90,28 @@ describe('busca: navegação', () => {
     expect(refAt(counts, 4)).toEqual({ key: 'tool:t1', index: 2 });
     expect(refAt(counts, 5)).toBeNull();
     expect(refAt(counts, -1)).toBeNull();
-    // Ida e volta: o próximo do último volta ao primeiro.
+    // Round-trip: next from last wraps to first.
     const total = 5;
     expect(refAt(counts, stepMatch(globalIndex(counts, { key: 'tool:t1', index: 2 }), total, 1))).toEqual({ key: 'user:u1', index: 0 });
   });
 
-  it('contador "3/17" (sem atual: "0/17")', () => {
+  it('counter "3/17" (without current: "0/17")', () => {
     expect(searchCounter(2, 17)).toBe('3/17');
     expect(searchCounter(-1, 17)).toBe('0/17');
     expect(searchCounter(0, 0)).toBe('0/0');
   });
 });
 
-describe('filtro', () => {
-  it('respostas finais: o texto sem ferramenta depois dele até o próximo prompt (ou o fim)', () => {
+describe('filter', () => {
+  it('final answers: text without tool after it until next prompt (or end)', () => {
     const list = items(user('u1'), say('a1', 'Vou ler.'), tool('t1'), result('r1', 't1'), say('a2', 'Pronto.'), sys('s1'), user('u2'), say('a3', 'Olhando…'), tool('t2'), say('a4', 'Fim.'));
     expect([...finalAnswerKeys(list)]).toEqual(['assistant:a2', 'assistant:a4']);
-    // Ainda trabalhando: o último texto pode deixar de ser final quando chega uma ferramenta.
+    // Still working: last text can stop being final when a tool arrives.
     expect([...finalAnswerKeys(items(user('u1'), say('a1')))]).toEqual(['assistant:a1']);
     expect([...finalAnswerKeys(items(user('u1'), say('a1'), tool('t1')))]).toEqual([]);
   });
 
-  it('Tudo / Só prompts / Sem ferramentas', () => {
+  it('All / Only prompts / No tools', () => {
     const list = items(user('u1'), think('th1'), say('a1', 'Vou rodar.'), tool('t1'), result('r1', 't1'), result('r9', 'outra'), say('a2', 'Passou.'), sys('s1'));
     const finals = finalAnswerKeys(list);
     const visible = (f: TerminalFilter) => list.filter((i) => itemVisible(i, f, finals)).map((i) => i.key);
@@ -121,8 +121,8 @@ describe('filtro', () => {
   });
 });
 
-describe('copiar', () => {
-  it('prompt, resposta, comando (ou o título, sem argumentos), resultado e eventos', () => {
+describe('copy', () => {
+  it('prompt, reply, command (or title without arguments), result, and events', () => {
     expect(copyTextOf(user('u1', 'Arruma o carrinho\n\n'))).toBe('Arruma o carrinho');
     expect(copyTextOf(say('a1', '**Pronto**: feito.'))).toBe('**Pronto**: feito.');
     expect(copyTextOf(tool('t1', { input: 'npm run build && npm test\n', inputKind: 'command' }))).toBe('npm run build && npm test');

@@ -1,14 +1,14 @@
-// Sons do ambiente sugeridos pelo mundo: teclado de quem trabalha à vista, "ding" quando a porta de
-// um elevador abre (alguém chega ou sai) e as rodas (raquetadas do pingue-pongue, fliperama). Só
-// observa a simulação e a câmera; quem decide se toca (preferência, volume, aba oculta) é a UI.
+// Ambient sounds suggested by the world: typing from characters working in view, "ding" when an
+// elevator door opens (someone arrives or leaves), and social spots (ping-pong paddle hits, arcade).
+// Only observes simulation and camera; UI decides whether to play (preference, volume, hidden tab).
 import type { SoundCue } from './api';
 import type { Camera } from './camera';
 import type { Character } from './sim/character';
 import type { Sim } from './sim/sim';
 
-/** Reavalia quem está digitando a cada isto (ms). */
+/** Re-evaluates who is typing every interval (ms). */
 const KEYS_TICK_MS = 160;
-/** Período (ms) de uma ida da bolinha do pingue-pongue (o mesmo do desenho). */
+/** Period (ms) of a ping-pong ball pass (same as rendering). */
 const PINGPONG_PERIOD = 1_100;
 
 interface ViewRect {
@@ -35,7 +35,7 @@ export class SoundCues {
     const a = this.camera.screenToWorld(0, 0);
     const b = this.camera.screenToWorld(this.camera.viewW, this.camera.viewH);
     const view = { x0: a.x, y0: a.y, x1: b.x, y1: b.y };
-    // de longe (zoom baixo) tudo fica mais baixinho
+    // from far away (low zoom) everything is quieter
     const near = Math.max(0.45, Math.min(1, 0.25 + this.camera.zoom * 0.25));
     this.elevators(view, emit);
     this.keys(now, view, near, emit);
@@ -51,7 +51,7 @@ export class SoundCues {
     return x > v.x0 - m && x < v.x1 + m && y > v.y0 - m && y < v.y1 + m;
   }
 
-  /** "Ding" quando a porta começa a abrir; fora da tela, mais baixo (ainda avisa que alguém chegou). */
+  /** "Ding" when the door starts opening; offscreen is quieter (still signals arrival). */
   private elevators(view: ViewRect, emit: (cue: SoundCue) => void): void {
     this.sim.elevators.forEach((e, i) => {
       const prev = this.doors[i];
@@ -63,7 +63,7 @@ export class SoundCues {
     });
   }
 
-  /** Rajadas de teclas, mais frequentes quanto mais gente digita na tela. */
+  /** Keyboard bursts, more frequent the more people type on screen. */
   private keys(now: number, view: ViewRect, near: number, emit: (cue: SoundCue) => void): void {
     if (now - this.keysAt < KEYS_TICK_MS) return;
     this.keysAt = now;
@@ -80,7 +80,7 @@ export class SoundCues {
     emit({ kind: 'keys', gain: near * Math.min(1, 0.6 + 0.1 * n), pan: this.pan(sx / n, view), count: 2 + Math.floor(this.rng() * 5) });
   }
 
-  /** Pingue-pongue (raquetadas e quiques no ritmo da bolinha desenhada) e o fliperama. */
+  /** Ping-pong (paddle hits and table bounces matching drawn ball) and arcade. */
   private social(now: number, view: ViewRect, near: number, emit: (cue: SoundCue) => void): void {
     const alive = new Set<number>();
     for (const g of this.sim.social.gatherings) {
@@ -103,7 +103,7 @@ export class SoundCues {
       if (!this.inView(x, y, view, 24)) continue;
       if (g.kind === 'pingpong') {
         alive.add(g.id);
-        // a cada meia ida: raquetada (pontas) ou quique na mesa (meio), como no desenho
+        // every half pass: paddle hit (ends) or table bounce (middle), matching rendering
         const seg = Math.floor(((now - g.startAt) % (PINGPONG_PERIOD * 2)) / (PINGPONG_PERIOD / 2));
         const prev = this.rally.get(g.id);
         this.rally.set(g.id, seg);
@@ -117,7 +117,7 @@ export class SoundCues {
   }
 }
 
-/** Sentado na própria mesa, digitando. */
+/** Seated at their desk, typing. */
 function typing(ch: Character): boolean {
   return ch.mode === 'work' && ch.seated && ch.pose === 'type' && !ch.leaving && !ch.inside && ch.alpha > 0.5;
 }

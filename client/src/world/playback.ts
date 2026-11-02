@@ -1,14 +1,14 @@
-// Timelapse no mundo: durante o replay a simulação roda num relógio próprio, acelerado por um fator
-// de animação moderado (andar 1 h de gravação em 6 s não caberia em passos de verdade), enquanto os
-// snapshots chegam no relógio da gravação, bem mais rápido. Para os limiares que comparam o snapshot
-// com o "agora" (cochilo depois de 10 min ocioso, estágios da espera de shell, comando em primeiro
-// plano demorado), as idades são preservadas: os horários do snapshot são deslocados para o relógio
-// do mundo no momento em que ele é aplicado (rebaseSnapshot).
+// World timelapse: during replay the simulation runs on its own clock, accelerated by a moderate
+// animation factor (running 1 h of recording in 6 s would not fit into real steps), while
+// snapshots arrive on the recording clock, much faster. For thresholds that compare the snapshot
+// with "now" (nap after 10 min idle, shell waiting stages, long-running foreground command),
+// the ages are preserved: snapshot timestamps are shifted to the world clock
+// when applied (rebaseSnapshot).
 import type { OfficeSnapshot } from '../../../shared/types';
 
 /**
- * Fator de animação do mundo para uma velocidade de reprodução: ~raiz da velocidade, entre 1 e 16
- * (60× -> 6, 180× -> 10, 600× -> 16). Acima disso os personagens só se teletransportariam.
+ * World animation factor for a playback speed: ~sqrt of speed, between 1 and 16
+ * (60× -> 6, 180× -> 10, 600× -> 16). Above that, characters would just teleport.
  */
 export function animScale(speed: number): number {
   if (!Number.isFinite(speed) || speed <= 0) return 0;
@@ -16,8 +16,8 @@ export function animScale(speed: number): number {
 }
 
 /**
- * Desloca para o relógio do mundo os horários do snapshot que o mundo compara com o "agora":
- * `statusSince` e o início dos shells. As atividades ficam como estão (o mundo só as compara entre si).
+ * Shifts snapshot timestamps that the world compares to "now" to the world clock:
+ * `statusSince` and shell start times. Activities remain unchanged (the world only compares them with each other).
  */
 export function rebaseSnapshot(snap: OfficeSnapshot, delta: number): OfficeSnapshot {
   if (!delta) return snap;

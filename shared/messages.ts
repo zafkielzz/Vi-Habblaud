@@ -1,20 +1,25 @@
-// Mensagens pelo escritório (POST /api/messages): o que o servidor, o demo e a página têm em comum.
-// Código puro: sem APIs de Node nem de DOM.
+// Messages from office (POST /api/messages): shared between server, demo, and client page.
+// Pure code: no Node or DOM APIs.
 import { maskSecrets, truncate, type ActivityDescription } from './activity';
 import { tr } from './i18n';
 
-/** Tamanho máximo de uma mensagem (caracteres). */
+/** Maximum message length (characters). */
 export const MESSAGE_MAX = 20_000;
-/** `Activity.tool` da atividade "Mensagem pelo Habblaud" (não é uma ferramenta do agente: é o seu texto entrando). */
+/** `Activity.tool` for "Message via Habblaud" activity (not an agent tool: it is incoming user text). */
 export const MESSAGE_TOOL = 'HabblaudMessage';
-/** Detalhe da atividade: o começo do texto, mascarado e cortado (o texto inteiro vai só para a sessão). */
+/** Activity detail: start of text, masked and truncated (full text only goes to session). */
 const DETAIL_MAX = 300;
 
 /**
- * Atividade "Mensagem pelo Habblaud" de uma mensagem entregue à sessão (entrou nela ou na fila dela: não quer dizer
- * que o agente já leu).
+ * "Message via Habblaud" activity for a message delivered to session (received or queued: does not mean
+ * agent has read it yet).
  */
 export function describeMessage(text: string): ActivityDescription & { tool: string } {
   const detail = truncate(maskSecrets(text.slice(0, DETAIL_MAX * 4)), DETAIL_MAX);
-  return { kind: 'communicate', icon: '✉️', text: tr('Mensagem pelo Habblaud'), tool: MESSAGE_TOOL, ...(detail ? { detail } : {}) };
+  return { kind: 'communicate', icon: '✉️', text: tr('Message via Habblaud'), tool: MESSAGE_TOOL, ...(detail ? { detail } : {}) };
 }
+
+
+/** Choices the drawer offers (`/model <alias>`, `/effort <level>`); `default` = back to the configured model. */
+export const SESSION_MODELS = ['opus', 'sonnet', 'haiku', 'fable', 'default'] as const;
+export const SESSION_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;

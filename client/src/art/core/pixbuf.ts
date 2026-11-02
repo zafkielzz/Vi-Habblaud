@@ -1,16 +1,16 @@
-// Buffer de pixels RGBA puro (sem DOM): toda a arte é composta aqui e só no fim vira canvas.
-// Isso permite gerar sprites (e testá-los) em Node, contornar sem getImageData e manter o
-// desenho determinístico.
+// Pure RGBA pixel buffer (no DOM): all art is composed here and only turns into a canvas at the end.
+// This allows generating sprites (and testing them) in Node, outlining without getImageData, and keeping
+// drawing deterministic.
 import { outlineFor, parseColor, type RGBA } from './color';
 
-/** Paleta de um template ASCII: caractere -> cor (ausente/undefined = não desenha). */
+/** Palette of an ASCII template: character -> color (absent/undefined = does not draw). */
 export type Palette = Readonly<Record<string, string | undefined>>;
 
 export class PixelBuf {
   readonly data: Uint8ClampedArray<ArrayBuffer>;
   /**
-   * Origem de desenho: todas as operações de pintura (set, rect, stamp, draw, shadow...) somam
-   * (ox, oy). Operações globais (outline, bounds, crop) usam coordenadas absolutas.
+   * Drawing origin: all painting operations (set, rect, stamp, draw, shadow...) add
+   * (ox, oy). Global operations (outline, bounds, crop) use absolute coordinates.
    */
   ox = 0;
   oy = 0;
@@ -33,7 +33,7 @@ export class PixelBuf {
     return this.data[(yi * this.w + xi) * 4 + 3];
   }
 
-  /** Pinta um pixel; cores com alfa < 1 são compostas por cima (source-over). */
+  /** Paints a pixel; colors with alpha < 1 are composited over (source-over). */
   set(x: number, y: number, c: string | undefined): void {
     if (!c) return;
     const xi = Math.floor(x) + this.ox;
@@ -43,7 +43,7 @@ export class PixelBuf {
     this.blend(xi, yi, r, g, b, a);
   }
 
-  /** Escrita rápida de cor opaca já convertida (sem parse nem mistura); respeita a origem. */
+  /** Fast write of already converted opaque color (no parsing or blending); respects origin. */
   put(x: number, y: number, c: RGBA): void {
     const xi = x + this.ox;
     const yi = y + this.oy;
@@ -75,7 +75,7 @@ export class PixelBuf {
     d[i + 3] = oa * 255;
   }
 
-  /** Pinta POR BAIXO do que já existe (destination-over) — usado em sombras de contato. */
+  /** Paints UNDER existing content (destination-over) — used for contact shadows. */
   under(x: number, y: number, c: string): void {
     const xi = Math.floor(x) + this.ox;
     const yi = Math.floor(y) + this.oy;
@@ -110,21 +110,21 @@ export class PixelBuf {
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) this.set(xx, yy, c);
   }
 
-  /** Linha horizontal inclusiva de x0 a x1. */
+  /** Inclusive horizontal line from x0 to x1. */
   hline(x0: number, x1: number, y: number, c: string | undefined): void {
     const a = Math.min(x0, x1);
     const b = Math.max(x0, x1);
     for (let x = a; x <= b; x++) this.set(x, y, c);
   }
 
-  /** Linha vertical inclusiva de y0 a y1. */
+  /** Inclusive vertical line from y0 to y1. */
   vline(x: number, y0: number, y1: number, c: string | undefined): void {
     const a = Math.min(y0, y1);
     const b = Math.max(y0, y1);
     for (let y = a; y <= b; y++) this.set(x, y, c);
   }
 
-  /** Linha de Bresenham (com pincel quadrado opcional de `size` px). */
+  /** Bresenham line (with optional square brush of `size` px). */
   line(x0: number, y0: number, x1: number, y1: number, c: string | undefined, size = 1): void {
     let x = Math.round(x0);
     let y = Math.round(y0);
@@ -151,7 +151,7 @@ export class PixelBuf {
     }
   }
 
-  /** Elipse preenchida com centro (cx, cy) e raios rx, ry (aceita meios pixels). */
+  /** Filled ellipse with center (cx, cy) and radii rx, ry (accepts half pixels). */
   ellipse(cx: number, cy: number, rx: number, ry: number, c: string | undefined): void {
     if (!c) return;
     for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
@@ -163,7 +163,7 @@ export class PixelBuf {
     }
   }
 
-  /** Sombra de contato (elipse) composta por baixo do sprite. */
+  /** Contact shadow (ellipse) composited under the sprite. */
   shadow(cx: number, cy: number, rx: number, ry: number, c = '#1c2034', alpha = 0.22): void {
     const [r, g, b] = parseColor(c);
     const col = `rgba(${r},${g},${b},${alpha})`;
@@ -179,8 +179,8 @@ export class PixelBuf {
   }
 
   /**
-   * Carimba um template ASCII: cada caractere é procurado na paleta; '.' e ' ' (ou ausentes) são
-   * ignorados. `flip` espelha horizontalmente dentro da largura do template.
+   * Stamps an ASCII template: each character is looked up in the palette; '.' and ' ' (or absent) are
+   * ignored. `flip` mirrors horizontally within template width.
    */
   stamp(rows: readonly string[], x: number, y: number, pal: Palette, flip = false): void {
     for (let r = 0; r < rows.length; r++) {
@@ -196,7 +196,7 @@ export class PixelBuf {
     }
   }
 
-  /** Copia outro buffer por cima deste (com alfa), opcionalmente espelhado. */
+  /** Copies another buffer over this one (with alpha), optionally mirrored. */
   draw(src: PixelBuf, dx: number, dy: number, flip = false): void {
     for (let y = 0; y < src.h; y++) {
       for (let x = 0; x < src.w; x++) {
@@ -217,7 +217,7 @@ export class PixelBuf {
     return out;
   }
 
-  /** Recorta uma região em um novo buffer. */
+  /** Crops a region into a new buffer. */
   crop(x: number, y: number, w: number, h: number): PixelBuf {
     const out = new PixelBuf(w, h);
     for (let yy = 0; yy < h; yy++) {
@@ -235,9 +235,9 @@ export class PixelBuf {
   }
 
   /**
-   * Contorno automático de 1px (vizinhança 4) ao redor dos pixels opacos: usa uma versão escura da
-   * cor vizinha mais escura, puxada para o cinza-azulado padrão (nunca preto puro).
-   * `only` restringe a uma região (x, y, w, h).
+   * Automatic 1px outline (4-neighborhood) around opaque pixels: uses a dark version of the
+   * darkest neighboring color, shifted toward standard slate (never pure black).
+   * `only` restricts to a region (x, y, w, h).
    */
   outline(only?: { x: number; y: number; w: number; h: number }): void {
     const { w, h } = this;
@@ -276,7 +276,7 @@ export class PixelBuf {
     }
   }
 
-  /** Caixa delimitadora dos pixels visíveis, ou null se vazio. */
+  /** Bounding box of visible pixels, or null if empty. */
   bounds(): { x: number; y: number; w: number; h: number } | null {
     let minX = this.w;
     let minY = this.h;
@@ -294,7 +294,7 @@ export class PixelBuf {
     return maxX < 0 ? null : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
   }
 
-  /** Quantidade de pixels visíveis (alfa > 0). */
+  /** Number of visible pixels (alpha > 0). */
   countOpaque(): number {
     let n = 0;
     for (let i = 3; i < this.data.length; i += 4) if (this.data[i]) n++;

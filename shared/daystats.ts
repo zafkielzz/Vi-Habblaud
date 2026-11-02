@@ -1,73 +1,72 @@
-// "Onde foi meu dia": estatísticas do dia (tempo por status, contagens, tokens, custo e esperas).
-// Código puro (sem Node nem DOM): o servidor acumula e persiste (server/history/daystats.ts) e o navegador
-// reaproveita a mesma lógica no ?mock=1 (ui/daystats.ts). O protocolo de GET /api/stats também mora aqui.
+// "Where did my day go": day stats (time per status, counts, tokens, cost, and waits).
+// Pure code (no Node or DOM): the server aggregates and persists (server/history/daystats.ts), and the browser
+// reuses the same logic in ?mock=1 (ui/daystats.ts). The GET /api/stats protocol also lives here.
 //
-// Como acumula: a cada amostra (~1 s) o rastreador (StatsTracker) olha os agentes do escritório e integra, por
-// agente, o tempo desde a amostra anterior no status em que ele estava, partindo o intervalo em `statusSince`
-// quando o status mudou no meio. O tempo cai em baldes de 1 hora alinhados em UTC (instantes absolutos),
-// guardados por "dia de arquivo" (o dia no fuso do servidor). O dia que o painel mostra só é montado na
-// consulta (queryDay), no fuso de quem pergunta: o Docker roda em UTC e o navegador no fuso do usuário, e os
-// dois concordam sobre onde o dia começa e termina.
+// How it aggregates: on each sample (~1 s), the tracker (StatsTracker) inspects office agents and integrates, per
+// agent, the time since previous sample in its current status, splitting interval at `statusSince` when status
+// changed midway. Time falls into 1-hour buckets aligned in UTC (absolute timestamps), stored by "file day"
+// (day in server timezone). The day displayed by the dashboard is only assembled upon query (queryDay), in the
+// caller's timezone: Docker runs in UTC and the browser in user's timezone, and both agree on day start and end.
 import type { AgentInfo, AgentStatus } from './types';
 import { tr } from './i18n';
 
 export const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
-/** Intervalo entre amostras acima disto não é integrado (servidor travado, computador dormindo). */
+/** Sample interval above this is not integrated (frozen server, sleeping computer). */
 export const MAX_GAP_MS = 120_000;
 /**
- * Linha de base: nos primeiros segundos de um agente que já existia (boot, sessão retomada), os números
- * cumulativos só sobem a referência — a leitura do começo de um transcript longo chega depois e não é uso novo.
+ * Baseline: in first seconds of an existing agent (boot, resumed session), cumulative numbers only advance
+ * the reference — reading the start of a long transcript arrives later and is not new usage.
  */
 export const SETTLE_MS = 20_000;
-/** Os agentes vistos logo no boot ganham uma janela maior (as leituras de começo de arquivo vão em fila). */
+/** Agents seen right at boot get a larger window (start-of-file reads are queued). */
 export const BOOT_SETTLE_MS = 90_000;
-/** Agente que sumiu do escritório: a linha de base fica guardada por este tempo (se voltar, não conta de novo). */
+/** Agent gone from the office: baseline is kept for this duration (if it returns, does not count again). */
 export const KEEP_GONE_MS = 6 * HOUR_MS;
-/** Espera mais curta que isto (piscada do registro) não entra na contagem nem no ranking. */
+/** Wait shorter than this (registry flicker) is excluded from counts and rankings. */
 export const MIN_WAIT_MS = 3_000;
-/** Esperas guardadas por dia de arquivo (as mais curtas saem primeiro). */
+/** Waits kept per file day (shortest are dropped first). */
 export const MAX_WAITS_PER_DAY = 1_000;
-/** Maiores esperas devolvidas pela consulta. */
+/** Longest waits returned by query. */
 export const TOP_WAITS = 10;
-/** Dias guardados além de hoje. */
+/** Days retained beyond today. */
 export const RETENTION_DAYS = 30;
 /**
- * Salto impossível numa amostra (dezenas de ferramentas ou milhões de tokens em segundos): é releitura
- * (começo do transcript, arquivo regravado), não uso novo — só move a linha de base.
+ * Impossible jump in a sample (dozens of tools or millions of tokens in seconds): this is a re-read
+ * (transcript start, rewritten file), not new usage — only shifts the baseline.
  */
 const JUMP_WINDOW_MS = 10_000;
 const JUMP_LIMITS = { toolCalls: 60, tokensIn: 5_000_000, tokensOut: 500_000, costUSD: 50 } as const;
-/** Duas esperas do mesmo agente separadas por menos que isto viram uma só. */
+/** Two waits from the same agent separated by less than this are merged into one. */
 const WAIT_JOIN_MS = 1_500;
 
-// ------------------------------------------------------------------ protocolo (GET /api/stats)
+// ------------------------------------------------------------------ protocol (GET /api/stats)
 
-/** Status com tempo contado, na ordem em que as barras empilham (esperando você primeiro, junto da base). */
+/** Status with tracked time, in stack order (waiting on you first, near the base). */
 export const TIMED_STATUSES = ['waiting', 'working', 'idle', 'shell'] as const;
 export type TimedStatus = (typeof TIMED_STATUSES)[number];
-/** Milissegundos de agente em cada status (dois agentes trabalhando 1 h = 2 h). */
+/** Agent milliseconds in each status (two agents working 1 h = 2 h). */
 export type StatusMs = Record<TimedStatus, number>;
 
 export const COUNT_KEYS = ['prompts', 'toolCalls', 'tasksDone', 'tokensIn', 'tokensOut', 'costUSD'] as const;
 export type CountKey = (typeof COUNT_KEYS)[number];
-/** Contagens somadas (tokens e custo a partir dos números cumulativos de cada agente). */
+/** Summed counts (tokens and cost from cumulative metrics of each agent). */
 export type StatsCounts = Record<CountKey, number>;
 
 export interface StatsTotals {
   ms: StatusMs;
   counts: StatsCounts;
-  /** Sessões (agentes principais; /clear abre uma nova) com tempo no dia. */
+  /** Sessions (main agents; /clear opens a new one) with time in the day. */
   sessions: number;
-  /** Subagentes com tempo no dia. */
+  /** Subagents with time in the day. */
   subagents: number;
-  /** Esperas por você (episódios de pelo menos MIN_WAIT_MS). */
+  /** Waits for you (episodes of at least MIN_WAIT_MS). */
   waits: number;
   longestWaitMs: number;
 }
 
 export interface RoomDayStats extends StatsTotals {
-  /** = RoomInfo.id (cwd do projeto). */
+  /** = RoomInfo.id (project cwd). */
   id: string;
   name: string;
 }
@@ -81,9 +80,9 @@ export interface AccountDayStats extends StatsTotals {
 }
 
 export interface HourDayStats {
-  /** Início do balde (epoch ms). */
+  /** Bucket start (epoch ms). */
   t: number;
-  /** Hora local (0–23) no fuso da consulta. */
+  /** Local hour (0–23) in query timezone. */
   hour: number;
   ms: StatusMs;
 }
@@ -97,59 +96,59 @@ export interface WaitDayStats {
   start: number;
   end: number;
   ms: number;
-  /** Motivo (ex.: "aprovar uma permissão"), quando conhecido. */
+  /** Reason (e.g. "approve a permission"), when known. */
   reason?: string;
-  /** O agente continua esperando agora. */
+  /** Agent is still waiting now. */
   ongoing?: boolean;
 }
 
 export interface DayStats {
-  /** AAAA-MM-DD no fuso `tz`. */
+  /** YYYY-MM-DD in `tz` timezone. */
   day: string;
   tz: string;
   start: number;
   end: number;
-  /** Última amostra que entrou neste dia. */
+  /** Last sample included in this day. */
   updatedAt?: number;
   totals: StatsTotals & {
-    /** Tempo de relógio com pelo menos um agente esperando você (sem somar agentes). */
+    /** Wall-clock time with at least one agent waiting for you (not summing agents). */
     waitWallMs: number;
   };
-  /** Do que mais esperou você para o que menos esperou. */
+  /** From most time waiting for you to least. */
   rooms: RoomDayStats[];
-  /** Do que mais trabalhou para o que menos trabalhou. */
+  /** From most work time to least. */
   accounts: AccountDayStats[];
   hours: HourDayStats[];
-  /** Maiores esperas, da mais longa para a mais curta (no máximo TOP_WAITS). */
+  /** Longest waits, from longest to shortest (at most TOP_WAITS). */
   waits: WaitDayStats[];
 }
 
-/** 'real' = sessões de verdade (persistidas); 'demo' = agentes do modo demonstração (fictícios, só em memória). */
+/** 'real' = real sessions (persisted); 'demo' = demo mode agents (fictional, in-memory only). */
 export type StatsSource = 'real' | 'demo';
 
-/** Resposta de GET /api/stats?day=AAAA-MM-DD&tz=<IANA>&source=real|demo */
+/** Response of GET /api/stats?day=YYYY-MM-DD&tz=<IANA>&source=real|demo */
 export interface DayStatsResponse {
   source: StatsSource;
-  /** O modo demonstração está ligado (dá para pedir source=demo). */
+  /** Demo mode is active (source=demo can be requested). */
   demoAvailable: boolean;
-  /** Hoje (AAAA-MM-DD) no fuso da consulta. */
+  /** Today (YYYY-MM-DD) in query timezone. */
   today: string;
   serverTime: number;
   stats: DayStats;
 }
 
-/** Resposta de GET /api/stats/days?tz=<IANA> */
+/** Response of GET /api/stats/days?tz=<IANA> */
 export interface StatsDaysResponse {
   tz: string;
   today: string;
-  /** Dias com dados reais (mais recente primeiro; hoje sempre aparece). */
+  /** Days with real data (most recent first; today always appears). */
   days: string[];
   demoAvailable: boolean;
-  /** Dias com dados do demo (só com o demo ligado). */
+  /** Days with demo data (only when demo is active). */
   demoDays?: string[];
 }
 
-// ------------------------------------------------------------------ números
+// ------------------------------------------------------------------ numbers
 
 export function zeroMs(): StatusMs {
   return { waiting: 0, working: 0, idle: 0, shell: 0 };
@@ -183,7 +182,7 @@ export function hourStart(t: number): number {
   return Math.floor(t / HOUR_MS) * HOUR_MS;
 }
 
-/** Chama `cb` para cada pedaço de [from, to) dentro de uma hora (alinhada em UTC). */
+/** Calls `cb` for each slice of [from, to) within an hour (UTC-aligned). */
 export function forEachHour(from: number, to: number, cb: (hour: number, ms: number) => void): void {
   let s = from;
   while (s < to) {
@@ -194,7 +193,7 @@ export function forEachHour(from: number, to: number, cb: (hour: number, ms: num
   }
 }
 
-/** Une intervalos sobrepostos (para o tempo de relógio com alguém esperando). */
+/** Merges overlapping intervals (for wall-clock time with someone waiting). */
 export function mergeIntervals(list: ReadonlyArray<readonly [number, number]>): Array<[number, number]> {
   const sorted = list.filter(([s, e]) => e > s).sort((a, b) => a[0] - b[0]);
   const out: Array<[number, number]> = [];
@@ -206,14 +205,14 @@ export function mergeIntervals(list: ReadonlyArray<readonly [number, number]>): 
   return out;
 }
 
-// ------------------------------------------------------------------ fusos e dias
+// ------------------------------------------------------------------ timezones and days
 
 const DAY_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-/** Nome IANA plausível ("America/Sao_Paulo", "UTC", "Etc/GMT+3"): o Intl confirma depois. */
+/** Plausible IANA name ("America/Sao_Paulo", "UTC", "Etc/GMT+3"): Intl validates later. */
 const TZ_RE = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+){0,2}$/;
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();
-/** Fusos guardados no cache (o nome vem da query string: variações de caixa não podem crescer sem limite). */
+/** Timezones cached (name comes from query string: case variations must not grow unbounded). */
 const FMT_CACHE_MAX = 64;
 
 function partsFormat(tz: string): Intl.DateTimeFormat {
@@ -258,7 +257,7 @@ function localParts(t: number, tz: string): LocalParts {
   return out;
 }
 
-/** Nome canônico do fuso (ex.: "america/sao_paulo" -> "America/Sao_Paulo"), ou null se o Intl não o aceitar. */
+/** Canonical timezone name (e.g. "america/sao_paulo" -> "America/Sao_Paulo"), or null if Intl rejects it. */
 export function canonicalTimeZone(tz: string): string | null {
   if (tz.length > 64 || !TZ_RE.test(tz)) return null;
   try {
@@ -268,12 +267,12 @@ export function canonicalTimeZone(tz: string): string | null {
   }
 }
 
-/** Fuso aceito pelo Intl (e com cara de nome IANA)? */
+/** Timezone accepted by Intl (and formatted like an IANA name)? */
 export function isValidTimeZone(tz: string): boolean {
   return canonicalTimeZone(tz) !== null;
 }
 
-/** Fuso do processo (no Docker, normalmente UTC). */
+/** Process timezone (in Docker, usually UTC). */
 export function systemTimeZone(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -285,18 +284,18 @@ export function systemTimeZone(): string {
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
-/** "AAAA-MM-DD" do instante `t` no fuso `tz`. */
+/** "YYYY-MM-DD" of timestamp `t` in timezone `tz`. */
 export function dayKeyOf(t: number, tz: string): string {
   const p = localParts(t, tz);
   return `${p.y}-${pad2(p.mo)}-${pad2(p.d)}`;
 }
 
-/** Hora local (0–23) do instante `t` no fuso `tz`. */
+/** Local hour (0–23) of timestamp `t` in timezone `tz`. */
 export function localHourOf(t: number, tz: string): number {
   return localParts(t, tz).h;
 }
 
-/** Valida "AAAA-MM-DD" com rigor (formato exato e data que existe no calendário). */
+/** Strictly validates "YYYY-MM-DD" (exact format and existing calendar date). */
 export function parseDayKey(key: string): { y: number; m: number; d: number } | null {
   const m = DAY_KEY_RE.exec(key);
   if (!m) return null;
@@ -309,7 +308,7 @@ export function parseDayKey(key: string): { y: number; m: number; d: number } | 
   return { y, m: mo, d };
 }
 
-/** Soma `n` dias de calendário a "AAAA-MM-DD". */
+/** Adds `n` calendar days to "YYYY-MM-DD". */
 export function addDays(key: string, n: number): string {
   const k = parseDayKey(key);
   if (!k) return key;
@@ -317,20 +316,20 @@ export function addDays(key: string, n: number): string {
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 }
 
-/** Diferença local - UTC (ms) no instante `t`. */
+/** Local - UTC offset (ms) at timestamp `t`. */
 function offsetMs(t: number, tz: string): number {
   const p = localParts(t, tz);
   return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) - Math.floor(t / 1000) * 1000;
 }
 
-/** Primeiro instante do dia `key` no fuso `tz` (meia-noite, ou o começo real em dias de horário de verão). */
+/** First moment of day `key` in timezone `tz` (midnight, or actual start on DST change days). */
 export function dayStart(key: string, tz: string): number {
   const k = parseDayKey(key);
-  if (!k) throw new RangeError(tr('dia inválido: {0}', [key]));
+  if (!k) throw new RangeError(tr('invalid day: {0}', [key]));
   const guess = Date.UTC(k.y, k.m - 1, k.d);
   let t = guess - offsetMs(guess, tz);
   t = guess - offsetMs(t, tz);
-  // Meia-noite inexistente (horário de verão começando à 0h): anda até o primeiro instante do dia.
+  // Nonexistent midnight (DST starting at 00:00): steps forward to the first moment of the day.
   const step = 15 * 60_000;
   for (let i = 0; i < 16 && dayKeyOf(t, tz) < key; i++) t += step;
   for (let i = 0; i < 16 && dayKeyOf(t - step, tz) === key; i++) t -= step;
@@ -341,13 +340,13 @@ export function dayRange(key: string, tz: string): { start: number; end: number 
   return { start: dayStart(key, tz), end: dayStart(addDays(key, 1), tz) };
 }
 
-/** O balde de 1 hora começando em `t` pertence ao dia [start, end)? (pelo meio da hora: fusos de meia hora) */
+/** Does the 1-hour bucket starting at `t` belong to [start, end)? (by hour midpoint: half-hour timezones) */
 function hourInRange(t: number, start: number, end: number): boolean {
   const mid = t + HOUR_MS / 2;
   return mid >= start && mid < end;
 }
 
-// ------------------------------------------------------------------ dia de arquivo (em memória)
+// ------------------------------------------------------------------ file day (in memory)
 
 export interface StatsPart {
   ms: StatusMs;
@@ -355,14 +354,14 @@ export interface StatsPart {
 }
 
 export interface HourBucket {
-  /** Início da hora (epoch ms, alinhado em UTC). */
+  /** Start of the hour (epoch ms, UTC-aligned). */
   t: number;
   ms: StatusMs;
   waitWallMs: number;
   counts: StatsCounts;
   rooms: Map<string, StatsPart>;
   accounts: Map<string, StatsPart>;
-  /** Quem esteve presente nesta hora: 'm:<sessionId>' (sessão) ou 's:<id>' (subagente) -> [sala, conta]. */
+  /** Present during this hour: 'm:<sessionId>' (session) or 's:<id>' (subagent) -> [room, account]. */
   agents: Map<string, [string, string]>;
 }
 
@@ -372,7 +371,7 @@ export interface AccountMeta {
   color: string;
 }
 
-/** Um episódio de espera por você (status 'waiting' contínuo de um agente). */
+/** Wait episode for you (continuous 'waiting' status of an agent). */
 export interface WaitRecord {
   agentId: string;
   agentName: string;
@@ -381,7 +380,7 @@ export interface WaitRecord {
   start: number;
   end: number;
   reason?: string;
-  /** Ainda aberto na última amostra (num arquivo carregado no boot: o servidor parou durante a espera). */
+  /** Still open on last sample (in a file loaded at boot: server stopped during wait). */
   open?: boolean;
 }
 
@@ -399,14 +398,14 @@ function bucketHasData(b: HourBucket): boolean {
   return totalMs(b.ms) > 0 || b.counts.prompts > 0 || b.counts.toolCalls > 0 || b.counts.tokensIn > 0 || b.counts.tokensOut > 0;
 }
 
-/** Os dados de um dia de arquivo (o dia no fuso do servidor): baldes de hora, nomes e esperas. */
+/** Data for a file day (day in server timezone): hour buckets, names, and waits. */
 export class DayData {
   readonly hours = new Map<number, HourBucket>();
-  /** Sala -> nome exibido. */
+  /** Room -> display name. */
   readonly rooms = new Map<string, string>();
   readonly accounts = new Map<string, AccountMeta>();
   waits: WaitRecord[] = [];
-  /** Mudou desde a última gravação. */
+  /** Changed since last write. */
   dirty = false;
   updatedAt = 0;
 
@@ -418,7 +417,7 @@ export class DayData {
     return b;
   }
 
-  /** Horas com algum dado (para o índice de dias). */
+  /** Hours with any data (for day index). */
   hoursWithData(): number[] {
     return [...this.hours.values()].filter(bucketHasData).map((b) => b.t);
   }
@@ -447,7 +446,10 @@ export class DayData {
   }
 }
 
-/** Formato do arquivo `${dataDir}/stats/AAAA-MM-DD.json` (listas em vez de objetos: chaves livres viram dados, nunca protótipo). */
+/**
+ * File format of `${dataDir}/stats/YYYY-MM-DD.json` (lists instead of objects:
+ * arbitrary keys are data, never prototype).
+ */
 export interface StatsDayFile {
   version: 1;
   day: string;
@@ -466,7 +468,7 @@ export interface StatsDayFile {
   waits: WaitRecord[];
 }
 
-// Leitura defensiva: o arquivo pode estar truncado, editado à mão ou ser de outra versão.
+// Defensive read: file might be truncated, hand-edited, or from another version.
 const LIMITS = { hours: 30, parts: 500, agents: 5_000, text: 512, name: 120 };
 
 function num(v: unknown): number {
@@ -510,7 +512,7 @@ function partsFrom(v: unknown): Map<string, StatsPart> {
   return out;
 }
 
-/** Monta o DayData a partir do JSON do arquivo; null se não for reconhecível. */
+/** Builds DayData from file JSON; null if unrecognizable. */
 export function parseDayFile(raw: unknown, key: string): DayData | null {
   const o = obj(raw);
   if (!o || o.version !== 1 || !Array.isArray(o.hours)) return null;
@@ -566,7 +568,7 @@ export function parseDayFile(raw: unknown, key: string): DayData | null {
       if (!agentId || !start || end < start) continue;
       const rec: WaitRecord = {
         agentId,
-        agentName: text(wo.agentName, LIMITS.name) ?? tr('Agente'),
+        agentName: text(wo.agentName, LIMITS.name) ?? tr('Agent'),
         roomId: text(wo.roomId) ?? '',
         account: text(wo.account) ?? '',
         start,
@@ -581,9 +583,9 @@ export function parseDayFile(raw: unknown, key: string): DayData | null {
   return d;
 }
 
-// ------------------------------------------------------------------ livro: todos os dias carregados
+// ------------------------------------------------------------------ book: all loaded days
 
-/** Como o rastreador se refere a um agente ao gravar (chave de presença, sala e conta com seus nomes). */
+/** How tracker references an agent when writing (presence key, room, and account with display names). */
 export interface AgentRef {
   key: string;
   room: string;
@@ -593,8 +595,8 @@ export interface AgentRef {
 }
 
 /**
- * Os dias de arquivo em memória. `fileDayOf` diz a que dia de arquivo pertence uma hora (fuso do servidor);
- * `loader` (opcional) traz do disco um dia que ainda não está na memória.
+ * File days in memory. `fileDayOf` returns which file day an hour belongs to (server timezone);
+ * `loader` (optional) fetches an unloaded day from disk.
  */
 export class StatsBook {
   private readonly days = new Map<string, DayData>();
@@ -605,7 +607,7 @@ export class StatsBook {
     private readonly loader?: (key: string) => DayData | null,
   ) {}
 
-  /** Dia de arquivo `key`: o da memória, o do disco (na primeira vez) ou um novo. */
+  /** File day `key`: in memory, from disk (first time), or newly created. */
   day(key: string): DayData {
     let d = this.days.get(key);
     if (!d) {
@@ -624,7 +626,7 @@ export class StatsBook {
     return [...this.days.values()];
   }
 
-  /** Tira da memória os dias anteriores a `key` que já foram gravados. */
+  /** Evicts days before `key` from memory if already saved. */
   evictBefore(key: string): void {
     for (const [k, d] of this.days) {
       if (k >= key || d.dirty) continue;
@@ -656,7 +658,7 @@ export class StatsBook {
     if (m && (!cur || cur.name !== m.name || cur.short !== m.short || cur.color !== m.color)) day.accounts.set(ref.account, { ...m });
   }
 
-  /** Soma `ms` de `status` na hora que começa em `hour` (sem partir: o demo usa para montar horas inteiras). */
+  /** Adds `ms` of `status` to hour starting at `hour` (without splitting: demo uses to build whole hours). */
   addMsAt(ref: AgentRef, status: TimedStatus, hour: number, ms: number, at = hour): void {
     if (!(ms > 0)) return;
     const { day, b } = this.slot(hour);
@@ -668,7 +670,7 @@ export class StatsBook {
     this.touch(day, at);
   }
 
-  /** Registra a presença do agente na hora de `at` (sessões e subagentes do dia), sem tempo. */
+  /** Records agent presence during hour of `at` (day sessions and subagents), without elapsed time. */
   markPresent(ref: AgentRef, at: number): void {
     const { day, b } = this.slot(at);
     if (b.agents.has(ref.key)) return;
@@ -677,7 +679,7 @@ export class StatsBook {
     this.touch(day, at);
   }
 
-  /** Soma o intervalo [from, to) em `status`, partido pelas horas. */
+  /** Adds interval [from, to) in `status`, partitioned across hours. */
   addTime(ref: AgentRef, status: TimedStatus, from: number, to: number): void {
     forEachHour(from, to, (hs, ms) => this.addMsAt(ref, status, hs, ms, to));
   }
@@ -703,19 +705,19 @@ export class StatsBook {
     forEachHour(from, to, (hs, ms) => this.addWaitWallAt(hs, ms, to));
   }
 
-  /** Guarda um episódio de espera no dia em que ele começou. */
+  /** Stores a wait episode under the day it started. */
   addWait(rec: WaitRecord): void {
     const { day } = this.slot(rec.start);
     day.waits.push(rec);
     if (day.waits.length > MAX_WAITS_PER_DAY) {
-      // Cheio: sai a espera fechada mais curta.
+      // Full: evict shortest closed wait.
       const length = (i: number) => day.waits[i].end - day.waits[i].start;
       let worst = -1;
       day.waits.forEach((w, i) => {
         if (w.open || w === rec) return;
         if (worst < 0 || length(i) < length(worst)) worst = i;
       });
-      // Sem nenhuma fechada para tirar (todas ainda abertas): sai a mais curta de todas, para o limite valer sempre.
+      // No closed waits to evict (all still open): drop shortest of all, keeping limit enforced.
       if (worst < 0) {
         for (let i = 0; i < day.waits.length; i++) if (worst < 0 || length(i) < length(worst)) worst = i;
       }
@@ -737,7 +739,7 @@ export class StatsBook {
     }
   }
 
-  /** Espera ainda aberta de `agentId` vinda de antes de um reinício (terminou depois de `since`). */
+  /** Still-open wait for `agentId` originating before a restart (ended after `since`). */
   findOpenWait(agentId: string, since: number): WaitRecord | undefined {
     for (const d of this.days.values()) {
       for (let i = d.waits.length - 1; i >= 0; i--) {
@@ -749,7 +751,7 @@ export class StatsBook {
   }
 }
 
-// ------------------------------------------------------------------ consulta: o dia no fuso de quem pergunta
+// ------------------------------------------------------------------ query: the day in caller's timezone
 
 interface Agg extends StatsTotals {
   agents: Set<string>;
@@ -781,8 +783,8 @@ function basename(path: string): string {
 }
 
 /**
- * Monta o dia `dayKey` (no fuso `tz`) a partir dos dias de arquivo que o cobrem (passe também o anterior,
- * para as esperas que começaram ontem e entraram por hoje).
+ * Builds day `dayKey` (in `tz` timezone) from covering file days (include previous day as well,
+ * for waits that started yesterday and crossed into today).
  */
 export function queryDay(datas: readonly DayData[], dayKey: string, tz: string, now: number, opts: { top?: number } = {}): DayStats {
   const { start, end } = dayRange(dayKey, tz);
@@ -823,7 +825,7 @@ export function queryDay(datas: readonly DayData[], dayKey: string, tz: string, 
     for (const d of sorted) if (d.hours.get(b.t) === b && d.updatedAt > updatedAt) updatedAt = d.updatedAt;
   }
 
-  // Esperas que tocam o dia (uma que atravessa a meia-noite aparece nos dois dias, com a duração inteira).
+  // Waits touching this day (one crossing midnight appears in both days with full duration).
   const seen = new Set<string>();
   const waits: WaitRecord[] = [];
   for (const d of sorted) {
@@ -890,14 +892,14 @@ export function queryDay(datas: readonly DayData[], dayKey: string, tz: string, 
   return out;
 }
 
-/** Dias (no fuso `tz`) com algum dado, a partir das horas com dados de cada dia de arquivo. */
+/** Days (in `tz` timezone) with any data, derived from hours with data in each file day. */
 export function daysFromHours(hours: Iterable<number>, tz: string): Set<string> {
   const out = new Set<string>();
   for (const t of hours) out.add(dayKeyOf(t + HOUR_MS / 2, tz));
   return out;
 }
 
-/** Dias de arquivo (fuso `fileTz`) que cobrem [from, to). */
+/** File days (`fileTz` timezone) covering [from, to). */
 export function fileDaysCovering(from: number, to: number, fileTz: string): string[] {
   const out = new Set<string>();
   for (let t = from; t < to; t += 6 * HOUR_MS) out.add(dayKeyOf(t, fileTz));
@@ -905,15 +907,15 @@ export function fileDaysCovering(from: number, to: number, fileTz: string): stri
   return [...out].sort();
 }
 
-/** Para a consulta de `dayKey`: os dias de arquivo do próprio dia e da véspera (esperas que atravessam a meia-noite). */
+/** For `dayKey` query: file days of day itself and preceding day (for waits crossing midnight). */
 export function fileDaysForQuery(dayKey: string, tz: string, fileTz: string): string[] {
   const { start, end } = dayRange(dayKey, tz);
   return fileDaysCovering(start - DAY_MS, end, fileTz);
 }
 
-// ------------------------------------------------------------------ rastreador
+// ------------------------------------------------------------------ tracker
 
-/** O que o rastreador observa: os agentes e os nomes de salas e contas (um OfficeSnapshot serve). */
+/** What tracker observes: agents and room/account display names (an OfficeSnapshot works). */
 export interface StatsView {
   agents: readonly AgentInfo[];
   rooms: readonly { id: string; name: string }[];
@@ -921,7 +923,7 @@ export interface StatsView {
 }
 
 export interface TrackerOptions {
-  /** Início da observação (epoch ms): prompts anteriores a isto (releitura de transcript no boot) não contam. */
+  /** Start of observation (epoch ms): prompts prior to this (transcript re-read on boot) do not count. */
   startedAt: number;
 }
 
@@ -937,14 +939,14 @@ interface Track {
   status: AgentStatus;
   lastAt: number;
   seenAt: number;
-  /** Maior valor já visto de cada número cumulativo (só o que passa disso é uso novo). */
+  /** Highest seen value for each cumulative count (only increases beyond this count as new usage). */
   hw: Baseline;
   costKnown: boolean;
-  /** Conta a partir do zero (agente que nasceu depois do início da observação). */
+  /** Counts from zero (agent created after observation started). */
   fresh: boolean;
   tasksDone: number;
   settleUntil: number;
-  /** Prompts já contados (ids das atividades). */
+  /** Already counted prompts (activity ids). */
   prompts: string[];
   wait?: WaitRecord;
 }
@@ -974,8 +976,8 @@ function completedTasks(a: AgentInfo): number {
 }
 
 /**
- * Integra o tempo de cada agente por status e soma as contagens (deltas dos números cumulativos de
- * `AgentInfo.stats`, prompts e tarefas concluídas), gravando tudo num StatsBook. Chame observe() a cada ~1 s.
+ * Integrates each agent's time per status and accumulates counts (deltas from cumulative `AgentInfo.stats`,
+ * prompts, and completed tasks), recording all into a StatsBook. Call observe() every ~1 s.
  */
 export class StatsTracker {
   private readonly tracks = new Map<string, Track>();
@@ -989,7 +991,7 @@ export class StatsTracker {
     this.startedAt = opts.startedAt;
   }
 
-  /** Agentes acompanhados (inclusive os que sumiram há pouco). Para testes. */
+  /** Tracked agents (including recently departed ones). For tests. */
   get size(): number {
     return this.tracks.size;
   }
@@ -1016,9 +1018,9 @@ export class StatsTracker {
       if (!t) {
         t = this.begin(a, now);
         this.tracks.set(a.id, t);
-        // Primeira vez: o que já veio nos números é suspeito de releitura (o limite de salto vale).
+        // First time: initial numbers are suspected re-reads (jump limit applies).
         sampleDt = 0;
-        // Já conta como presente (um subagente rápido pode concluir antes da próxima amostra).
+        // Mark present immediately (a fast subagent could complete before next sample).
         if (isTimedStatus(a.status) || t.fresh) this.book.markPresent(ref, now);
       } else {
         this.integrate(t, a, ref, now, waiting);
@@ -1030,8 +1032,8 @@ export class StatsTracker {
     }
     for (const [id, t] of this.tracks) {
       if (present.has(id)) continue;
-      // Sumiu (período de graça acabou, registro regravado...). Se voltar logo, segue de onde parou (até a
-      // espera continua a mesma); a linha de base fica guardada por mais tempo.
+      // Disappeared (grace period ended, registry rewritten...). If it returns shortly, resumes where it left off
+      // (wait remains continuous); baseline is kept for longer.
       if (now - t.seenAt > MAX_GAP_MS) this.closeWait(t);
       if (now - t.seenAt > KEEP_GONE_MS) this.tracks.delete(id);
     }
@@ -1040,7 +1042,7 @@ export class StatsTracker {
 
   private begin(a: AgentInfo, now: number): Track {
     const cur = baselineOf(a);
-    // Subagente que nasceu depois do início, ou sessão nova (ainda sem números): conta do zero.
+    // Subagent spawned after observation start, or new session (no metrics yet): count from zero.
     const fresh = a.startedAt >= this.startedAt && (a.kind === 'sub' || isEmpty(cur));
     return {
       sessionId: a.sessionId,
@@ -1061,7 +1063,7 @@ export class StatsTracker {
     t.lastAt = now;
     if (now <= from) return;
     if (now - from > MAX_GAP_MS) {
-      // Pausa longa (servidor parado, computador dormindo): o intervalo não conta e a espera recomeça.
+      // Long pause (server stopped, computer sleeping): interval does not count and wait restarts.
       this.closeWait(t);
       return;
     }
@@ -1092,7 +1094,7 @@ export class StatsTracker {
       return;
     }
     this.closeWait(t);
-    // Espera que já estava aberta antes de um reinício do servidor: continua a mesma.
+    // Wait already open before a server restart: continues the same.
     const prev = this.book.findOpenWait(a.id, s - MAX_GAP_MS);
     if (prev) {
       prev.end = e;
@@ -1128,7 +1130,7 @@ export class StatsTracker {
     const cur = baselineOf(a);
     const done = completedTasks(a);
     if (a.sessionId !== t.sessionId) {
-      // /clear (transcript novo, vazio) ou /resume (transcript antigo, com números) no mesmo processo.
+      // /clear (new, empty transcript) or /resume (old transcript with existing counts) in same process.
       t.sessionId = a.sessionId;
       t.fresh = isEmpty(cur);
       t.hw = t.fresh ? { ...ZERO_BASELINE } : cur;
@@ -1139,7 +1141,7 @@ export class StatsTracker {
       return;
     }
     if (a.stats.costUSD !== undefined && !t.costKnown) {
-      // O custo apareceu agora: num agente antigo é o total da sessão até aqui, não gasto novo.
+      // Cost appeared just now: for an existing agent, this is session total so far, not new spend.
       t.costKnown = true;
       if (!t.fresh) t.hw.costUSD = Math.max(t.hw.costUSD, cur.costUSD);
     }
@@ -1165,7 +1167,7 @@ export class StatsTracker {
     this.book.addCount(ref, 'tokensIn', d.tokensIn, now);
     this.book.addCount(ref, 'tokensOut', d.tokensOut, now);
     this.book.addCount(ref, 'costUSD', d.costUSD, now);
-    // Tarefas: a lista é substituída de tempos em tempos (TodoWrite), então só conta o que sobe.
+    // Tasks: list is replaced periodically (TodoWrite), so only increments count.
     if (done > t.tasksDone) this.book.addCount(ref, 'tasksDone', done - t.tasksDone, now);
     t.tasksDone = done;
   }

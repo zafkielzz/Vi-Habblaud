@@ -1,11 +1,11 @@
-// Desenhos animados chamados a cada quadro: telas, quadro kanban, vista da janela e relógio.
-// Regras: só fillRect com coordenadas inteiras (barato), sem getImageData e sem criar canvases.
+// Animated drawings called every frame: screens, kanban board, window view, and clock.
+// Rules: only fillRect with integer coordinates (cheap), no getImageData and no creating canvases.
 import type { Rect, ScreenMode } from './api';
 import { mix } from './core/color';
 
 type Ctx = CanvasRenderingContext2D;
 
-/** Retângulo de recorte ativo: todo fill é limitado a ele (as telas nunca vazam da moldura). */
+/** Active clip rectangle: all fill operations are clipped to it (screens never leak out of frame). */
 let clipX0 = -Infinity;
 let clipY0 = -Infinity;
 let clipX1 = Infinity;
@@ -28,7 +28,7 @@ function fill(ctx: Ctx, x: number, y: number, w: number, h: number, c: string): 
   ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
 }
 
-/** Hash inteiro rápido e determinístico (sem alocação). */
+/** Fast and deterministic integer hash (no allocation). */
 function h32(a: number, b = 0): number {
   let x = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1)) >>> 0;
   x ^= x >>> 15;
@@ -43,7 +43,7 @@ function frac(n: number): number {
 
 const SYNTAX = ['#ff79c6', '#8be9fd', '#f1fa8c', '#50fa7b', '#bd93f9', '#ffb86c', '#f8f8f2'] as const;
 
-// ------------------------------------------------------------------ telas
+// ------------------------------------------------------------------ screens
 
 export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed: number): void {
   const x = Math.round(r.x);
@@ -55,8 +55,8 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
   const s = seed >>> 0;
   switch (mode) {
     case 'off': {
-      // Desligado: vidro azul-marinho fosco com reflexo diagonal largo + um fino (lê como tela
-      // apagada, não como buraco preto). O fill já recorta ao retângulo.
+      // Off: matte navy blue glass with wide diagonal reflection + a thin one (reads as screen
+      // turned off, not as black hole). The fill already clips to the rectangle.
       fill(ctx, x, y, w, h, '#22324f');
       fill(ctx, x, y, w, 1, '#2a3d5f');
       fill(ctx, x, y + h - 1, w, 1, '#1d2b45');
@@ -70,7 +70,7 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
       break;
     }
     case 'standby': {
-      // Ligado sem uso: fundo azul em faixas + logo (losango) que "respira" devagar.
+      // On but unused: blue background in bands + logo (rhombus) that "breathes" slowly.
       const bands = ['#2d63ad', '#285a9f', '#235192', '#1f4884'];
       for (let i = 0; i < h; i++) fill(ctx, x, y + i, w, 1, bands[Math.min(bands.length - 1, Math.floor((i * bands.length) / h))]);
       fill(ctx, x, y, w, 1, '#3a74c0');
@@ -83,12 +83,12 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
       fill(ctx, cx + 1, cy, 1, 1, logo);
       fill(ctx, cx, cy + 1, 1, 1, logo);
       fill(ctx, cx, cy, 1, 1, '#6aa6e6');
-      // Barrinha sob o logo (campo de "toque para entrar").
+      // Small bar under logo ("tap to enter" field).
       if (h >= 7) fill(ctx, cx - 2, cy + 3, 5, 1, '#4f86c9');
       break;
     }
     case 'idle': {
-      // Descanso de tela: degradê suave + bolinha colorida quicando.
+      // Screensaver: smooth gradient + bouncing colored ball.
       for (let i = 0; i < h; i++) fill(ctx, x, y + i, w, 1, mix('#1b2a4a', '#2c1f4a', i / h));
       const px = bounce(t / 140 + (s % 17), Math.max(1, w - 2));
       const py = bounce(t / 190 + (s % 11), Math.max(1, h - 2));
@@ -109,7 +109,7 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
         fill(ctx, x, yy, 1, 1, '#4a5170');
         let cx = x + 3 + (hh % 4);
         const tokens = 1 + ((hh >>> 3) % 3);
-        if ((hh >>> 7) % 7 === 0) continue; // linha em branco
+        if ((hh >>> 7) % 7 === 0) continue; // blank line
         for (let k = 0; k < tokens && cx < x + w - 1; k++) {
           const tw = 1 + ((hh >>> (9 + k * 4)) % 4);
           fill(ctx, cx, yy, Math.min(tw, x + w - 1 - cx), 1, SYNTAX[(hh >>> (5 + k * 3)) % SYNTAX.length]);
@@ -124,10 +124,10 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
       const rows = Math.floor((h - 1) / 2);
       const step = Math.floor(t / 260) + (s % 40);
       const lineLen = (n: number) => 2 + (h32(s, n) % Math.max(2, w - 4));
-      // A linha atual "digita" aos poucos; as anteriores ficam mais apagadas. Cada linha ocupa uma
-      // janela FIXA de passos (a mais longa possível + pausa), então a linha atual sai direto de
-      // `step` em O(1): o custo por quadro depende só do tamanho da tela, nunca do valor de `t`
-      // (o mundo passa Date.now(), ~1,8e12 ms). Linhas curtas ficam com o cursor piscando no fim.
+      // Current line "types" gradually; previous ones appear dimmer. Each line occupies a
+      // FIXED step window (longest possible + pause), so current line is determined directly from
+      // `step` in O(1): cost per frame depends only on screen size, never on `t` value
+      // (world passes Date.now(), ~1.8e12 ms). Short lines have cursor blinking at the end.
       const slot = Math.max(2, w - 4) + 3;
       const line = Math.floor(step / slot);
       const typed = Math.min(lineLen(line), step - line * slot);
@@ -192,7 +192,7 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
         if (yy < y) continue;
         fill(ctx, mine ? x + w - 1 - bw : x + 1, yy, bw, 2, mine ? '#5b8fe0' : '#d6dce6');
       }
-      // Indicador "digitando".
+      // "Typing" indicator.
       const dot = Math.floor(t / 250) % 3;
       for (let k = 0; k < 3; k++) fill(ctx, x + 2 + k * 2, y + 1, 1, 1, k === dot ? '#5b6b85' : '#b8c2d2');
       break;
@@ -223,31 +223,31 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
       break;
     }
     case 'progress': {
-      // Esperando um comando: terminal escuro com o comando no topo, barra de progresso que enche e
-      // recomeça (com um brilho correndo na ponta), spinner girando e cursor piscando. Tudo O(1)
-      // por quadro (só depende do tamanho da tela), como os demais modos.
+      // Waiting for command: dark terminal with command at top, progress bar that fills and
+      // restarts (with running sparkle at the tip), spinning spinner, and blinking cursor. All O(1)
+      // per frame (only depends on screen size), like other modes.
       fill(ctx, x, y, w, h, '#0b1210');
       fill(ctx, x, y + h - 1, w, 1, '#0f1916');
       const tiny = h < 9;
-      // Linha do comando: prompt + texto apagado (comprimento varia por semente).
+      // Command line: prompt + dimmed text (length varies by seed).
       fill(ctx, x + 1, y + 1, 1, 1, '#5cff7a');
       fill(ctx, x + 3, y + 1, Math.max(1, Math.min(w - 5, 4 + (h32(s, 1) % Math.max(1, w - 7)))), 1, '#3c8f57');
-      // Saída anterior (só em telas maiores, ex.: TV).
+      // Previous output (only on larger screens, e.g. TV).
       if (h >= 13) {
         fill(ctx, x + 3, y + 3, Math.max(1, Math.min(w - 5, 3 + (h32(s, 2) % Math.max(1, w - 6)))), 1, '#2a5c3c');
         fill(ctx, x + 3, y + 5, Math.max(1, Math.min(w - 5, 2 + (h32(s, 3) % Math.max(1, w - 6)))), 1, '#2a5c3c');
       }
-      // Barra: colchetes nas pontas, trilho escuro, enchimento verde com topo claro e ponta brilhante.
+      // Bar: brackets at ends, dark track, green fill with light top and bright tip.
       const by = tiny ? y + 3 : h >= 13 ? y + h - 7 : y + 3;
       const bh = tiny ? 1 : 2;
       const inner = Math.max(1, w - 4);
       fill(ctx, x + 1, by, 1, bh, '#7d8ea0');
       fill(ctx, x + w - 2, by, 1, bh, '#7d8ea0');
       fill(ctx, x + 2, by, inner, bh, '#163322');
-      const period = 3400 + (s % 5) * 300; // ciclo de cada monitor um pouco diferente
+      const period = 3400 + (s % 5) * 300; // slightly different cycle for each monitor
       const cycle = (t + (s % 997) * 37) / period;
       const p = frac(cycle);
-      // Enche em 85% do ciclo e segura cheia no resto (pisca antes de recomeçar).
+      // Fills during 85% of cycle and stays full for the rest (flashes before restarting).
       const filled = p < 0.85 ? Math.floor((p / 0.85) * (inner + 1)) : inner;
       const done = p >= 0.85;
       if (filled > 0) {
@@ -256,7 +256,7 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
         if (bh > 1) fill(ctx, x + 2, by, filled, 1, blink ? '#e4ffe9' : '#7cf09a');
         if (!done) fill(ctx, x + 1 + filled, by, 1, bh, '#d8ffe2');
       }
-      // Spinner (anel 3x3 com cabeça brilhante e rastro) + cursor piscando ao lado.
+      // Spinner (3x3 ring with bright head and trail) + blinking cursor beside it.
       const sy = tiny ? y + h - 3 : h >= 13 ? y + h - 4 : y + h - 4;
       if (sy + 2 < y + h) {
         const RING = [[1, 0], [2, 0], [2, 1], [2, 2], [1, 2], [0, 2], [0, 1], [0, 0]] as const;
@@ -266,7 +266,7 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
           const c = age === 0 ? '#9ff3ff' : age === 1 ? '#4fb8d6' : age === 2 ? '#2b6f86' : '#173a45';
           fill(ctx, x + 1 + RING[k][0], sy + RING[k][1], 1, 1, c);
         }
-        // Pontinhos "..." que vão aparecendo e o cursor de bloco.
+        // Appearing "..." dots and block cursor.
         const dots = Math.floor(t / 420 + (s % 3)) % 4;
         for (let k = 0; k < dots && 5 + k * 2 < w - 2; k++) fill(ctx, x + 5 + k * 2, sy + 2, 1, 1, '#3c8f57');
         if (Math.floor(t / 500) % 2 === 0 && x + 11 < x + w) fill(ctx, x + 11, sy + 1, 1, 2, '#d6ffe0');
@@ -302,9 +302,9 @@ export function drawScreen(ctx: Ctx, r: Rect, mode: ScreenMode, t: number, seed:
   }
 }
 
-// ------------------------------------------------------------------ TV e videogame (vida social)
+// ------------------------------------------------------------------ TV and videogame (social life)
 
-/** Letras 3x5 para as vinhetas da TV ("GOL", "KO"): cada linha vira poucos fills (trechos contínuos). */
+/** 3x5 letters for TV banners ("GOL", "KO"): each row becomes few fills (continuous runs). */
 const GLYPHS: Readonly<Record<string, readonly string[]>> = {
   G: ['###', '#..', '#.#', '#.#', '###'],
   O: ['###', '#.#', '#.#', '#.#', '###'],
@@ -333,7 +333,7 @@ function drawWord(ctx: Ctx, word: string, x: number, y: number, c: string): void
   }
 }
 
-/** Palavra centralizada com uma faixa escura atrás (legível sobre qualquer cena). */
+/** Centered word with dark banner behind (readable over any scene). */
 function banner(ctx: Ctx, word: string, x: number, y: number, w: number, h: number, c: string): void {
   const ww = word.length * 4 - 1;
   const bx = x + Math.floor((w - ww) / 2);
@@ -343,19 +343,19 @@ function banner(ctx: Ctx, word: string, x: number, y: number, w: number, h: numb
 }
 
 /**
- * Futebol: gramado listrado, linha do meio, gols, dois times de pontinhos que seguem a bola e
- * placar no canto. A cada lance (7 s) a bola corre para um dos gols; no fim do lance ela entra e
- * a tela pisca "GOL" (borda amarela).
+ * Soccer: striped pitch, midfield line, goals, two teams of dots following the ball, and
+ * scoreboard in corner. On each play (7 s) ball runs toward one goal; at end of play it enters and
+ * screen flashes "GOL" (yellow border).
  */
-/** Duração de um lance do futebol da TV (a bola sai do meio e termina no gol). */
+/** Duration of a TV soccer play (ball leaves center and ends in goal). */
 export const FOOTBALL_LANCE_MS = 7000;
-/** A partir desta fração do lance a bola está no gol e a tela pisca "GOL". */
+/** From this fraction of play onward ball is in goal and screen flashes "GOL". */
 export const FOOTBALL_GOAL_AT = 0.8;
 
 /**
- * Lance do futebol da TV no instante `t` (mesmo `t`/`seed` de drawScreen('show')): número do lance,
- * progresso (0..1) e se a bola vai para o gol da direita. Exportado para o mundo sincronizar a
- * torcida com o "GOL" da tela.
+ * TV soccer play at time `t` (same `t`/`seed` as drawScreen('show')): play number,
+ * progress (0..1), and whether ball goes to right goal. Exported for world to synchronize
+ * cheering with on-screen "GOL".
  */
 export function footballLance(t: number, s: number): { lance: number; progress: number; right: boolean; period: number; goalAt: number } {
   const k = Math.floor((t + (s % 997) * 13) / FOOTBALL_LANCE_MS);
@@ -379,7 +379,7 @@ function drawFootball(ctx: Ctx, x: number, y: number, w: number, h: number, t: n
   const gh = Math.max(3, Math.floor(h / 3));
   fill(ctx, x, my - Math.floor(gh / 2), 1, gh, '#ffffff');
   fill(ctx, x + w - 1, my - Math.floor(gh / 2), 1, gh, '#ffffff');
-  // Lance: a bola parte do meio e termina dentro de um dos gols (lado sorteado por lance).
+  // Play: ball starts from center and ends inside one goal (side chosen per play).
   const right = footballLance(t, s).right;
   const u = Math.min(1, p / 0.8);
   const ease = u * u * (3 - 2 * u);
@@ -387,7 +387,7 @@ function drawFootball(ctx: Ctx, x: number, y: number, w: number, h: number, t: n
   const bx = mx + Math.round((right ? 1 : -1) * span * ease);
   const sway = Math.round(Math.sin(u * Math.PI * 3 + (s % 7)) * Math.max(1, (h - 6) / 3) * (1 - ease));
   const by = my + sway;
-  // Jogadores: cada um volta à posição de base e é puxado na direção da bola.
+  // Players: each returns to base position and is pulled toward the ball.
   for (let i = 0; i < 6; i++) {
     const red = i < 3;
     const hh = h32(s + i * 31, 7);
@@ -401,7 +401,7 @@ function drawFootball(ctx: Ctx, x: number, y: number, w: number, h: number, t: n
   }
   fill(ctx, bx, by + 1, 1, 1, 'rgba(10,40,10,0.45)');
   fill(ctx, bx, by, 1, 1, '#ffffff');
-  // Placar no canto: marcador de cada time e um tracinho por gol (zera a cada 4 lances).
+  // Scoreboard in corner: each team's score marker and dash per goal (resets every 4 plays).
   if (w >= 16 && h >= 9) {
     const goals = [0, 0];
     for (let j = k - (k % 4); j < k; j++) goals[h32(s, j) & 1]++;
@@ -422,7 +422,7 @@ function drawFootball(ctx: Ctx, x: number, y: number, w: number, h: number, t: n
   }
 }
 
-/** Rosto em close (novela): `hair` cabelo, `long` cai nos ombros; `look` 0 = olhando à direita. */
+/** Close-up face (soap opera): `hair` hair, `long` falls on shoulders; `look` 0 = looking right. */
 function soapFace(ctx: Ctx, cx: number, cy: number, sc: number, skin: string, hair: string, long: boolean, look: number, blush: boolean): void {
   const fw = 6 * sc;
   const fh = 7 * sc;
@@ -443,7 +443,7 @@ function soapFace(ctx: Ctx, cx: number, cy: number, sc: number, skin: string, ha
   fill(ctx, fx + 2 * sc + ex, fy + 5 * sc, Math.max(1, sc + Math.floor(sc / 2)), Math.max(1, Math.floor(sc / 2)), '#b4475a');
 }
 
-/** Coração de 3x3 (rosa). */
+/** 3x3 heart (pink). */
 function heart(ctx: Ctx, x: number, y: number, c: string): void {
   fill(ctx, x, y, 1, 1, c);
   fill(ctx, x + 2, y, 1, 1, c);
@@ -451,14 +451,14 @@ function heart(ctx: Ctx, x: number, y: number, c: string): void {
   fill(ctx, x + 1, y + 2, 1, 1, c);
 }
 
-/** Novela: fundo quente, cortes entre os dois protagonistas em close e o casal com corações subindo. */
+/** Soap opera: warm background, cuts between two close-up leads and the couple with rising hearts. */
 function drawSoap(ctx: Ctx, x: number, y: number, w: number, h: number, t: number, s: number): void {
   const CUT = 2600;
   const shot = Math.floor((t + (s % 97) * 31) / CUT) % 4;
   const wall = ['#c98a6a', '#b77a62', '#d6a27c', '#8f6f9e'][s % 4];
   fill(ctx, x, y, w, h, wall);
   fill(ctx, x, y + h - Math.max(2, Math.floor(h / 5)), w, Math.max(2, Math.floor(h / 5)), mix(wall, '#2b2236', 0.35));
-  // Janela com luz de fim de tarde ao fundo.
+  // Window with late afternoon light in background.
   fill(ctx, x + w - Math.floor(w / 3), y + 1, Math.floor(w / 4), Math.floor(h / 2), '#ffd59a');
   fill(ctx, x + w - Math.floor(w / 3) + Math.floor(w / 8), y + 1, 1, Math.floor(h / 2), mix(wall, '#2b2236', 0.2));
   const sc = h >= 13 ? 2 : 1;
@@ -468,7 +468,7 @@ function drawSoap(ctx: Ctx, x: number, y: number, w: number, h: number, t: numbe
   if (shot === 0) soapFace(ctx, x + Math.floor(w / 2), my, sc, her.skin, her.hair, true, 0, true);
   else if (shot === 1) soapFace(ctx, x + Math.floor(w / 2), my, sc, him.skin, him.hair, false, 1, false);
   else {
-    // Os dois, um diante do outro (menores), e corações subindo entre eles.
+    // The two, facing each other (smaller), and hearts rising between them.
     const s1 = w >= 34 ? sc : 1;
     soapFace(ctx, x + Math.floor(w * 0.3), my, s1, her.skin, her.hair, true, 0, shot === 3);
     soapFace(ctx, x + Math.floor(w * 0.7), my, s1, him.skin, him.hair, false, 1, false);
@@ -481,7 +481,7 @@ function drawSoap(ctx: Ctx, x: number, y: number, w: number, h: number, t: numbe
   }
 }
 
-/** Desenho animado: céu, sol, nuvens passando e um bichinho rosa pulando, perseguido por um amarelo. */
+/** Cartoon: sky, sun, passing clouds, and a pink critter hopping, chased by a yellow one. */
 function drawCartoon(ctx: Ctx, x: number, y: number, w: number, h: number, t: number, s: number): void {
   fill(ctx, x, y, w, h, '#7fd3ff');
   fill(ctx, x, y, w, Math.floor(h / 3), '#9fe0ff');
@@ -512,8 +512,8 @@ function drawCartoon(ctx: Ctx, x: number, y: number, w: number, h: number, t: nu
 }
 
 /**
- * Corrida em tela dividida: cada metade tem pista com faixas correndo, grama nas bordas, árvores
- * passando e o carrinho de um jogador; a posição de cada um oscila (ora um na frente, ora o outro).
+ * Split-screen race: each half has track with moving stripes, grass borders, passing trees,
+ * and a player's car; positions oscillate (now one leads, now the other).
  */
 function drawRace(ctx: Ctx, x: number, y: number, w: number, h: number, t: number, s: number): void {
   const half = Math.floor(h / 2);
@@ -530,7 +530,7 @@ function drawRace(ctx: Ctx, x: number, y: number, w: number, h: number, t: numbe
     for (let lx = -off; lx < w; lx += 6) fill(ctx, x + lx, lane, 3, 1, '#f4f4f0');
     const tree = Math.floor(t * speed * 0.8 + i * 9) % (w + 6);
     fill(ctx, x + w - tree, hy, 2, 1, '#2e7d32');
-    // Quem está na frente muda devagar.
+    // Leader changes slowly.
     const lead = Math.sin(t / 2300 + (s % 9) + i * Math.PI);
     const cx = x + Math.floor(w * 0.3) + Math.round(lead * Math.max(1, w / 8));
     const cy = lane - 1 + (Math.floor(t / 130 + i) % 2 === 0 ? 0 : (hh >= 6 ? 1 : 0));
@@ -543,8 +543,8 @@ function drawRace(ctx: Ctx, x: number, y: number, w: number, h: number, t: numbe
 }
 
 /**
- * Luta: palco roxo, dois bonecos (vermelho e azul) se aproximando e trocando socos, barras de vida
- * no topo diminuindo a cada golpe e "KO" piscando quando uma acaba (o round recomeça).
+ * Fighting: purple stage, two fighters (red and blue) approaching and trading punches, health bars
+ * at top decreasing with each blow, and "KO" flashing when one runs out (round restarts).
  */
 function drawFight(ctx: Ctx, x: number, y: number, w: number, h: number, t: number, s: number): void {
   const ROUND = 9000;
@@ -556,7 +556,7 @@ function drawFight(ctx: Ctx, x: number, y: number, w: number, h: number, t: numb
   const floorH = Math.max(2, Math.floor(h / 4));
   fill(ctx, x, y + h - floorH, w, floorH, '#7a4f2a');
   fill(ctx, x, y + h - floorH, w, 1, '#a8723f');
-  // Barras de vida: quem perde o round é sorteado; o vencedor perde menos.
+  // Health bars: round loser is randomly chosen; winner loses less.
   const loser = h32(s, k) & 1;
   const bw = Math.max(3, Math.floor(w / 2) - 2);
   const fight = Math.min(1, p / 0.82);
@@ -567,11 +567,11 @@ function drawFight(ctx: Ctx, x: number, y: number, w: number, h: number, t: numb
     const lw = Math.round(bw * lifeOf(who));
     if (lw > 0) fill(ctx, who === 0 ? bx : bx + bw - lw, y + 1, lw, 2, lifeOf(who) > 0.35 ? '#ffd84d' : '#ff6b4a');
   }
-  // Lutadores: aproximam-se e recuam; nos golpes um braço estica e o outro pisca de branco.
+  // Fighters: approach and retreat; on strikes one arm stretches and other flashes white.
   const ground = y + h - floorH;
   const gap = Math.max(3, Math.round(w * (0.18 + 0.12 * Math.abs(Math.sin(tt / 900)))));
   const mx = x + Math.floor(w / 2);
-  // A cada batida: 0 = o vermelho soca, 1 = o azul soca, 2 = ninguém.
+  // At each beat: 0 = red punches, 1 = blue punches, 2 = neither.
   const hitter = h32(s, Math.floor(tt / 300)) % 3;
   const ko = p >= 0.82;
   for (let who = 0; who < 2; who++) {
@@ -602,7 +602,7 @@ function bounce(v: number, span: number): number {
   return Math.floor(p < span ? p : span * 2 - p);
 }
 
-// ------------------------------------------------------------------ quadro kanban
+// ------------------------------------------------------------------ kanban board
 
 const NOTE = {
   pending: ['#ffe27a', '#ffd0a8'],
@@ -632,7 +632,7 @@ export function drawBoard(ctx: Ctx, r: Rect, items: readonly { status: 'pending'
     const nx = x + c * colW + 1 + (k % per) * 5;
     const ny = y + 2 + Math.floor(k / per) * 4;
     if (ny + 3 > y + h) {
-      // Excesso: pontinhos no rodapé da coluna.
+      // Overflow: dots at column footer.
       if (k % per === 0) fill(ctx, x + c * colW + Math.floor(colW / 2) - 1, y + h - 1, 3, 1, '#9aa4b2');
       continue;
     }
@@ -646,9 +646,9 @@ export function drawBoard(ctx: Ctx, r: Rect, items: readonly { status: 'pending'
   }
 }
 
-// ------------------------------------------------------------------ janela
+// ------------------------------------------------------------------ window
 
-/** Chaves de cor do céu ao longo do dia: [hora, topo, horizonte]. */
+/** Sky color stops throughout the day: [hour, top, horizon]. */
 const SKY: readonly (readonly [number, string, string])[] = [
   [0, '#0b1230', '#1f2b57'],
   [4.6, '#0e1838', '#28335f'],
@@ -685,7 +685,7 @@ export function drawWindowView(ctx: Ctx, r: Rect, hour: number, t: number, seed:
   const s = seed >>> 0;
   const sky = skyAt(hour);
   for (let i = 0; i < h; i++) fill(ctx, x, y + i, w, 1, mix(sky.top, sky.bottom, i / Math.max(1, h - 1)));
-  // Estrelas e lua.
+  // Stars and moon.
   if (sky.night > 0.3) {
     for (let k = 0; k < 7; k++) {
       const hh = h32(s, k + 101);
@@ -699,7 +699,7 @@ export function drawWindowView(ctx: Ctx, r: Rect, hour: number, t: number, seed:
     fill(ctx, mx + 2, y + 2, 1, 1, sky.top);
     fill(ctx, mx, y + 4, 1, 1, '#d9d2ad');
   }
-  // Sol (arco ao longo do dia).
+  // Sun (arc across the day).
   const hr = ((hour % 24) + 24) % 24;
   if (hr > 5.6 && hr < 19) {
     const p = (hr - 5.6) / 13.4;
@@ -709,7 +709,7 @@ export function drawWindowView(ctx: Ctx, r: Rect, hour: number, t: number, seed:
     fill(ctx, sx - 1, sy, 5, 3, warm ? 'rgba(255,190,120,0.35)' : 'rgba(255,250,210,0.35)');
     fill(ctx, sx, sy, 3, 3, warm ? '#ffcf86' : '#fff6c8');
   }
-  // Nuvens deslizando.
+  // Drifting clouds.
   if (sky.night < 0.8) {
     const cloud = sky.day > 0.5 ? 'rgba(255,255,255,0.9)' : 'rgba(255,214,190,0.75)';
     for (let k = 0; k < 2; k++) {
@@ -726,7 +726,7 @@ export function drawWindowView(ctx: Ctx, r: Rect, hour: number, t: number, seed:
       }
     }
   }
-  // Silhueta da cidade (janelas acesas à noite).
+  // City skyline (lit windows at night).
   const city = mix('#8ea8c6', '#1a2138', Math.max(sky.night, 1 - sky.day) * 0.9);
   const cityFar = mix('#b3c6dc', '#262f4d', Math.max(sky.night, 1 - sky.day) * 0.9);
   let bx = x;
@@ -753,7 +753,7 @@ export function drawWindowView(ctx: Ctx, r: Rect, hour: number, t: number, seed:
   }
 }
 
-// ------------------------------------------------------------------ relógio
+// ------------------------------------------------------------------ clock
 
 export function drawClock(ctx: Ctx, r: Rect, date: Date): void {
   clipTo(Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h));

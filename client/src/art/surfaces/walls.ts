@@ -1,5 +1,5 @@
-// Texturas de parede (puras): cada função gera UMA coluna/tile em PixelBuf; o desenho por quadro
-// (art/index.ts) só copia esses tiles já convertidos em canvas.
+// Wall textures (pure): each function generates ONE column/tile in PixelBuf; per-frame drawing
+// (art/index.ts) only copies these tiles once converted to canvas.
 import { TILE, type WallPattern, type WallStyle } from '../api';
 import { mix, ramp, shade } from '../core/color';
 import { PixelBuf } from '../core/pixbuf';
@@ -12,19 +12,19 @@ function speckle(b: PixelBuf, seed: number, n: number, colors: readonly string[]
   }
 }
 
-// ------------------------------------------------------------------ paredes
+// ------------------------------------------------------------------ walls
 
-/** Altura da face da parede norte e da tampa escura no topo. */
+/** Height of north wall face and dark cap at the top. */
 export const WALL_FACE_H = TILE * 2;
 export const WALL_CAP_H = 4;
 export const BASEBOARD_H = 3;
 
-/** Cor da tampa (topo da parede), levemente tingida pela cor da parede. */
+/** Cap color (top of wall), slightly tinted by wall color. */
 export function capColor(style: WallStyle): string {
   return mix(style.exterior ? '#4a4f5c' : '#3d4356', style.base, 0.1);
 }
 
-/** Coluna de 16x32 da face da parede norte (tampa + padrão + rodapé). */
+/** 16x32 column of north wall face (cap + pattern + baseboard). */
 export function wallFaceTile(style: WallStyle, variant: number, col: number): PixelBuf {
   const b = new PixelBuf(TILE, WALL_FACE_H);
   const base = style.base;
@@ -34,7 +34,7 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
   const fy = WALL_CAP_H;
   const fh = WALL_FACE_H - WALL_CAP_H - BASEBOARD_H;
   const r = rngOf(variant * 31 + col, 43);
-  // Face: gradiente sutil (mais claro em cima) e sombra logo abaixo da tampa.
+  // Face: subtle gradient (lighter at top) and shadow just below the cap.
   for (let y = 0; y < fh; y++) b.hline(0, TILE - 1, fy + y, shade(base, 0.02 - (y / fh) * 0.035));
   switch (pattern) {
     case 'stripes': {
@@ -57,7 +57,7 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
       break;
     }
     case 'wood_panel': {
-      // Lambri de madeira na metade de baixo com friso; metade de cima lisa.
+      // Wood wainscoting on lower half with trim; smooth upper half.
       const w = ramp(mix('#b98a5e', base, 0.15), 0.04);
       const top = fy + Math.floor(fh * 0.45);
       b.rect(0, top, TILE, fy + fh - top, w.base);
@@ -71,7 +71,7 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
       break;
     }
     case 'brick': {
-      // Tijolos 8x4 (com argamassa) em fileiras desencontradas; tom por tijolo, aresta de cima clara.
+      // 8x4 bricks (with mortar) in staggered rows; tone per brick, light top edge.
       const brick = ramp(base, 0.035);
       const mortar = mix(base, '#e9e4dc', 0.5);
       for (let row = 0; row * 4 < fh; row++) {
@@ -90,7 +90,7 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
       break;
     }
     case 'glass': {
-      // Parede de vidro: face translúcida com montantes; o mundo vê através.
+      // Glass wall: translucent face with mullions; world sees through.
       b.clearRect(0, fy, TILE, fh);
       b.rect(0, fy, TILE, fh, 'rgba(175,215,238,0.38)');
       b.vline(0, fy, fy + fh - 1, 'rgba(195,202,212,0.95)');
@@ -103,7 +103,7 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
       break;
     }
     case 'marble': {
-      // Frontão de mármore cinza (copa): placas com veios.
+      // Gray marble backsplash (pantry): slabs with veins.
       const m = mix('#c9cdd3', base, 0.25);
       b.rect(0, fy, TILE, fh, m);
       for (let v = 0; v < 2; v++) {
@@ -122,13 +122,13 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
       if (style.exterior) speckle(b, variant * 13 + col, 5, [shade(base, -0.03), shade(base, 0.03)]);
       break;
   }
-  // Sombra projetada pela tampa.
+  // Shadow cast by the cap.
   if (pattern !== 'glass') b.hline(0, TILE - 1, fy, shade(base, -0.06));
-  // Tampa escura com brilho na aresta.
+  // Dark cap with edge highlight.
   b.rect(0, 0, TILE, WALL_CAP_H, cap);
   b.hline(0, TILE - 1, 0, shade(cap, 0.08));
   b.hline(0, TILE - 1, WALL_CAP_H - 1, shade(cap, -0.06));
-  // Rodapé.
+  // Baseboard.
   const by = WALL_FACE_H - BASEBOARD_H;
   b.rect(0, by, TILE, BASEBOARD_H, trim);
   b.hline(0, TILE - 1, by, shade(trim, 0.08));
@@ -136,7 +136,7 @@ export function wallFaceTile(style: WallStyle, variant: number, col: number): Pi
   return b;
 }
 
-/** Tile de 16x16 da parede sul (tampa + mureta). */
+/** 16x16 tile of south wall (cap + low wall). */
 export function southWallTile(style: WallStyle, col: number): PixelBuf {
   const b = new PixelBuf(TILE, TILE);
   const cap = capColor(style);

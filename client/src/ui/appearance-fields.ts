@@ -1,6 +1,6 @@
-// Peças do personagem (pele, cabelo e estilo, olhos, roupa, calça, sapato, acessório, barba) com a prévia de corpo
-// inteiro: o miolo do editor de personagem, usado na gaveta do agente (character-editor.ts) e no personagem do Habblaud
-// World (world/settings-world.ts). Quem usa guarda o nome, salva e decide o que mandar; aqui só se escolhe a aparência.
+// Character parts (skin, hair and style, eyes, top, pants, shoes, accessory, beard) with full-body preview:
+// the core of the character editor, used in agent drawer (character-editor.ts) and Habblaud World
+// character (world/settings-world.ts). Caller manages name, saving, and sending; here only appearance is chosen.
 import type { PartKey } from '../../../shared/appearance';
 import { characterSprite, editorConflict, editorOptions, fitToOptions } from '../art';
 import type { Appearance } from '../art/api';
@@ -8,27 +8,27 @@ import { EDITOR_GROUPS, rowVisible, styleLabel, type EditorRow } from './charact
 import { h } from './dom';
 import { tr } from '../../../shared/i18n';
 
-/** Pixels de tela por pixel do personagem na prévia. */
+/** Screen pixels per character pixel in preview. */
 const PREVIEW_SCALE = 4;
 
 export class AppearanceFields {
-  /** Prévia de corpo inteiro (canvas). */
+  /** Full-body preview (canvas). */
   readonly preview: HTMLCanvasElement;
-  /** Grupos de peças (pele, cabelo...), redesenhados a cada escolha. */
+  /** Part groups (skin, hair...), redrawn on each selection. */
   readonly groups: HTMLElement;
   private draft: Appearance | null = null;
 
   constructor(private readonly onChange: (a: Appearance) => void = () => {}) {
-    this.preview = h('canvas', { class: 'ui-char__preview', role: 'img', attrs: { 'aria-label': tr('Prévia do personagem') } });
+    this.preview = h('canvas', { class: 'ui-char__preview', role: 'img', attrs: { 'aria-label': tr('Character preview') } });
     this.groups = h('div', { class: 'ui-char__groups' });
   }
 
-  /** Aparência em edição (null antes do primeiro `set`). */
+  /** Appearance being edited (null before first `set`). */
   get value(): Appearance | null {
     return this.draft;
   }
 
-  /** Troca a aparência inteira (começo da edição, "Sortear") e redesenha. */
+  /** Replaces entire appearance (initial edit, "Randomize") and redraws. */
   set(a: Appearance): void {
     this.draft = a;
     this.paint();
@@ -41,7 +41,7 @@ export class AppearanceFields {
     this.onChange(this.draft);
   }
 
-  /** Redesenha a prévia e as opções; `focusKey` devolve o foco à opção marcada daquela linha. */
+  /** Redraws preview and options; `focusKey` returns focus to checked option of that row. */
   paint(focusKey?: PartKey): void {
     const a = this.draft;
     if (!a) return;
@@ -88,7 +88,7 @@ export class AppearanceFields {
     return h('div', { class: 'ui-char__row' }, h('span', { class: 'ui-char__row-label', text: r.label }), list);
   }
 
-  /** Setas mudam a escolha dentro da linha (padrão de radiogroup), pulando opções desabilitadas. */
+  /** Arrow keys change selection within row (radiogroup pattern), skipping disabled options. */
   private onRadioKey(ev: KeyboardEvent, buttons: HTMLButtonElement[], key: PartKey, values: readonly string[]): void {
     const step = ev.key === 'ArrowRight' || ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 0;
     if (!step) return;
@@ -113,8 +113,8 @@ export class AppearanceFields {
       g.clearRect(0, 0, c.width, c.height);
       g.drawImage(s.canvas, 0, 0, c.width, c.height);
     } catch (err) {
-      // A arte ainda pode estar em construção: o editor continua utilizável sem a prévia.
-      console.warn('[ui] falha ao desenhar a prévia do personagem', err);
+      // Art may still be under construction: editor remains usable without preview.
+      console.warn('[ui] failed to draw character preview', err);
     }
   }
 }

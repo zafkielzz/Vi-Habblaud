@@ -1,6 +1,6 @@
-// Kit de desenho de móveis (puro): materiais, caixas 3/4, sombras de contato e pequenos objetos.
-// Convenção 3/4: topo mais claro (lt) com aresta frontal brilhante (hi), face frontal em base/dk,
-// luz vindo de cima/esquerda (lado direito mais escuro).
+// Furniture drawing kit (pure): materials, 3/4 boxes, contact shadows, and small objects.
+// 3/4 convention: lighter top (lt) with bright front edge (hi), front face in base/dk,
+// light coming from top-left (right side darker).
 import { mulberry32 } from '../../../../shared/hash';
 import { ramp, shade, type Ramp } from '../core/color';
 import type { PixelBuf } from '../core/pixbuf';
@@ -24,10 +24,10 @@ export const M = {
   orange: ramp('#ec8a3c', 0.07),
 } as const;
 
-/** Cores de acento saturadas (pastas, livros, objetos). */
+/** Saturated accent colors (folders, books, objects). */
 export const ACCENTS = ['#3f7fd8', '#ec8a3c', '#4cae6a', '#e05a5a', '#f2c14e', '#8d66cf', '#36b0b0', '#e47aa8'] as const;
 
-/** Fundo padrão da tela no sprite (igual ao modo 'off': azul-marinho fosco, nunca quase preto). */
+/** Default screen background in sprite (same as 'off' mode: matte navy, never near-black). */
 export const SCREEN_BG = '#22324f';
 export const SCREEN_GLOW = '#4aa3f0';
 
@@ -41,14 +41,14 @@ export function pick<T>(r: Rng, arr: readonly T[]): T {
   return arr[Math.floor(r() * arr.length) % arr.length];
 }
 
-/** Face de cima (tampo): base clara, aresta de trás um pouco mais escura e aresta frontal brilhante. */
+/** Top face (tabletop): light base, slightly darker back edge, and bright front edge. */
 export function topFace(b: PixelBuf, x: number, y: number, w: number, h: number, m: Ramp): void {
   b.rect(x, y, w, h, m.lt);
   if (h > 2) b.hline(x, x + w - 1, y, m.base);
   b.hline(x, x + w - 1, y + h - 1, m.hi);
 }
 
-/** Face frontal: base, com a última linha escura e bordas laterais sombreadas. */
+/** Front face: base, with dark bottom line and shaded side borders. */
 export function frontFace(b: PixelBuf, x: number, y: number, w: number, h: number, m: Ramp): void {
   b.rect(x, y, w, h, m.base);
   b.hline(x, x + w - 1, y + h - 1, m.dk);
@@ -56,7 +56,7 @@ export function frontFace(b: PixelBuf, x: number, y: number, w: number, h: numbe
   if (h > 1) b.hline(x, x + w - 1, y, m.base);
 }
 
-/** Textura sutil de veios de madeira num retângulo (linhas horizontais interrompidas). */
+/** Subtle wood grain texture on a rectangle (interrupted horizontal lines). */
 export function woodGrain(b: PixelBuf, x: number, y: number, w: number, h: number, m: Ramp, seed: number, vertical = false): void {
   const r = rngOf(seed, 7);
   if (vertical) {
@@ -74,7 +74,7 @@ export function woodGrain(b: PixelBuf, x: number, y: number, w: number, h: numbe
   }
 }
 
-/** Sombra de contato retangular arredondada, composta por baixo. */
+/** Rounded rectangular contact shadow, composited underneath. */
 export function contact(b: PixelBuf, x: number, y: number, w: number, h: number, alpha = 0.2): void {
   const c = `rgba(28,32,52,${alpha})`;
   const c2 = `rgba(28,32,52,${alpha * 0.55})`;
@@ -88,12 +88,12 @@ export function contact(b: PixelBuf, x: number, y: number, w: number, h: number,
   }
 }
 
-/** Retângulo composto por baixo do que já existe (sombras em áreas vazadas). */
+/** Rectangle composited under existing pixels (shadows in hollow areas). */
 export function underRect(b: PixelBuf, x: number, y: number, w: number, h: number, c: string): void {
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) b.under(xx, yy, c);
 }
 
-/** Vidro translúcido azulado com reflexos diagonais. */
+/** Bluish translucent glass with diagonal reflections. */
 export function glass(
   b: PixelBuf,
   x: number,
@@ -105,7 +105,7 @@ export function glass(
   const a = opts.alpha ?? 0.42;
   b.rect(x, y, w, h, `rgba(168,212,238,${a})`);
   if (opts.streaks === false) return;
-  // Reflexos: faixas diagonais (de baixo/esquerda para cima/direita).
+  // Reflections: diagonal stripes (bottom-left to top-right).
   const period = opts.period ?? 9;
   for (let k = -h + (opts.offset ?? 0); k < w; k += period) {
     for (let i = 0; i < h; i++) {
@@ -118,21 +118,21 @@ export function glass(
   b.hline(x, x + w - 1, y, 'rgba(255,255,255,0.35)');
 }
 
-// ------------------------------------------------------------------ objetos pequenos
+// ------------------------------------------------------------------ small objects
 
-/** Sombra suave de objeto pousado numa superfície (1px, à direita/abaixo). */
+/** Soft shadow of object resting on a surface (1px, right/below). */
 const SURFACE_SHADOW = 'rgba(60,40,40,0.2)';
-/** Sombra de contato mais firme para objetos sobre tampo branco (senão eles "somem" no branco). */
+/** Firmer contact shadow for objects on white tabletop (otherwise they disappear on white). */
 const SURFACE_SHADOW_LIGHT = 'rgba(40,46,70,0.3)';
 
 /**
- * Tom dos objetos de mesa: 'light' (padrão, sobre madeira), 'onLight' (um degrau mais escuro e com
- * sombra mais firme, para tampo branco) ou 'dark'.
+ * Desk item tone: 'light' (default, on wood), 'onLight' (a step darker with
+ * firmer shadow, for white tabletop) or 'dark'.
  */
 export type DeskItemTone = 'light' | 'onLight' | 'dark';
 
 export function mug(b: PixelBuf, x: number, y: number, color: string): void {
-  // 4x4: borda, café, corpo colorido e alça; sombra na superfície.
+  // 4x4: rim, coffee, colored body, and handle; surface shadow.
   b.hline(x + 1, x + 3, y + 3, SURFACE_SHADOW);
   b.hline(x, x + 2, y, '#f4f2ee');
   b.set(x + 1, y, '#6b4226');
@@ -147,7 +147,7 @@ export function papers(b: PixelBuf, x: number, y: number, w = 6, h = 4, tone: De
   const on = tone === 'onLight';
   b.hline(x + 1, x + w, y + h, on ? SURFACE_SHADOW_LIGHT : SURFACE_SHADOW);
   if (on) b.vline(x + w, y, y + h - 1, SURFACE_SHADOW_LIGHT);
-  // Folha de baixo deslocada (aparece como borda) + folha de cima com linhas de texto.
+  // Offset bottom sheet (appears as rim) + top sheet with text lines.
   b.rect(x + 1, y - 1, w, h, on ? '#c4bfb2' : '#dedad0');
   b.rect(x, y, w, h, on ? '#fbfaf6' : '#f8f7f3');
   b.hline(x, x + w - 1, y + h - 1, on ? '#b9b3a6' : '#d6d2c8');
@@ -185,10 +185,10 @@ export function mouse(b: PixelBuf, x: number, y: number, tone: DeskItemTone = 'l
   if (on) b.set(x, y, '#e4e8ee');
 }
 
-/** Monitor visto de frente: moldura, tela (retângulo retornado), pescoço e base. */
+/** Front-facing monitor: bezel, screen (returned rectangle), neck, and stand. */
 export function monitorFront(b: PixelBuf, x: number, y: number, w = 16, h = 11): { x: number; y: number; w: number; h: number } {
   const body = '#2c313d';
-  // Sombra do monitor no tampo (luz de cima/esquerda).
+  // Monitor shadow on tabletop (light from top-left).
   b.hline(x + 3, x + w - 2, y + h + 3, SURFACE_SHADOW);
   b.rect(x, y, w, h, body);
   b.hline(x, x + w - 1, y, '#3e4554');
@@ -198,12 +198,12 @@ export function monitorFront(b: PixelBuf, x: number, y: number, w = 16, h = 11):
   const sy = y + 1;
   const sw = w - 2;
   const sh = h - 2;
-  // Fundo padrão = tela desligada (o mundo desenha o conteúdo animado por cima).
+  // Default background = screen off (world draws animated content on top).
   b.rect(sx, sy, sw, sh, SCREEN_BG);
   b.rect(sx, sy, sw, 1, '#2a3d5f');
   for (let i = 0; i < sh; i++) b.set(sx + sw - 3 - i, sy + i, '#2f4569');
   b.set(x + w - 2, y + h - 1, '#5fd07a');
-  // Pescoço e base.
+  // Neck and stand.
   const cx = x + Math.floor(w / 2) - 1;
   b.rect(cx, y + h, 2, 2, '#4a5060');
   b.rect(cx - 2, y + h + 2, 6, 1, '#5b6272');
@@ -211,19 +211,19 @@ export function monitorFront(b: PixelBuf, x: number, y: number, w = 16, h = 11):
   return { x: sx, y: sy, w: sw, h: sh };
 }
 
-/** Conteúdo estático de uma tela secundária (2º monitor / notebook). */
+/** Static content for a secondary screen (2nd monitor / laptop). */
 export type StaticScreen = 'sheet' | 'ide' | 'chart';
 
 /**
- * Tela secundária "ligada" com conteúdo fixo um pouco escurecido (~60–75% do brilho da principal):
- * planilha, editor ou painel com gráfico. Quebra o bloco escuro das ilhas de mesas sem competir
- * com a tela animada principal.
+ * Secondary screen "turned on" with slightly dimmed static content (~60–75% brightness of main):
+ * spreadsheet, editor, or chart panel. Breaks up dark blocks on desk islands without competing
+ * with the animated main screen.
  */
 export function staticScreen(b: PixelBuf, r: { x: number; y: number; w: number; h: number }, kind: StaticScreen, seed: number): void {
   const { x, y, w, h } = r;
   const rnd = rngOf(seed, 41);
   if (kind === 'sheet') {
-    // Planilha: cabeçalho azul, coluna de rótulos, grade e algumas células destacadas.
+    // Spreadsheet: blue header, label column, grid, and some highlighted cells.
     b.rect(x, y, w, h, '#b4c0d2');
     b.hline(x, x + w - 1, y, '#5f86c4');
     b.vline(x, y + 1, y + h - 1, '#9aa8bd');
@@ -237,7 +237,7 @@ export function staticScreen(b: PixelBuf, r: { x: number; y: number; w: number; 
     return;
   }
   if (kind === 'chart') {
-    // Painel: título, barras subindo e linha de base.
+    // Dashboard: title, rising bars, and baseline.
     b.rect(x, y, w, h, '#22304a');
     b.hline(x + 1, x + Math.max(1, Math.floor(w / 2)), y + 1, '#6d7f9e');
     const base = y + h - 1;
@@ -249,7 +249,7 @@ export function staticScreen(b: PixelBuf, r: { x: number; y: number; w: number; 
     }
     return;
   }
-  // Editor escuro com linhas de código em cores dessaturadas.
+  // Dark editor with code lines in desaturated colors.
   const syn = ['#a0628e', '#4f8fa6', '#a8a35f', '#4f9c68', '#8a72b0', '#b08156'];
   b.rect(x, y, w, h, '#232a3d');
   b.vline(x, y, y + h - 1, '#2c3449');
@@ -265,9 +265,9 @@ export function staticScreen(b: PixelBuf, r: { x: number; y: number; w: number; 
 }
 
 /**
- * Traseira de monitor (para desk_back): carcaça de plástico (clara por padrão, cinza média em
- * mesas escuras) com 3 tons + contorno próprio, faixa de ventilação, ressalto do suporte VESA com
- * logo, pé visível e cabo. Nunca escura como uma tela — o verso tem que ler como verso.
+ * Monitor back (for desk_back): plastic casing (light by default, mid-gray on
+ * dark desks) with 3 tones + outline, vent strip, VESA mount protrusion with
+ * logo, visible stand, and cable. Never dark like a screen — back must read as back.
  */
 export function monitorBack(b: PixelBuf, x: number, y: number, w = 16, h = 10, tone: 'light' | 'mid' = 'light'): void {
   const p =
@@ -275,17 +275,17 @@ export function monitorBack(b: PixelBuf, x: number, y: number, w = 16, h = 10, t
       ? { hi: '#b4bcc8', lt: '#a3abb8', base: '#8f98a6', dk: '#747d8c', line: '#454c5a', stand: '#6b7383', foot: '#596170' }
       : { hi: '#e6eaf0', lt: '#d8dee6', base: '#c9d0da', dk: '#aab3c0', line: '#5b6577', stand: '#9aa3b0', foot: '#7d8696' };
   const cx = x + Math.floor(w / 2);
-  // Sombra do monitor no tampo.
+  // Monitor shadow on tabletop.
   b.hline(x + 2, x + w - 1, y + h + 3, SURFACE_SHADOW_LIGHT);
-  // Pé (base + pescoço) desenhado antes da carcaça, aparecendo embaixo dela.
+  // Stand (base + neck) drawn before casing, showing beneath it.
   b.rect(cx - 4, y + h + 1, 8, 2, p.foot);
   b.hline(cx - 4, cx + 3, y + h + 1, p.stand);
   b.set(cx - 4, y + h + 2, p.line);
   b.set(cx + 3, y + h + 2, p.line);
   b.rect(cx - 1, y + h - 1, 2, 3, p.stand);
   b.vline(cx, y + h - 1, y + h + 1, p.dk);
-  // Carcaça: topo brilhante, lateral esquerda clara, direita/base sombreadas, contorno próprio
-  // (as laterais ficam sobre o tampo, onde o contorno automático não chega).
+  // Casing: bright top, light left edge, shaded right/bottom, custom outline
+  // (the sides sit on the tabletop, where automatic outline doesn't reach).
   b.rect(x, y, w, h, p.base);
   b.hline(x + 1, x + w - 2, y + 1, p.lt);
   b.vline(x + 1, y + 1, y + h - 2, p.lt);
@@ -297,16 +297,16 @@ export function monitorBack(b: PixelBuf, x: number, y: number, w = 16, h = 10, t
   b.hline(x, x + w - 1, y + h - 1, p.line);
   b.set(x, y, p.lt);
   b.set(x + w - 1, y, p.dk);
-  // Faixa de ventilação (fendas alternadas) perto do topo.
+  // Ventilation strip (alternating slots) near the top.
   for (let xx = x + 3; xx <= x + w - 4; xx += 2) b.set(xx, y + 2, p.dk);
-  // Ressalto do suporte VESA com logo discreto.
+  // VESA mount protrusion with subtle logo.
   b.rect(cx - 3, y + 4, 6, Math.max(2, h - 6), p.lt);
   b.hline(cx - 3, cx + 2, y + 4, p.hi);
   b.hline(cx - 3, cx + 2, y + 4 + Math.max(2, h - 6) - 1, p.dk);
   b.vline(cx + 2, y + 5, y + 4 + Math.max(2, h - 6) - 1, p.dk);
   b.set(cx - 1, y + 5, tone === 'mid' ? '#cfd5de' : '#f6f8fb');
   b.set(cx, y + 5, tone === 'mid' ? '#cfd5de' : '#f6f8fb');
-  // Cabo descendo pela lateral do pé.
+  // Cable running down the side of the stand.
   b.vline(cx + 2, y + h, y + h + 2, p.line);
 }
 
@@ -345,9 +345,9 @@ export function book(b: PixelBuf, x: number, y: number, w: number, h: number, co
 }
 
 /**
- * Copa/folhagem em "bolhas" (estilo tileset): massa escura de fundo e bolhas de folhas desenhadas
- * de cima para baixo, cada uma com aro claro no alto/esquerda e sombra embaixo/direita. As bolhas
- * de baixo ficam mais escuras, dando volume.
+ * Canopy/foliage in "bubbles" (tileset style): dark background mass and leaf bubbles drawn
+ * top-to-bottom, each with bright rim at top/left and shadow below/right. Lower
+ * bubbles are darker, providing depth.
  */
 export function foliage(b: PixelBuf, cx: number, cy: number, rx: number, ry: number, m: Ramp, seed: number): void {
   const r = rngOf(seed, 3);
@@ -364,7 +364,7 @@ export function foliage(b: PixelBuf, cx: number, cy: number, rx: number, ry: num
   }
   bubbles.sort((a, c) => a[1] - c[1]);
   for (const [bx, by, rad] of bubbles) {
-    const low = (by - cy) / ry; // -1 topo .. 1 base
+    const low = (by - cy) / ry; // -1 top .. 1 bottom
     const left = (cx - bx) / rx;
     const body = low > 0.35 ? m.dk : low > -0.2 || left < -0.4 ? m.base : m.lt;
     for (let y = Math.floor(by - rad); y <= Math.ceil(by + rad); y++) {
@@ -383,9 +383,9 @@ export function foliage(b: PixelBuf, cx: number, cy: number, rx: number, ry: num
 }
 
 /**
- * Folha grande de (x0,y0) até a ponta (x1,y1). Antes do preenchimento desenha um anel escuro
- * (borda) para separar folhas sobrepostas. `cuts`: 'monstera' (3 recortes largos) ou 'pinnate'
- * (folíolos: recortes alternados ao longo de toda a lâmina, como fronde de palmeira).
+ * Large leaf from (x0,y0) to the tip (x1,y1). Before fill, draws a dark ring
+ * (border) to separate overlapping leaves. `cuts`: 'monstera' (3 wide cutouts) or 'pinnate'
+ * (leaflets: alternating cutouts along entire blade, like palm frond).
  */
 export function bigLeaf(
   b: PixelBuf,
@@ -434,7 +434,7 @@ export function bigLeaf(
   }
 }
 
-/** Folha alongada (lâmina) de (x0,y0) até a ponta (x1,y1), com nervura central. */
+/** Elongated leaf (blade) from (x0,y0) to tip (x1,y1), with central vein. */
 export function leafBlade(b: PixelBuf, x0: number, y0: number, x1: number, y1: number, width: number, m: Ramp, light: boolean): void {
   const len = Math.hypot(x1 - x0, y1 - y0);
   const steps = Math.ceil(len * 2);
@@ -450,7 +450,7 @@ export function leafBlade(b: PixelBuf, x0: number, y0: number, x1: number, y1: n
   b.line(x0, y0, Math.round(x0 + (x1 - x0) * 0.85), Math.round(y0 + (y1 - y0) * 0.85), m.dk);
 }
 
-/** Vaso de cerâmica/terracota (topo com aro, corpo afunilado) — (x, y) = canto superior esquerdo. */
+/** Ceramic/terracotta pot (rim top, tapered body) — (x, y) = top-left corner. */
 export function pot(b: PixelBuf, x: number, y: number, w: number, h: number, m: Ramp = M.terracotta): void {
   b.rect(x, y, w, 2, m.lt);
   b.hline(x, x + w - 1, y, m.hi);

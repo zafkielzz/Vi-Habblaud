@@ -1,11 +1,11 @@
-// Responder pelo escritório: cartão do pedido de permissão na gaveta do agente (Aprovar, Recusar com
-// motivo, "sempre permitir" e Responder no terminal) ou das perguntas do AskUserQuestion (opções, "Outro" e
-// Responder), e os atalhos que levam até ele (aviso, contador da barra superior e tecla P). O pedido chega
-// pelo hook PermissionRequest (mod/habblaud-permissoes/hooks/permission-hook.mjs); o diálogo continua no
-// terminal e vale o que for respondido primeiro.
-// Pedido do Codex (`provider: 'codex'`): o hook dele só espera alguns segundos e o terminal só mostra a aprovação
-// depois que você responder aqui ou o prazo acabar; não há "sempre permitir" nem "interromper", e recusar pede um
-// motivo. O Codex nunca pergunta pelo escritório (sem cartão de pergunta).
+// Respond from the office: permission request card in the agent drawer (Approve, Deny with
+// reason, "always allow", and Answer in terminal) or AskUserQuestion questions (options, "Other", and
+// Answer), plus the shortcuts leading to it (notice, top bar counter, and the P key). The request arrives
+// via the PermissionRequest hook (mod/habblaud-permissoes/hooks/permission-hook.mjs); the dialog continues in
+// the terminal and whichever is answered first wins.
+// Codex request (`provider: 'codex'`): its hook only waits a few seconds and the terminal only shows the approval
+// after you answer here or the timeout expires; there is no "always allow" or "interrupt", and denying requires a
+// reason. Codex never asks questions through the office (no question card).
 import { access, isLoopbackHostname } from '../net/access';
 import { ANSWER_OTHER_MAX, ASK_TOOL, checkAnswers } from '../../../shared/answers';
 import type { AgentInfo, AskQuestion, PermissionAnswer, PermissionDecision, PermissionRequestInfo, PermissionSuggestionInfo } from '../../../shared/types';
@@ -16,70 +16,70 @@ import { ICONS } from './icons';
 import { diffLineKind, moreLabel, previewText, showToolInput, splitToolTitle } from './terminal';
 import { tr } from '../../../shared/i18n';
 
-/** Evento (em ctx.root) que pede para o cartão de um agente aparecer: rolar até ele e receber o foco. */
+/** Event (on ctx.root) requesting an agent's card to appear: scroll into view and focus. */
 export const PERMISSION_FOCUS_EVENT = 'habblaud:permission-focus';
 const PREVIEW_LINES = 12;
 const MESSAGE_MAX = 1_000;
 
 const DESTINATIONS: Record<string, string> = {
-  session: tr('só nesta sessão'),
-  localSettings: tr('neste projeto, só para você'),
-  projectSettings: tr('neste projeto, para todos (versionado)'),
-  userSettings: tr('em todos os projetos'),
+  session: tr('this session only'),
+  localSettings: tr('in this project, just for you'),
+  projectSettings: tr('in this project, for everyone (versioned)'),
+  userSettings: tr('in all projects'),
 };
 
-/** Onde a regra "sempre permitir" fica guardada, em português. */
+/** Where the "always allow" rule is stored, labeled for UI. */
 export function destinationLabel(destination: string): string {
   return DESTINATIONS[destination] ?? destination;
 }
 
 /**
- * "volta ao terminal em 4 min" (quando o hook desiste de esperar). `seconds` conta os segundos no último minuto
- * (o prazo do Codex é de segundos).
+ * "returns to the terminal in 4 min" (when the hook gives up waiting). `seconds` counts seconds in the last minute
+ * (Codex timeout is in seconds).
  */
 export function expiryText(expiresAt: number, now: number, seconds = false): string {
   const left = expiresAt - now;
-  if (left <= 0) return tr('voltando ao terminal…');
-  if (left < 60_000) return seconds ? tr('volta ao terminal em {0} s', [Math.ceil(left / 1_000)]) : tr('volta ao terminal em menos de 1 min');
-  return tr('volta ao terminal em {0}', [formatDuration(left)]);
+  if (left <= 0) return tr('returning to the terminal…');
+  if (left < 60_000) return seconds ? tr('returns to the terminal in {0} s', [Math.ceil(left / 1_000)]) : tr('returns to the terminal in under 1 min');
+  return tr('returns to the terminal in {0}', [formatDuration(left)]);
 }
 
-/** Aviso do cartão de um pedido do Codex. */
-export const CODEX_PERMISSION_NOTE = tr('No Codex, a aprovação só aparece no terminal depois que você responder aqui ou o prazo acabar.');
+/** Warning on the card for a Codex request. */
+export const CODEX_PERMISSION_NOTE = tr('In Codex, the approval only shows up in the terminal after you answer here or the time runs out.');
 
-/** O que o cartão oferece para um pedido (muda com a ferramenta). */
+/** What the card offers for a request (varies by tool). */
 export interface PermissionOptions {
-  /** "Aprovar e não perguntar de novo" (as sugestões do Claude Code). */
+  /** "Approve and don't ask again" (Claude Code suggestions). */
   always: boolean;
-  /** "Interromper o agente" junto com a recusa. */
+  /** "Interrupt the agent" alongside denying. */
   interrupt: boolean;
-  /** Recusar só com motivo. */
+  /** Deny only with a reason. */
   reasonRequired: boolean;
-  /** Prazo contado em segundos no último minuto. */
+  /** Timeout counted in seconds during the last minute. */
   seconds: boolean;
-  /** Aviso curto embaixo da prévia ('' = nenhum). */
+  /** Short note below preview ('' = none). */
   note: string;
 }
 
 export function permissionOptions(p: Pick<PermissionRequestInfo, 'provider' | 'suggestions'>, agent: Pick<AgentInfo, 'kind' | 'background'>): PermissionOptions {
   if (p.provider === 'codex') return { always: false, interrupt: false, reasonRequired: true, seconds: true, note: CODEX_PERMISSION_NOTE };
-  // Subagente em segundo plano: o Claude Code só mostra o diálogo depois que o hook responde.
+  // Background subagent: Claude Code only displays the dialog after the hook responds.
   const blocking = agent.kind === 'sub' && !!agent.background;
   return {
     always: !!p.suggestions?.length,
     interrupt: true,
     reasonRequired: false,
     seconds: false,
-    note: blocking ? tr('Este subagente roda em segundo plano: o terminal só mostra o pedido depois que você responder aqui ou escolher “Responder no terminal”.') : '',
+    note: blocking ? tr('This subagent runs in the background: the terminal only shows the request after you answer here or choose “Answer in terminal”.') : '',
   };
 }
 
-/** Agentes com pedido para responder, do pedido mais antigo para o mais recente. */
+/** Agents with requests to answer, from oldest to newest. */
 export function permissionAgents(agents: readonly AgentInfo[]): AgentInfo[] {
   return agents.filter((a) => a.permission && a.status !== 'offline' && a.status !== 'done').sort((a, b) => a.permission!.createdAt - b.permission!.createdAt);
 }
 
-/** Próximo agente com pedido depois de `currentId` (volta ao primeiro no fim da fila). */
+/** Next agent with a request after `currentId` (loops back to first at queue end). */
 export function nextPermissionAgent(agents: readonly AgentInfo[], currentId?: string): AgentInfo | undefined {
   const list = permissionAgents(agents);
   if (!list.length) return undefined;
@@ -87,21 +87,21 @@ export function nextPermissionAgent(agents: readonly AgentInfo[], currentId?: st
   return list[(i + 1) % list.length];
 }
 
-/** Seleciona o agente e pede ao cartão para aparecer (rolar até ele e receber o foco). */
+/** Selects the agent and asks the card to appear (scroll into view and focus). */
 export function focusPermission(ctx: UiContext, agentId: string): void {
   ctx.select({ type: 'agent', id: agentId }, { focus: true });
   ctx.root.dispatchEvent(new CustomEvent(PERMISSION_FOCUS_EVENT, { detail: agentId }));
 }
 
-/** A página foi aberta pelo próprio computador? (a regra antiga; quem decide agora é o servidor, ver net/access.ts) */
+/** Was the page opened on the local machine? (legacy rule; decided by server now, see net/access.ts) */
 export const isLocalHostname = isLoopbackHostname;
 
-/** Pedido que se responde escolhendo (as perguntas do AskUserQuestion), não aprovando. O Codex nunca pergunta. */
+/** Request answered by choosing (AskUserQuestion questions), not approving. Codex never asks questions. */
 export function isQuestionRequest(p: Pick<PermissionRequestInfo, 'tool' | 'questions' | 'provider'> | undefined): boolean {
   return !!p && p.provider !== 'codex' && p.tool === ASK_TOOL && !!p.questions?.length;
 }
 
-/** O que está marcado numa pergunta do cartão: as opções (posições do original) e o "Outro" (marcado, e o texto). */
+/** Selected state for a question card: options (indices in original) and "Other" (checked and text). */
 export interface AskChoice {
   options: readonly number[];
   otherOn: boolean;
@@ -109,8 +109,8 @@ export interface AskChoice {
 }
 
 /**
- * Resposta de uma pergunta a partir do que está marcado; undefined = ainda sem resposta. Escolha única: a opção
- * OU o "Outro"; várias: as opções e o "Outro" juntos. "Outro" marcado sem texto conta como sem resposta.
+ * Answer for a question based on current selection; undefined = not yet answered. Single choice: option
+ * OR "Other"; multiple choice: options and "Other" combined. "Other" checked without text counts as unanswered.
  */
 export function answerFor(q: AskQuestion, c: AskChoice | undefined): PermissionAnswer | undefined {
   if (!c) return undefined;
@@ -122,8 +122,8 @@ export function answerFor(q: AskQuestion, c: AskChoice | undefined): PermissionA
 }
 
 /**
- * Corpo da resposta (`answers` da decisão) quando todas as perguntas estão respondidas do jeito que o servidor
- * aceita; undefined enquanto falta alguma (o botão Responder fica desligado).
+ * Answer payload (`answers` in decision) when all questions are answered in a way accepted by
+ * the server; undefined while any are missing (the Answer button stays disabled).
  */
 export function buildAnswers(questions: readonly AskQuestion[], choices: ReadonlyMap<number, AskChoice>): PermissionAnswer[] | undefined {
   const answers: PermissionAnswer[] = [];
@@ -135,12 +135,12 @@ export function buildAnswers(questions: readonly AskQuestion[], choices: Readonl
   return checkAnswers(questions, answers);
 }
 
-/** O comando vai inteiro na caixa "$ …" (é o que se aprova); o título mostra só o nome da ferramenta. */
+/** The full command goes into the "$ …" box (what gets approved); title only shows tool name. */
 function commandPreview(p: Pick<PermissionRequestInfo, 'input' | 'inputKind'> | null): boolean {
   return !!p && p.inputKind === 'command' && !!p.input?.trim();
 }
 
-/** Prévia dos argumentos (comando, diff, JSON, texto), com as mesmas classes do terminal. */
+/** Arguments preview (command, diff, JSON, text), using the same classes as terminal. */
 function previewBlock(p: Pick<PermissionRequestInfo, 'title' | 'input' | 'inputKind'>): HTMLElement | null {
   if (!commandPreview(p) && !showToolInput(p)) return null;
   const kind = p.inputKind ?? 'text';
@@ -161,7 +161,7 @@ function previewBlock(p: Pick<PermissionRequestInfo, 'title' | 'input' | 'inputK
     more.addEventListener('click', () => {
       open = !open;
       fill(body, open ? pv.text : pv.head);
-      setText(more, open ? tr('recolher') : moreLabel(pv.hiddenLines));
+      setText(more, open ? tr('collapse') : moreLabel(pv.hiddenLines));
       setAttr(more, 'aria-expanded', String(open));
     });
     box.append(more);
@@ -171,7 +171,7 @@ function previewBlock(p: Pick<PermissionRequestInfo, 'title' | 'input' | 'inputK
 
 type Phase = 'idle' | 'deny' | 'sending' | 'sent';
 
-/** Uma pergunta do AskUserQuestion no cartão: as caixas das opções e o "Outro" (caixa e texto). */
+/** An AskUserQuestion question in the card: option checkboxes/radios and "Other" (checkbox/radio and text). */
 interface AskRefs {
   q: AskQuestion;
   el: HTMLElement;
@@ -180,11 +180,11 @@ interface AskRefs {
   text: HTMLInputElement;
 }
 
-const DONE: Record<PermissionDecision['behavior'], string> = { allow: tr('Aprovado'), deny: tr('Recusado'), answer: tr('Respondido'), terminal: tr('Devolvido ao terminal') };
+const DONE: Record<PermissionDecision['behavior'], string> = { allow: tr('Approved'), deny: tr('Denied'), answer: tr('Answered'), terminal: tr('Sent back to the terminal') };
 
 /**
- * Cartão "Pede permissão" (ou "Pergunta para você", no AskUserQuestion) na gaveta do agente. Some quando o
- * pedido é respondido (por aqui ou no terminal), expira ou o agente sai.
+ * "Asks for permission" (or "Questions for you", in AskUserQuestion) card in the agent drawer. Disappears when the
+ * request is answered (here or in the terminal), expires, or the agent leaves.
  */
 export class PermissionCard {
   readonly el: HTMLElement;
@@ -213,11 +213,11 @@ export class PermissionCard {
   private interrupt: HTMLInputElement;
   private interruptRow: HTMLElement;
   private denySubmit: HTMLButtonElement;
-  /** O que o cartão oferece para o pedido atual (Claude Code ou Codex). */
+  /** What the card offers for current request (Claude Code or Codex). */
   private opts: PermissionOptions = { always: false, interrupt: true, reasonRequired: false, seconds: false, note: '' };
   private status: HTMLElement;
   private remote: HTMLElement;
-  /** Perguntas do AskUserQuestion, montadas uma vez por pedido (a seleção sobrevive aos snapshots). */
+  /** AskUserQuestion questions, built once per request (selection survives snapshots). */
   private askForm: HTMLFormElement;
   private askId = '';
   private askRefs: AskRefs[] = [];
@@ -232,21 +232,21 @@ export class PermissionCard {
     this.preview = h('div', { class: 'ui-perm__preview' });
     this.note = h('p', { class: 'ui-perm__note', hidden: true });
     this.queue = h('p', { class: 'ui-perm__queue', hidden: true });
-    this.remote = h('p', { class: 'ui-perm__note', hidden: true, text: tr('Para responder por aqui, abra o Habblaud por http://localhost (ou 127.0.0.1). Por enquanto, responda no terminal.') });
+    this.remote = h('p', { class: 'ui-perm__note', hidden: true, text: tr('To answer from here, open Habblaud at http://localhost (or 127.0.0.1). For now, answer in the terminal.') });
 
-    this.approveBtn = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--allow', type: 'button', on: { click: () => this.send({ behavior: 'allow' }) } }, tr('✓ Aprovar'));
-    this.answerBtn = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--allow', type: 'button', hidden: true, on: { click: () => this.sendAnswer() } }, tr('✓ Responder'));
-    this.askForm = h('form', { class: 'ui-perm-ask', hidden: true, attrs: { 'aria-label': tr('Perguntas do agente') } });
+    this.approveBtn = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--allow', type: 'button', on: { click: () => this.send({ behavior: 'allow' }) } }, tr('✓ Approve'));
+    this.answerBtn = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--allow', type: 'button', hidden: true, on: { click: () => this.sendAnswer() } }, tr('✓ Answer'));
+    this.askForm = h('form', { class: 'ui-perm-ask', hidden: true, attrs: { 'aria-label': tr("Agent's questions") } });
     this.askForm.addEventListener('submit', (e) => {
       e.preventDefault();
       this.sendAnswer();
     });
     this.askForm.addEventListener('change', () => this.syncAnswer());
-    this.denyBtn = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--deny', type: 'button', attrs: { 'aria-expanded': 'false' }, on: { click: () => this.toggleDeny() } }, tr('✕ Recusar…'));
+    this.denyBtn = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--deny', type: 'button', attrs: { 'aria-expanded': 'false' }, on: { click: () => this.toggleDeny() } }, tr('✕ Deny…'));
     this.terminalBtn = h(
       'button',
-      { class: 'ui-btn ui-perm__btn', type: 'button', title: tr('O Habblaud deixa este pedido de lado: vale o que você responder no terminal'), on: { click: () => this.send({ behavior: 'terminal' }) } },
-      tr('Responder no terminal'),
+      { class: 'ui-btn ui-perm__btn', type: 'button', title: tr('Habblaud sets this request aside: your answer in the terminal is what counts'), on: { click: () => this.send({ behavior: 'terminal' }) } },
+      tr('Answer in terminal'),
     );
 
     const list = h('div', { class: 'ui-perm__rules' });
@@ -257,23 +257,23 @@ export class PermissionCard {
       update: (btn, s) => {
         const rules = s.rules.join(', ');
         setText(btn, `${rules} · ${destinationLabel(s.destination)}`);
-        setTitle(btn, tr('Aprovar agora e não perguntar de novo: {0} ({1})', [rules, destinationLabel(s.destination)]));
+        setTitle(btn, tr("Approve now and don't ask again: {0} ({1})", [rules, destinationLabel(s.destination)]));
       },
     });
-    this.always = h('div', { class: 'ui-perm__always', hidden: true }, h('span', { class: 'ui-perm__always-label', text: tr('Aprovar e não perguntar de novo:') }), list);
+    this.always = h('div', { class: 'ui-perm__always', hidden: true }, h('span', { class: 'ui-perm__always-label', text: tr("Approve and don't ask again:") }), list);
 
-    this.reason = h('textarea', { class: 'ui-perm__reason', attrs: { rows: 2, maxlength: MESSAGE_MAX, placeholder: tr('Motivo (opcional, vai para o agente). Ex.: use pnpm em vez de npm'), 'aria-label': tr('Motivo da recusa (opcional)') } });
+    this.reason = h('textarea', { class: 'ui-perm__reason', attrs: { rows: 2, maxlength: MESSAGE_MAX, placeholder: tr('Reason (optional, goes to the agent). E.g.: use pnpm instead of npm'), 'aria-label': tr('Reason for denying (optional)') } });
     this.interrupt = h('input', { type: 'checkbox', class: 'ui-perm__check' });
-    this.interruptRow = h('label', { class: 'ui-perm__check-row' }, this.interrupt, h('span', { text: tr('Interromper o agente (ele para e espera você)') }));
-    this.denySubmit = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--deny', type: 'submit' }, tr('Recusar'));
+    this.interruptRow = h('label', { class: 'ui-perm__check-row' }, this.interrupt, h('span', { text: tr('Interrupt the agent (it stops and waits for you)') }));
+    this.denySubmit = h('button', { class: 'ui-btn ui-perm__btn ui-perm__btn--deny', type: 'submit' }, tr('Deny'));
     this.denyForm = h(
       'form',
       { class: 'ui-perm__deny', hidden: true },
       this.reason,
       this.interruptRow,
-      h('div', { class: 'ui-perm__actions' }, this.denySubmit, h('button', { class: 'ui-btn ui-perm__btn', type: 'button', on: { click: () => this.toggleDeny(false) } }, tr('Cancelar'))),
+      h('div', { class: 'ui-perm__actions' }, this.denySubmit, h('button', { class: 'ui-btn ui-perm__btn', type: 'button', on: { click: () => this.toggleDeny(false) } }, tr('Cancel'))),
     );
-    // Codex: recusar só com motivo (o botão acende quando há texto).
+    // Codex: deny only with a reason (button enables when text is present).
     this.reason.addEventListener('input', () => this.syncDeny());
     this.denyForm.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -281,7 +281,7 @@ export class PermissionCard {
       if (this.opts.reasonRequired && !message) return this.reason.focus();
       this.send({ behavior: 'deny', ...(message ? { message } : {}), ...(this.opts.interrupt && this.interrupt.checked ? { interrupt: true } : {}) });
     });
-    // Esc dentro do formulário fecha só o formulário (não a gaveta).
+    // Escape inside the form closes only the form (not the drawer).
     this.denyForm.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
@@ -310,7 +310,7 @@ export class PermissionCard {
     });
   }
 
-  /** O cartão está à mostra (há pedido para este agente). */
+  /** The card is visible (there is a request for this agent). */
   get visible(): boolean {
     return !this.el.hidden;
   }
@@ -333,20 +333,20 @@ export class PermissionCard {
     if (this.el.dataset.kind !== kind) {
       this.el.dataset.kind = kind;
       this.icon.innerHTML = ask ? ICONS.help : ICONS.lock;
-      setAttr(this.el, 'aria-label', ask ? tr('Pergunta do agente') : tr('Pedido de permissão'));
+      setAttr(this.el, 'aria-label', ask ? tr("Agent's question") : tr('Permission request'));
     }
-    setText(this.title, ask ? (p.questions!.length > 1 ? tr('Perguntas para você') : tr('Pergunta para você')) : tr('Pede permissão'));
-    const by = p.subagent ? tr(' · subagente {0}', [p.subagent]) : '';
-    setText(this.what, ask ? tr('Aqui ou no terminal: vale a primeira resposta{0}', [by]) :`${p.icon} ${p.text}${by}`);
+    setText(this.title, ask ? (p.questions!.length > 1 ? tr('Questions for you') : tr('Question for you')) : tr('Asks for permission'));
+    const by = p.subagent ? tr(' · subagent {0}', [p.subagent]) : '';
+    setText(this.what, ask ? tr('Here or in the terminal: the first answer wins{0}', [by]) : `${p.icon} ${p.text}${by}`);
     setText(this.timer, expiryText(p.expiresAt, now, opts.seconds));
     setTitle(
       this.timer,
       codex
-        ? tr('Pedido feito às {0}. Sem resposta aqui até {1}, o Codex segue sem a decisão do escritório e pede a aprovação no terminal.', [formatClock(p.createdAt), formatClock(p.expiresAt)])
-        : tr('Pedido feito às {0}. Sem resposta aqui até {1}, o Habblaud devolve o pedido ao terminal.', [formatClock(p.createdAt), formatClock(p.expiresAt)]),
+        ? tr("Requested at {0}. With no answer here by {1}, Codex moves on without the office's decision and asks for approval in the terminal.", [formatClock(p.createdAt), formatClock(p.expiresAt)])
+        : tr('Requested at {0}. With no answer here by {1}, Habblaud hands the request back to the terminal.', [formatClock(p.createdAt), formatClock(p.expiresAt)]),
     );
 
-    // Pergunta: o formulário com as opções no lugar do título da ferramenta e da prévia dos argumentos.
+    // Question: form with options instead of tool title and arguments preview.
     setHidden(this.tool, ask);
     setHidden(this.preview, ask);
     setHidden(this.askForm, !ask);
@@ -362,15 +362,15 @@ export class PermissionCard {
       setTitle(this.tool, p.title);
       if (this.preview.dataset.id !== `${p.id}:${full ? 'full' : 'short'}`) {
         this.preview.dataset.id = `${p.id}:${full ? 'full' : 'short'}`;
-        this.preview.replaceChildren(full ? (previewBlock(full) ?? '') : h('span', { class: 'ui-muted ui-small', text: tr('Carregando os detalhes…') }));
+        this.preview.replaceChildren(full ? (previewBlock(full) ?? '') : h('span', { class: 'ui-muted ui-small', text: tr('Loading details…') }));
       }
     }
 
-    // Aviso: subagente em segundo plano (Claude Code) ou o terminal do Codex, que só pede depois do escritório.
+    // Warning: background subagent (Claude Code) or Codex terminal, which only prompts after office.
     setHidden(this.note, !opts.note);
     setText(this.note, opts.note);
     setHidden(this.queue, !p.queued);
-    setText(this.queue, p.queued ? tr('+{0} {1} deste agente na fila', [p.queued, p.queued === 1 ? tr('pedido') : tr('pedidos')]) : '');
+    setText(this.queue, p.queued ? tr('+{0} {1} from this agent in the queue', [p.queued, p.queued === 1 ? tr('request') : tr('requests')]) : '');
 
     setHidden(this.remote, this.isLocal());
     const busy = this.isBusy();
@@ -379,10 +379,10 @@ export class PermissionCard {
     for (const b of [this.approveBtn, this.denyBtn, this.terminalBtn]) b.disabled = busy;
     for (const el of this.askForm.querySelectorAll('input')) el.disabled = busy;
     if (ask) this.syncAnswer();
-    setTitle(this.denyBtn, ask ? tr('Não responder: o agente segue sem a resposta (com o motivo, se você escrever um)') : codex ? tr('Recusar com um motivo (o Codex pede um)') : '');
+    setTitle(this.denyBtn, ask ? tr("Don't answer: the agent continues without the answer (with the reason, if you write one)") : codex ? tr('Deny with a reason (Codex requires one)') : '');
     setTitle(
       this.terminalBtn,
-      codex ? tr('O Habblaud solta o pedido agora: o Codex mostra a aprovação no terminal') : tr('O Habblaud deixa este pedido de lado: vale o que você responder no terminal'),
+      codex ? tr('Habblaud releases the request now: Codex shows the approval in the terminal') : tr('Habblaud sets this request aside: your answer in the terminal is what counts'),
     );
     this.suggestions.sync(opts.always ? (p.suggestions ?? []) : []);
     for (const b of this.suggestions.container.querySelectorAll('button')) b.disabled = busy;
@@ -393,10 +393,10 @@ export class PermissionCard {
       this.reason,
       'placeholder',
       opts.reasonRequired
-        ? tr('Motivo (obrigatório no Codex, vai para o agente). Ex.: use pnpm em vez de npm')
-        : tr('Motivo (opcional, vai para o agente). Ex.: {0}', [ask ? tr('decida você, com o que for mais seguro') : tr('use pnpm em vez de npm')]),
+        ? tr('Reason (required in Codex, goes to the agent). E.g.: use pnpm instead of npm')
+        : tr('Reason (optional, goes to the agent). E.g.: {0}', [ask ? tr('you decide, going with the safest option') : tr('use pnpm instead of npm')]),
     );
-    setAttr(this.reason, 'aria-label', opts.reasonRequired ? tr('Motivo da recusa (obrigatório)') : tr('Motivo da recusa (opcional)'));
+    setAttr(this.reason, 'aria-label', opts.reasonRequired ? tr('Reason for denying (required)') : tr('Reason for denying (optional)'));
     for (const el of this.denyForm.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement | HTMLInputElement>('button, textarea, input')) el.disabled = busy;
     this.syncDeny();
     setAttr(this.denyBtn, 'aria-expanded', String(this.phase === 'deny'));
@@ -435,15 +435,15 @@ export class PermissionCard {
         this.ctx.invalidate();
       })
       .catch(() => {
-        // Sem detalhe (acesso que não é local ou pedido já respondido): fica o título.
+        // Without details (non-local access or already answered request): keep the title.
       });
   }
 
-  /** Codex: "Recusar" só acende com um motivo escrito. */
+  /** Codex: "Deny" only enables with a written reason. */
   private syncDeny(): void {
     const missing = this.opts.reasonRequired && !this.reason.value.trim();
     this.denySubmit.disabled = this.isBusy() || missing;
-    setTitle(this.denySubmit, missing ? tr('Escreva o motivo: o Codex recusa só com um motivo') : '');
+    setTitle(this.denySubmit, missing ? tr('Write the reason: Codex only denies with a reason') : '');
   }
 
   private toggleDeny(open = this.phase !== 'deny'): void {
@@ -459,13 +459,13 @@ export class PermissionCard {
     if (!id || this.phase === 'sending' || this.phase === 'sent') return;
     this.phase = 'sending';
     this.status.classList.remove('is-error');
-    setText(this.status, tr('Enviando a resposta…'));
+    setText(this.status, tr('Sending the answer…'));
     this.ctx.invalidate();
     let error: string | undefined;
     try {
       error = await this.ctx.store.decidePermission(id, d);
     } catch {
-      error = tr('Não foi possível falar com o Habblaud. Responda no terminal.');
+      error = tr("Couldn't reach Habblaud. Answer in the terminal.");
     }
     if (this.id !== id) return;
     if (error) {
@@ -476,31 +476,31 @@ export class PermissionCard {
       this.phase = 'sent';
       const done = DONE[d.behavior];
       setText(this.status, `${done}.`);
-      this.ctx.announce(`${done}: ${this.ctx.agent(this.agentId)?.name ?? tr('agente')}.`);
+      this.ctx.announce(`${done}: ${this.ctx.agent(this.agentId)?.name ?? tr('agent')}.`);
     }
     this.ctx.invalidate();
   }
 
-  /** Esta página pode responder (porta local, ou remota com permissions liberado; ou o modo mock). */
+  /** This page can respond (local port, or remote with permissions allowed; or mock mode). */
   private isLocal(): boolean {
     return this.ctx.store.mock || access().permissions;
   }
 
-  /** Sem como responder agora: enviando, já respondido ou página aberta de fora do computador. */
+  /** Unable to answer right now: sending, already answered, or page opened remotely. */
   private isBusy(): boolean {
     return this.phase === 'sending' || this.phase === 'sent' || !this.isLocal();
   }
 
-  // ---------------------------------------------------------------- perguntas (AskUserQuestion)
+  // ---------------------------------------------------------------- questions (AskUserQuestion)
 
-  /** Monta as perguntas de um pedido (só quando o pedido muda: a seleção sobrevive aos snapshots). */
+  /** Builds questions for a request (only when request changes: selection survives snapshots). */
   private buildAsk(p: PermissionRequestInfo): void {
     this.askId = p.id;
     this.askRefs = (p.questions ?? []).map((q) => this.askQuestion(p.id, q));
     this.askForm.replaceChildren(...this.askRefs.map((r) => r.el));
   }
 
-  /** Uma pergunta: rádios (escolha única) ou caixas (várias), cada opção com a descrição, e o "Outro" com texto. */
+  /** One question: radios (single choice) or checkboxes (multiple), each option with description, and "Other" with text. */
   private askQuestion(requestId: string, q: AskQuestion): AskRefs {
     const name = `ask-${requestId}-${q.index}`;
     const input = (value: string) => h('input', { class: 'ui-perm-ask__input', type: q.multiSelect ? 'checkbox' : 'radio', attrs: { name, value } });
@@ -511,10 +511,10 @@ export class PermissionCard {
     const text = h('input', {
       class: 'ui-perm-ask__text',
       type: 'text',
-      attrs: { maxlength: ANSWER_OTHER_MAX, placeholder: tr('Escreva a sua resposta'), autocomplete: 'off', 'aria-label': tr('Outra resposta para: {0}', [q.question]) },
+      attrs: { maxlength: ANSWER_OTHER_MAX, placeholder: tr('Write your answer'), autocomplete: 'off', 'aria-label': tr('Other answer for: {0}', [q.question]) },
     });
     text.addEventListener('input', () => {
-      // Escrever no campo marca o "Outro".
+      // Typing in the input checks "Other".
       if (text.value.trim() && !other.checked) other.checked = true;
       this.syncAnswer();
     });
@@ -523,7 +523,7 @@ export class PermissionCard {
         e.preventDefault();
         this.sendAnswer();
       } else if (e.key === 'Escape') {
-        // Esc sai do campo (não fecha a gaveta).
+        // Escape blurs the input (does not close drawer).
         e.preventDefault();
         text.blur();
       }
@@ -532,14 +532,14 @@ export class PermissionCard {
       'fieldset',
       { class: 'ui-perm-ask__q' },
       h('legend', { class: 'ui-perm-ask__legend' }, q.header ? h('span', { class: 'ui-ask__tag', text: q.header }) : null, h('span', { class: 'ui-ask__question', text: q.question })),
-      h('p', { class: 'ui-ask__hint', text: q.multiSelect ? tr('Pode escolher mais de uma') : tr('Escolha uma') }),
+      h('p', { class: 'ui-ask__hint', text: q.multiSelect ? tr('You can pick more than one') : tr('Pick one') }),
       ...options.map(({ input: box, o }) => h('label', { class: 'ui-perm-ask__opt' }, box, optionText(o.label, o.description))),
-      h('div', { class: 'ui-perm-ask__other' }, h('label', { class: 'ui-perm-ask__opt' }, other, optionText(tr('Outro'))), text),
+      h('div', { class: 'ui-perm-ask__other' }, h('label', { class: 'ui-perm-ask__opt' }, other, optionText(tr('Other'))), text),
     );
     return { q, el, options: options.map((x) => x.input), other, text };
   }
 
-  /** O que está marcado em cada pergunta. */
+  /** Current selection in each question. */
   private choices(): Map<number, AskChoice> {
     return new Map(this.askRefs.map((r) => [r.q.index, { options: r.options.filter((i) => i.checked).map((i) => Number(i.value)), otherOn: r.other.checked, otherText: r.text.value }]));
   }
@@ -551,11 +551,11 @@ export class PermissionCard {
     );
   }
 
-  /** Liga o Responder só com todas as perguntas respondidas. */
+  /** Enables Answer only when all questions are answered. */
   private syncAnswer(): void {
     const ready = !!this.answers();
     this.answerBtn.disabled = this.isBusy() || !ready;
-    setTitle(this.answerBtn, ready ? tr('Mandar as respostas ao agente') : tr('Responda todas as perguntas (no “Outro”, escreva a resposta)'));
+    setTitle(this.answerBtn, ready ? tr('Send the answers to the agent') : tr('Answer all the questions (for “Other”, write the answer)'));
   }
 
   private sendAnswer(): void {

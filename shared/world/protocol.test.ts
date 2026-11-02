@@ -1,9 +1,8 @@
-// O exemplo da seção 3.3 do plano (docs/world/privacidade.md) contra o schema.json, com um validador mínimo próprio (o
-// Habblaud não tem dependências de runtime nem o Ajv; o servidor do mundo valida o mesmo arquivo com o Ajv), e as listas
-// do protocolo conferidas contra o resto do código.
+// Section 3.3 example from plan (docs/world/privacidade.md) against schema.json, using custom minimal validator (Habblaud
+// has no runtime dependencies or Ajv; world server validates same file with Ajv), and protocol lists
+// checked against the rest of the code.
 import { describe, expect, it } from 'vitest';
 import * as appearance from '../appearance';
-import { LOCALES as UI_LOCALES } from '../i18n';
 import schemaJson from './schema.json';
 import { compileValidator } from './schema-validator';
 import {
@@ -47,7 +46,7 @@ const validate = compileValidator(schema);
 const valid = (data: unknown) => validate(data).length === 0;
 
 // ---------------------------------------------------------------------------------------------------------------
-// O exemplo da seção 3.3
+// Section 3.3 example
 // ---------------------------------------------------------------------------------------------------------------
 
 const MARINA_PARTS = {
@@ -56,7 +55,7 @@ const MARINA_PARTS = {
   accessory: 'glasses', accessoryColor: '#222222', facialHair: 'none',
 } as const satisfies AppearanceParts;
 
-/** O exemplo exatamente como está na seção 3.3 (com a abreviação `"...": "..."` nas peças de dois agentes). */
+/** Example exactly as written in section 3.3 (with `"...": "..."` abbreviation for parts in two agents). */
 const EXEMPLO_3_3 = JSON.parse(`{
   "v": 1,
   "version": "1.0.0",
@@ -80,7 +79,7 @@ const EXEMPLO_3_3 = JSON.parse(`{
   ]
 }`) as unknown;
 
-/** O mesmo exemplo com a abreviação desfeita (peças de verdade), e nada mais. Também confere o tipo WorldUplink. */
+/** Same example with abbreviation expanded (real parts), and nothing else. Also checks WorldUplink type. */
 const EXEMPLO_COMPLETO: WorldUplink = {
   v: 1,
   version: '1.0.0',
@@ -110,22 +109,22 @@ const EXEMPLO_COMPLETO: WorldUplink = {
 
 const clone = <T>(x: T): T => structuredClone(x);
 
-describe('schema.json do WorldUplink (validador mínimo)', () => {
-  it('aceita o exemplo da seção 3.3 com a abreviação desfeita', () => {
+describe('WorldUplink schema.json (minimal validator)', () => {
+  it('accepts section 3.3 example with abbreviation expanded', () => {
     expect(validate(EXEMPLO_COMPLETO)).toEqual([]);
   });
 
-  it('o exemplo literal só falha pela abreviação "..." das peças', () => {
+  it('literal example only fails due to "..." parts abbreviation', () => {
     const motivos = validate(EXEMPLO_3_3).map((e) => `${e.keyword} ${e.path}`);
     expect(motivos.sort()).toEqual(['additionalProperties /floors/0/agents/1/parts', 'additionalProperties /floors/1/agents/0/parts']);
   });
 
-  it('aceita o pacote mínimo e o opcional de tokens', () => {
+  it('accepts minimal payload and optional tokens', () => {
     expect(valid({ v: 1, version: '0.11.0', theme: 'none', floors: [] })).toBe(true);
     expect(valid({ v: 1, version: '1.2.3-beta.1', theme: 'christmas', floors: [], tokens: { day: 12000, week: 340000 } })).toBe(true);
   });
 
-  it('recusa campo desconhecido em qualquer profundidade', () => {
+  it('rejects unknown fields at any depth', () => {
     const raiz = { ...clone(EXEMPLO_COMPLETO), path: '/Users/fulano/projeto' };
     const andar = clone(EXEMPLO_COMPLETO);
     (andar.floors[0] as unknown as Record<string, unknown>)['name'] = 'Projeto secreto';
@@ -138,13 +137,13 @@ describe('schema.json do WorldUplink (validador mínimo)', () => {
     for (const p of [raiz, andar, agente, pecas, tokens]) expect(valid(p)).toBe(false);
   });
 
-  it('recusa enumerações, formatos e limites fora do protocolo', () => {
+  it('rejects enums, formats, and limits outside protocol', () => {
     const casos: Array<(u: WorldUplink) => void> = [
       (u) => { (u as { v: number }).v = 2; },
       (u) => { (u as { theme: string }).theme = 'auto'; },
       (u) => { u.version = 'mais nova'; },
       (u) => { u.floors[0]!.id = 'f_projeto-x'; },
-      (u) => { u.floors[0]!.agents[0]!.id = 'a_3f9d'; }, // 4 hex: a 6.1 pede 8
+      (u) => { u.floors[0]!.agents[0]!.id = 'a_3f9d'; }, // 4 hex: 6.1 requires 8
       (u) => { (u.floors[0]!.agents[0] as { status: string }).status = 'done'; },
       (u) => { (u.floors[0]!.agents[0] as { tasksDone: number }).tasksDone = 4; },
       (u) => { (u.floors[0]!.agents[0] as { compacted: boolean }).compacted = false; },
@@ -154,17 +153,17 @@ describe('schema.json do WorldUplink (validador mínimo)', () => {
       (u) => { u.floors[0]!.agents[0]!.name = 'Projeto /Users/x'; },
       (u) => { u.tokens = { day: -1, week: 0 }; },
       (u) => { u.tokens = { day: 1.5, week: 0 }; },
-      (u) => { u.floors[0]!.agents[0]!.parentId = 'a_71c0b5a9'; }, // principal com pai
+      (u) => { u.floors[0]!.agents[0]!.parentId = 'a_71c0b5a9'; }, // main agent with parent
       (u) => { u.floors = Array.from({ length: 65 }, (_, i) => ({ id: `f_${i.toString(16).padStart(10, '0')}`, agents: [] })); },
     ];
     for (const [i, mudar] of casos.entries()) {
       const u = clone(EXEMPLO_COMPLETO);
       mudar(u);
-      expect(valid(u), `caso ${i}`).toBe(false);
+      expect(valid(u), `case ${i}`).toBe(false);
     }
   });
 
-  it('subagente sem o pai no pacote vai sem parentId (o pai já saiu); principal nunca leva parentId', () => {
+  it('subagent without parent in payload drops parentId (parent already left); main agent never takes parentId', () => {
     const u = clone(EXEMPLO_COMPLETO);
     delete u.floors[0]!.agents[1]!.parentId;
     expect(validate(u)).toEqual([]);
@@ -172,17 +171,17 @@ describe('schema.json do WorldUplink (validador mínimo)', () => {
     expect(valid(u)).toBe(false);
   });
 
-  it('o validador mínimo não ignora palavra-chave nenhuma', () => {
+  it('minimal validator does not ignore any keywords', () => {
     expect(() => compileValidator({ type: 'string', format: 'email' })('x')).toThrow(/format/);
   });
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// As listas do protocolo contra o schema e o resto do código
+// Protocol lists against schema and the rest of the code
 // ---------------------------------------------------------------------------------------------------------------
 
-describe('listas do protocolo', () => {
-  it('estilos da aparência: iguais aos de shared/appearance.ts e aos do schema, e as mesmas peças', () => {
+describe('protocol lists', () => {
+  it('appearance styles: match shared/appearance.ts and schema, with same parts', () => {
     expect(HAIR_STYLES).toEqual(appearance.HAIR_STYLES);
     expect(TOP_STYLES).toEqual(appearance.TOP_STYLES);
     expect(ACCESSORIES).toEqual(appearance.ACCESSORIES);
@@ -197,7 +196,7 @@ describe('listas do protocolo', () => {
     expect(parts.bottomStyle.enum).toEqual([...BOTTOM_STYLES]);
   });
 
-  it('limites e enumerações do schema batem com os tipos', () => {
+  it('schema limits and enums match types', () => {
     expect(schema.properties.floors.maxItems).toBe(UPLINK_LIMITS.floors);
     expect((schema.$defs.floor.properties as Record<string, { maxItems: number }>).agents.maxItems).toBe(UPLINK_LIMITS.agentsPerFloor);
     const themes: WorldTheme[] = ['none', 'halloween', 'christmas'];
@@ -206,7 +205,7 @@ describe('listas do protocolo', () => {
     expect((schema.$defs.agent.properties as Record<string, { enum: unknown[] }>).status.enum).toEqual(statuses);
   });
 
-  it('ids fixos do contrato: 14 traços, 5 pares que não combinam, 20 frases, 10 cumprimentos, 4 idiomas', () => {
+  it('fixed contract ids: 14 traits, 5 clashing pairs, 20 intros, 10 greetings, 4 locales', () => {
     const unique = (l: readonly string[]) => new Set(l).size === l.length;
     expect(TRAIT_IDS).toHaveLength(14);
     expect(INTRO_IDS).toHaveLength(20);
@@ -215,25 +214,25 @@ describe('listas do protocolo', () => {
     expect(TRAIT_CLASHES.map((p) => p.join('×'))).toEqual(['timidez×piadas', 'timidez×fofoca', 'apostas×economia', 'esporte×sonecas', 'calma×competicao']);
     for (const [a, b] of TRAIT_CLASHES) expect(TRAIT_IDS.includes(a) && TRAIT_IDS.includes(b)).toBe(true);
     expect(LOCALES).toBe(WORLD_LOCALES);
-    expect([...WORLD_LOCALES]).toEqual(UI_LOCALES.map((l) => l.id));
+    expect([...WORLD_LOCALES]).toEqual(['pt-BR', 'en', 'es', 'fr']);
     expect(GOODBYE_REASONS).toEqual(expect.arrayContaining(['waiting', 'unauthorized', 'banned', 'suspended', 'update', 'no_player']));
     expect(PLAYER_NAME_LIMITS).toEqual({ min: 3, max: 20 });
   });
 
-  it('Fases 3 a 5: os ids dos avisos (o `text` do notice) e o `left` do ack, só acrescentados', () => {
+  it('Phases 3 to 5: notice ids (notice `text`) and ack `left`, append-only', () => {
     expect([...NOTICE_IDS]).toEqual([
       'ignored', 'invalid', 'rate_limited', 'view_required', 'not_found', 'street_left', 'chunk_full', 'afk', 'server_restart', 'left',
-      // Fase 4 (a porta de um prédio): só no fim.
+      // Phase 4 (building door): at the end only.
       'too_far', 'closed', 'blocked', 'full',
-      // Fase 5 (social leve): só no fim.
+      // Phase 5 (lightweight social): at the end only.
       'daily_limit', 'already_done', 'reported', 'blocked_ok', 'stamped',
     ]);
     for (const id of NOTICE_IDS) expect(id).toMatch(/^[a-z]+(_[a-z]+)*$/);
-    // Os códigos da Fase 2 continuam na mesma ordem; `left` (Fase 3) e `implausible` (Fase 6) entram no fim.
+    // Phase 2 codes remain in same order; `left` (Phase 3) and `implausible` (Phase 6) are appended at the end.
     expect([...UPLINK_ACK_ERRORS]).toEqual(['schema', 'limits', 'name_pool', 'parts', 'ids', 'rate', 'internal', 'left', 'implausible']);
   });
 
-  it('Fase 5: 8 carimbos, 3 metas da cidade, os 6 motivos de denúncia e "bater na porta" desligado por padrão', () => {
+  it('Phase 5: 8 stamps, 3 city goals, 6 report reasons, and "knock" disabled by default', () => {
     const unique = (l: readonly string[]) => new Set(l).size === l.length;
     expect([...STAMP_IDS]).toEqual(['visited', 'nice_building', 'keep_going', 'coffee', 'wave', 'star', 'heart', 'rocket']);
     expect([...CITY_GOAL_IDS]).toEqual(['agent_hours_10k', 'agent_hours_50k', 'agent_hours_100k']);
@@ -243,16 +242,16 @@ describe('listas do protocolo', () => {
     expect(VISIBILITY_DEFAULTS.knocks).toBe(false);
   });
 
-  it('Fase 6: `deleted` no goodbye, `maintenance` nos erros, `implausible` no ack, o aviso de inatividade e o selo "não verificado", só acrescentados', () => {
+  it('Phase 6: `deleted` in goodbye, `maintenance` in errors, `implausible` in ack, inactivity notice, and "unverified" badge, append-only', () => {
     expect([...GOODBYE_REASONS]).toEqual(['deploy', 'other-device', 'banned', 'suspended', 'waiting', 'update', 'unauthorized', 'no_player', 'deleted']);
     expect(WORLD_ERROR_CODES).toContain('maintenance');
     expect(UPLINK_ACK_ERRORS.at(-1)).toBe('implausible');
-    // Opcionais: um corpo sem eles continua valendo, e o padrão da visibilidade não muda.
+    // Optionals: payload without them remains valid, and default visibility does not change.
     const v: Visibility = { ...VISIBILITY_DEFAULTS };
     expect('notifyInactivity' in v).toBe(false);
     const b: Pick<WorldBuildingPublic, 'unverified'> & Pick<MeBuilding, 'unverified'> = {};
     expect(b.unverified).toBeUndefined();
-    // O pedido de exclusão e o arquivo "Baixar meus dados" (WorldExport) também são do protocolo.
+    // Deletion request and "Download my data" export (WorldExport) are also part of protocol.
     const del: DeleteConfirmRequest = { code: '123456' };
     expect(del.code).toHaveLength(6);
     const exp: Pick<WorldExport, 'format' | 'version'> = { format: 'habblaud-world-export', version: 1 };

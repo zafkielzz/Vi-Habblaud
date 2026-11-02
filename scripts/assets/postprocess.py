@@ -1,20 +1,20 @@
-"""Pós-processamento e composição dos assets do Habblaud (pixel art a partir das imagens da IA).
+"""Post-processing and composition of Habblaud assets (pixel art from AI images).
 
-Uso (a partir da raiz do projeto; requer Pillow e numpy):
-    python3 -E scripts/assets/postprocess.py                  # gera tudo + manifest + folha de contato
-    python3 -E scripts/assets/postprocess.py --only a,b       # reprocessa só alguns assets de specs.json
-    python3 -E scripts/assets/postprocess.py --take gpt54 --only logo-mark --out /tmp/teste
-                                                              # testa uma tomada alternativa em outra pasta
+Usage (from project root; requires Pillow and numpy):
+    python3 -E scripts/assets/postprocess.py                  # generates all + manifest + contact sheet
+    python3 -E scripts/assets/postprocess.py --only a,b       # reprocesses only specific assets from specs.json
+    python3 -E scripts/assets/postprocess.py --take gpt54 --only logo-mark --out /tmp/test
+                                                              # tests an alternate take in another folder
 
-Entradas: scripts/assets/specs.json e scripts/assets/.cache/raw/<id>[@tomada].png
-Saídas:   client/public/assets/** (+ manifest.json) e scripts/assets/.cache/contact-sheet.png.
+Inputs:  scripts/assets/specs.json and scripts/assets/.cache/raw/<id>[@take].png
+Outputs: client/public/assets/** (+ manifest.json) and scripts/assets/.cache/contact-sheet.png.
 
-Tipos de processamento (campo post.kind em specs.json):
-- native: objeto sobre magenta desenhado pela IA numa grade de "pixels grandes": chroma key,
-          desampliação para a grade nativa detectada, recorte e quantização.
-- sprite: objeto sobre magenta reduzido para w x h por moda, alfa binário e contorno de 1px.
-- art / poster / scene: imagem cheia cortada na proporção e reduzida por moda até w x h,
-          quantizada sem dithering (pôster ganha contorno; cena pode ser ampliada com NEAREST).
+Processing kinds (post.kind field in specs.json):
+- native: object on magenta drawn by AI on a "large pixel" grid: chroma key,
+          unscaling to detected native grid, cropping and quantization.
+- sprite: object on magenta downscaled to w x h via mode, binary alpha and 1px outline.
+- art / poster / scene: full image cropped to aspect ratio and mode-downscaled to w x h,
+          quantized without dithering (poster gets outline; scene can be upscaled with NEAREST).
 """
 
 from __future__ import annotations
@@ -38,11 +38,11 @@ SPECS = HERE / "specs.json"
 PUBLIC = ROOT / "client" / "public" / "assets"
 
 OUTLINE = "#1c2541"
-NIGHT = "#171c35"  # fundo do og-image sem ilustração (com ela, vale a cor do canto da ilustração)
+NIGHT = "#171c35"  # og-image background without illustration (with it, corner color of illustration is used)
 
 
 # ---------------------------------------------------------------------------
-# processamento por tipo de asset
+# processing by asset kind
 
 
 def process_native(src: Image.Image, post: dict) -> Image.Image:
@@ -85,7 +85,7 @@ def process_flat(src: Image.Image, post: dict) -> Image.Image:
     full = np.ones(rgb.shape[:2], dtype=bool)
     colors = post.get("colors", 16)
     balance = post.get("balance", 0.0)
-    # paleta intermediária mais rica que a final: a redução por moda escolhe entre estas cores
+    # richer intermediate palette than final: mode downscaling chooses among these colors
     palette = px.build_palette(rgb, None, max(colors + 8, round(colors * 1.75)), balance)
     small, _ = px.downscale_mode(rgb, full, w, h, palette, post.get("darkBias", 0.0))
     small = px.enhance(small, post.get("saturation", 1.0), post.get("contrast", 1.0))
@@ -108,15 +108,15 @@ PROCESSORS = {"native": process_native, "sprite": process_sprite, "art": process
 def process(asset: dict, src: Image.Image) -> Image.Image:
     kind = asset["post"]["kind"]
     if kind not in PROCESSORS:
-        raise ValueError(f"tipo de pós-processamento desconhecido: {kind}")
+        raise ValueError(f"unknown post-processing kind: {kind}")
     return PROCESSORS[kind](src, asset["post"])
 
 
 # ---------------------------------------------------------------------------
-# molduras das pinturas (3px: contorno + 2px de moldura com luz em cima/esquerda)
+# painting frames (3px: outline + 2px frame with top/left highlight)
 
 FRAMES: dict[str, tuple[str, str, str]] = {
-    # estilo: (luz, corpo, sombra)
+    # style: (highlight, body, shadow)
     "wood": ("#e3a868", "#c07d45", "#8a5530"),
     "black": ("#5a6276", "#3a4152", "#262b38"),
     "white": ("#ffffff", "#e9e6df", "#bdb8ae"),
@@ -131,7 +131,7 @@ def framed(img: Image.Image, style: str) -> Image.Image:
     p = out.load()
     for y in range(1, h - 1):
         for x in range(1, w - 1):
-            ring = min(x - 1, y - 1, w - 2 - x, h - 2 - y)  # 0 = anel externo da moldura, 1 = interno
+            ring = min(x - 1, y - 1, w - 2 - x, h - 2 - y)  # 0 = outer frame ring, 1 = inner
             if ring >= 2:
                 continue
             top_left = (y - 1 == ring and x - 1 >= ring) or (x - 1 == ring and y - 1 >= ring)
@@ -144,17 +144,17 @@ def framed(img: Image.Image, style: str) -> Image.Image:
 
 
 # ---------------------------------------------------------------------------
-# marca: mark desenhado, favicons, ícones com céu de entardecer
+# brand: hand-drawn mark, favicons, icons with dusk sky
 
 
 DUSK = ["#1f2445", "#262a55", "#30316a", "#433a7a", "#5d4585", "#7d4f8a", "#a45a88", "#cf6c7d", "#ee8c6c", "#f8b26a"]
 
 
 def dusk_scene(w: int, h: int, horizon: int, seed: int = 3) -> Image.Image:
-    """Céu de entardecer em faixas (sem gradiente), estrelas no alto e calçada abaixo do horizonte."""
+    """Dusk sky in bands (no gradient), stars up top and sidewalk below horizon."""
     img = Image.new("RGBA", (w, h))
     draw = ImageDraw.Draw(img)
-    # faixas mais finas perto do horizonte
+    # thinner bands near horizon
     weights = np.linspace(1.6, 0.6, len(DUSK))
     bounds = np.concatenate([[0], np.cumsum(weights / weights.sum() * horizon)]).round().astype(int)
     for i, color in enumerate(DUSK):
@@ -169,7 +169,7 @@ def dusk_scene(w: int, h: int, horizon: int, seed: int = 3) -> Image.Image:
 
 
 def app_icon(mark: Image.Image, canvas: int, factor: int, ground_gap: int) -> Image.Image:
-    """Ícone quadrado: céu + calçada + prédio apoiado na calçada, ampliado por inteiro com NEAREST."""
+    """Square icon: sky + sidewalk + building on sidewalk, integer upscaled with NEAREST."""
     horizon = canvas - ground_gap - 2
     scene = dusk_scene(canvas, canvas, horizon)
     x = (canvas - mark.width) // 2
@@ -215,15 +215,15 @@ def build_brand(detailed: Image.Image | None, out_root: Path) -> dict:
 
 
 def build_og(detailed: Image.Image | None, illustration: Image.Image | None, out_root: Path) -> str:
-    """Card de compartilhamento: ilustração no alto, painel com o prédio, "Habblaud" e a frase."""
+    """Share card: illustration on top, panel with building, "Habblaud" and tagline."""
     w, h = 600, 315
-    # fundo = azul-marinho do canto da ilustração, para a emenda com ela não aparecer
+    # background = navy from illustration corner, so seam with it is invisible
     night = illustration.convert("RGBA").getpixel((0, 0)) if illustration is not None else px.hex_rgb(NIGHT) + (255,)
     og = Image.new("RGBA", (w, h), night)
     if illustration is not None:
         og.alpha_composite(illustration.convert("RGBA"), (w - illustration.width, 0))
     panel_top = 218
-    # estrelas no céu noturno que sobra à esquerda da ilustração (só sobre pixels da cor de fundo)
+    # stars in night sky remaining to left of illustration (only over background-colored pixels)
     strip = w - illustration.width if illustration is not None else w
     rng = np.random.default_rng(11)
     for _ in range(70):
@@ -244,7 +244,7 @@ def build_og(detailed: Image.Image | None, illustration: Image.Image | None, out
     for i, line in enumerate(lines):
         img = art.text_image(line, "#c9d3e3", 2)
         if tx + img.width > w - 12:
-            raise ValueError(f"linha do og-image larga demais: {line!r}")
+            raise ValueError(f"og-image line too wide: {line!r}")
         og.alpha_composite(img, (tx, ty + 38 + i * 20))
     px.upscale(og, 2).convert("RGB").save(out_root / "og-image.png", optimize=True)
     return "og-image.png"
@@ -309,9 +309,9 @@ def raw_path(asset_id: str, take: str) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="ids de specs.json separados por vírgula")
-    parser.add_argument("--take", default="", help="usa raw/<id>@<tomada>.png em vez da tomada escolhida")
-    parser.add_argument("--out", default=str(PUBLIC), help="pasta de saída (padrão: client/public/assets)")
+    parser.add_argument("--only", default="", help="comma-separated specs.json ids")
+    parser.add_argument("--take", default="", help="use raw/<id>@<take>.png instead of chosen take")
+    parser.add_argument("--out", default=str(PUBLIC), help="output directory (default: client/public/assets)")
     args = parser.parse_args()
 
     specs = json.loads(SPECS.read_text())
@@ -319,13 +319,13 @@ def main() -> int:
     out_root = Path(args.out)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # 1) assets gerados por IA
+    # 1) AI-generated assets
     for asset in specs["assets"]:
         if only and asset["id"] not in only:
             continue
         raw = raw_path(asset["id"], args.take)
         if not raw.exists():
-            print(f"[{asset['id']}] sem imagem bruta ({raw.relative_to(ROOT)}); pulei")
+            print(f"[{asset['id']}] missing raw image ({raw.relative_to(ROOT)}); skipped")
             continue
         img = process(asset, Image.open(raw))
         dest = out_root / asset["out"]
@@ -341,7 +341,7 @@ def main() -> int:
     if only:
         return 0
 
-    # 2) marca, og-image, manifest e folha de contato (dependem dos arquivos acima)
+    # 2) brand, og-image, manifest and contact sheet (depend on files above)
     by_id = {a["id"]: a for a in specs["assets"]}
     detailed_path = out_root / by_id["logo-mark"]["out"]
     detailed = Image.open(detailed_path).convert("RGBA") if detailed_path.exists() else None
@@ -363,7 +363,7 @@ def main() -> int:
         if asset.get("kind") not in ("painting", "poster") or not (out_root / asset["out"]).exists():
             continue
         w, h = asset["post"]["w"], asset["post"]["h"]
-        # largura do vão na parede (tiles): pôster 1, pintura 2, pintura larga 4 (com a moldura de 3px)
+        # wall slot width (tiles): poster 1, painting 2, wide painting 4 (with 3px frame)
         tiles = 1 if asset["kind"] == "poster" else -(-(w + 6) // 16)
         entry = {"id": asset["id"], "kind": asset["kind"], "file": asset["out"], "w": w, "h": h,
                  "tiles": tiles, "title": asset["title"]}
@@ -376,12 +376,12 @@ def main() -> int:
 
     manifest = {"version": 1, "brand": brand, "illustrations": illustrations, "wallArt": wall_art, "og": og}
     (out_root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-    print(f"manifest: {len(wall_art)} artes de parede, marca e ilustração -> {out_root / 'manifest.json'}")
+    print(f"manifest: {len(wall_art)} wall art items, brand and illustration -> {out_root / 'manifest.json'}")
 
     if illustrations and wall_art:
         CACHE.mkdir(exist_ok=True)
         contact_sheet(out_root, manifest).save(CACHE / "contact-sheet.png")
-        print(f"folha de contato -> {CACHE / 'contact-sheet.png'}")
+        print(f"contact sheet -> {CACHE / 'contact-sheet.png'}")
     return 0
 
 

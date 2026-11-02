@@ -1,7 +1,6 @@
-/* ------------------------------------------------------------------ Habblaud World: social leve (Fase 5)
-   O "❤️ 3 hoje" do chip da barra, o "Enquanto você estava fora" (no cartão "Seu prédio" e no canto do escritório, ao
-   conectar), o código do prédio e a lista de Bloqueados. A interface só tem o tema escuro: as cores saem dos tokens
-   do .ui-root (ui/styles.css). */
+/* ------------------------------------------------------------------ Habblaud World: light social (Phase 5)
+   "❤️ 3 today" on top bar chip, "While you were away" (in "Your building" card and office corner on connect),
+   building code, and Blocked list. The UI only uses dark theme: colors come from .ui-root tokens (ui/styles.css). */
 
 .ui-world-chip__likes {
   margin-left: 2px;
@@ -27,7 +26,7 @@
   }
 }
 
-/* ---- "Enquanto você estava fora" */
+/* ---- "While you were away" */
 
 .ui-away__wrap {
   display: flex;
@@ -74,7 +73,7 @@
   animation: none;
 }
 
-/* na cidade, o resumo espera a volta ao escritório (não cobre a cena) */
+/* in city, summary waits for return to office (doesn't obscure scene) */
 .ui-root.is-city .ui-away--float {
   display: none;
 }
@@ -218,7 +217,7 @@
   list-style: none;
 }
 
-/* um carimbo de borracha: tinta, borda tracejada, meio torto, e cai na portaria um depois do outro */
+/* rubber stamp: ink, dashed border, slightly rotated, dropping onto reception one after another */
 .ui-away__stamp {
   position: relative;
   display: inline-flex;
@@ -276,7 +275,7 @@
   margin-right: auto;
 }
 
-/* ---- código do prédio */
+/* ---- building code */
 
 .ui-away__coderow {
   display: flex;
@@ -309,7 +308,7 @@
   margin: 0;
 }
 
-/* ---- Bloqueados */
+/* ---- Blocked */
 
 .ui-world__blocked {
   display: flex;

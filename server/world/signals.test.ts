@@ -20,18 +20,18 @@ const tasks = (done: number, pending = 1): TaskItem[] => [
 const act = (id: string, d: ReturnType<typeof SPECIAL.compact>): Activity => ({ id, at: T0, ...d });
 
 describe('AgentSignals', () => {
-  it('tarefas do dia: só o que sobe, a lista trocada não desconta, a virada do dia zera', () => {
+  it('tasks today: only increases count, replaced list does not decrease, day rollover resets', () => {
     const s = new AgentSignals(dayKey);
     expect(s.observe([agent('m1', tasks(2))], T0).tasksToday.get('m1')).toBe(2);
     expect(s.observe([agent('m1', tasks(4))], T0 + 1000).tasksToday.get('m1')).toBe(4);
-    // TodoWrite novo: lista do zero, depois 1 concluída.
+    // New TodoWrite: fresh list, then 1 completed.
     expect(s.observe([agent('m1', tasks(0, 3))], T0 + 2000).tasksToday.get('m1')).toBe(4);
     expect(s.observe([agent('m1', tasks(1, 2))], T0 + 3000).tasksToday.get('m1')).toBe(5);
     expect(s.observe([agent('m1', tasks(1, 2))], T0 + DAY).tasksToday.get('m1')).toBe(0);
     expect(s.observe([agent('m1', tasks(3, 0))], T0 + DAY + 1000).tasksToday.get('m1')).toBe(2);
   });
 
-  it('compactação nova vira pendente até a remessa sair; a do /clear e as antigas não contam', () => {
+  it('new compaction becomes pending until dispatch is sent; /clear and old ones do not count', () => {
     const s = new AgentSignals(dayKey);
     const old = act('c-velha', SPECIAL.compact());
     expect(s.observe([agent('m1', [], [old])], T0).compacted.size).toBe(0);
@@ -40,13 +40,13 @@ describe('AgentSignals', () => {
     expect(s.observe([agent('m1', [], [old, clear])], T0 + 1).compacted.size).toBe(0);
     const fresh = act('c-nova', SPECIAL.compact());
     expect([...s.observe([agent('m1', [], [old, clear, fresh])], T0 + 2).compacted]).toEqual(['m1']);
-    // Sem remessa, continua pendente.
+    // Without dispatch, remains pending.
     expect([...s.observe([agent('m1', [], [old, clear, fresh])], T0 + 3).compacted]).toEqual(['m1']);
     s.sent();
     expect(s.observe([agent('m1', [], [old, clear, fresh])], T0 + 4).compacted.size).toBe(0);
   });
 
-  it('quem some é esquecido', () => {
+  it('agents that disappear are forgotten', () => {
     const s = new AgentSignals(dayKey);
     s.observe([agent('m1', tasks(3)), agent('m2')], T0);
     expect([...s.observe([agent('m2')], T0 + 1).tasksToday.keys()]).toEqual(['m2']);

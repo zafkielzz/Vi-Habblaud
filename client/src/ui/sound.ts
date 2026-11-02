@@ -1,5 +1,5 @@
-// Sons da interface (opt-in): liga a mesa de som às preferências, toca os sons do ambiente que o
-// mundo sugere (teclado, elevador, rodas) e libera o áudio no primeiro gesto do usuário.
+// UI sounds (opt-in): connects soundboard to preferences, plays ambient sounds suggested by
+// the world (keyboard, elevator, groups), and unlocks audio on first user gesture.
 import { SoundBoard } from '../audio/board';
 import type { SoundKind } from '../audio/scheduler';
 import type { UiComponent, UiContext } from './context';
@@ -11,7 +11,7 @@ export class SoundControl implements UiComponent {
   constructor(private ctx: UiContext) {
     this.sync();
     ctx.world.onSound?.((cue) => this.board.play(cue.kind, cue));
-    // O navegador só libera o áudio depois de um gesto do usuário.
+    // The browser only unlocks audio after a user gesture.
     const unlock = () => {
       if (this.ctx.prefs.sound) void this.board.unlock();
     };
@@ -23,19 +23,19 @@ export class SoundControl implements UiComponent {
     this.sync();
   }
 
-  /** Aplica as preferências atuais (interruptor geral, volume, categorias). */
+  /** Applies current preferences (master switch, volume, categories). */
   sync(): void {
     this.board.configure(this.ctx.prefs.sound, this.ctx.prefs.sounds);
   }
 
-  /** Amostra ao mexer nas configurações (chamada a partir do clique: libera o áudio). */
+  /** Preview when adjusting settings (called on click: unlocks audio). */
   preview(kind: SoundKind = 'pop'): void {
     this.sync();
     const now = performance.now();
     const ready = this.board.unlock();
     if (now - this.previewAt < 250) return;
     this.previewAt = now;
-    // o primeiro "resume" do AudioContext é assíncrono
+    // first "resume" of AudioContext is asynchronous
     void ready.then(() => this.board.play(kind));
   }
 }

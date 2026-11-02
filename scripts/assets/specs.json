@@ -49,7 +49,7 @@
       "id": "painting-mountains",
       "group": "art",
       "kind": "painting",
-      "title": "Montanhas ao amanhecer",
+      "title": "Mountains at Dawn",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -68,7 +68,7 @@
       "id": "painting-beach",
       "group": "art",
       "kind": "painting",
-      "title": "Praia tropical",
+      "title": "Tropical Beach",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -87,7 +87,7 @@
       "id": "painting-city-night",
       "group": "art",
       "kind": "painting",
-      "title": "Cidade à noite",
+      "title": "City at Night",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -108,7 +108,7 @@
       "id": "painting-abstract",
       "group": "art",
       "kind": "painting",
-      "title": "Formas e cores",
+      "title": "Shapes and Colors",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -127,7 +127,7 @@
       "id": "painting-cat",
       "group": "art",
       "kind": "painting",
-      "title": "Retrato de gato",
+      "title": "Cat Portrait",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -146,7 +146,7 @@
       "id": "painting-wave",
       "group": "art",
       "kind": "painting",
-      "title": "A grande onda",
+      "title": "The Great Wave",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -165,7 +165,7 @@
       "id": "painting-sunflowers",
       "group": "art",
       "kind": "painting",
-      "title": "Girassóis",
+      "title": "Sunflowers",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -184,7 +184,7 @@
       "id": "painting-rio",
       "group": "art",
       "kind": "painting",
-      "title": "Pão de Açúcar",
+      "title": "Sugarloaf Mountain",
       "aspect": "16:9",
       "styles": [
         "wallart"
@@ -203,7 +203,7 @@
       "id": "painting-wide-forest-lake",
       "group": "art",
       "kind": "painting",
-      "title": "Lago na floresta",
+      "title": "Forest Lake",
       "aspect": "21:9",
       "styles": [
         "wallart"
@@ -222,7 +222,7 @@
       "id": "painting-wide-color-fields",
       "group": "art",
       "kind": "painting",
-      "title": "Campos de cor",
+      "title": "Color Fields",
       "aspect": "21:9",
       "styles": [
         "wallart"
@@ -241,7 +241,7 @@
       "id": "painting-wide-aurora",
       "group": "art",
       "kind": "painting",
-      "title": "Aurora boreal",
+      "title": "Northern Lights",
       "aspect": "21:9",
       "styles": [
         "wallart"
@@ -261,7 +261,7 @@
       "group": "art",
       "kind": "poster",
       "variant": "coffee",
-      "title": "Café",
+      "title": "Coffee",
       "aspect": "3:4",
       "styles": [
         "poster"
@@ -281,7 +281,7 @@
       "group": "art",
       "kind": "poster",
       "variant": "rocket",
-      "title": "Foguete",
+      "title": "Rocket",
       "aspect": "3:4",
       "styles": [
         "poster"
@@ -301,7 +301,7 @@
       "group": "art",
       "kind": "poster",
       "variant": "code",
-      "title": "Código",
+      "title": "Code",
       "aspect": "3:4",
       "styles": [
         "poster"
@@ -321,7 +321,7 @@
       "group": "art",
       "kind": "poster",
       "variant": "cat",
-      "title": "Gato",
+      "title": "Cat",
       "aspect": "3:4",
       "styles": [
         "poster"
@@ -341,7 +341,7 @@
       "group": "art",
       "kind": "poster",
       "variant": "bug",
-      "title": "Sem bugs",
+      "title": "No Bugs",
       "aspect": "3:4",
       "styles": [
         "poster"

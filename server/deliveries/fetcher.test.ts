@@ -4,14 +4,14 @@ import { FileFetcher, HOST_PRESENCE_MS } from './fetcher';
 const ok = (p: string) => ({ path: p, size: 3 });
 
 describe('FileFetcher', () => {
-  it('Node: lê direto do disco, com a checagem', async () => {
+  it('Node: reads directly from disk, with check', async () => {
     const f = new FileFetcher({ direct: true, check: ok, read: () => Buffer.from('abc') });
     expect(await f.get('/a/x.png')).toEqual({ data: Buffer.from('abc') });
-    const denied = new FileFetcher({ direct: true, check: () => ({ error: 'arquivo protegido' }) });
-    expect(await denied.get('/a/.ssh/x.png')).toEqual({ error: 'arquivo protegido', status: 403 });
+    const denied = new FileFetcher({ direct: true, check: () => ({ error: 'protected file' }) });
+    expect(await denied.get('/a/.ssh/x.png')).toEqual({ error: 'protected file', status: 403 });
   });
 
-  it('Docker: pasta montada lê aqui; o resto vai pelo auxiliar (poll → ack) e fica no cache', async () => {
+  it('Docker: mounted folder reads locally; remainder goes through helper (poll → ack) and caches', async () => {
     let now = 1_000;
     const reads: string[] = [];
     const f = new FileFetcher({
@@ -33,16 +33,16 @@ describe('FileFetcher', () => {
     expect(await f.get('/tmp/x.png')).toEqual({ data: Buffer.from('png') });
   });
 
-  it('auxiliar recusa: o erro dele chega ao navegador', async () => {
+  it('helper rejects: helper error reaches browser', async () => {
     const f = new FileFetcher({ check: ok });
     f.poll();
     const pending = f.get('/tmp/y.png');
     const [req] = f.poll();
-    f.ack({ results: [{ id: req.id, ok: false, error: 'arquivo protegido' }] });
-    expect(await pending).toEqual({ error: 'arquivo protegido', status: 404 });
+    f.ack({ results: [{ id: req.id, ok: false, error: 'protected file' }] });
+    expect(await pending).toEqual({ error: 'protected file', status: 404 });
   });
 
-  it('rodada com espera (?wait=1): o auxiliar fica parado até a página pedir um arquivo, e conta como presente', async () => {
+  it('long-poll round (?wait=1): helper waits until page requests a file, and counts as present', async () => {
     const f = new FileFetcher({ mapHostPath: () => undefined });
     expect(f.hostAvailable()).toBe(false);
     const round = f.pollWait(60_000);

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfficeSnapshot } from '../../../shared/types';
 import { mockOptionsFrom, OfficeStore, pageBuild, reconnectDelay, type EventSourceLike } from './store';
 
-/** EventSource falso: o teste dispara open/error e muda o readyState. */
+/** Mock EventSource: test triggers open/error and updates readyState. */
 class FakeSource implements EventSourceLike {
   readyState = 0;
   closed = false;
@@ -27,7 +27,7 @@ class FakeSource implements EventSourceLike {
     this.fire('open');
   }
 
-  /** Erro definitivo (ex.: HTTP 502): o navegador desiste e fecha o stream. */
+  /** Permanent error (e.g. HTTP 502): browser gives up and closes the stream. */
   fail(): void {
     this.readyState = 2;
     this.fire('error');
@@ -35,34 +35,34 @@ class FakeSource implements EventSourceLike {
 }
 
 describe('mockOptionsFrom', () => {
-  it('usa os padrões sem parâmetros', () => {
+  it('uses defaults with no query parameters', () => {
     expect(mockOptionsFrom('')).toEqual({ speed: 1, sessions: 4 });
   });
 
-  it('aceita sessions=0 (escritório vazio)', () => {
+  it('accepts sessions=0 (empty office)', () => {
     expect(mockOptionsFrom('?mock=1&sessions=0').sessions).toBe(0);
   });
 
-  it('ignora valores inválidos e limita os exagerados', () => {
+  it('ignores invalid values and clamps excessive ones', () => {
     expect(mockOptionsFrom('?sessions=abc&speed=-2')).toEqual({ speed: 1, sessions: 4 });
     expect(mockOptionsFrom('?sessions=&speed=')).toEqual({ speed: 1, sessions: 4 });
     expect(mockOptionsFrom('?sessions=6.7&speed=2')).toEqual({ speed: 2, sessions: 6 });
     expect(mockOptionsFrom('?sessions=999&speed=999')).toEqual({ speed: 50, sessions: 40 });
   });
 
-  it('para capturas de tela: semente fixa e o Codex sem cota', () => {
+  it('for screenshots: fixed seed and Codex without quota', () => {
     expect(mockOptionsFrom('?mock=1&seed=7&noquota=1')).toEqual({ speed: 1, sessions: 4, seed: 7, codexNoQuota: true });
     expect(mockOptionsFrom('?seed=-1&noquota=0')).toEqual({ speed: 1, sessions: 4 });
   });
 });
 
 describe('reconnectDelay', () => {
-  it('dobra a cada tentativa até 30 s', () => {
+  it('doubles on each attempt up to 30 s', () => {
     expect([0, 1, 2, 3, 4, 5, 9].map(reconnectDelay)).toEqual([2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
   });
 });
 
-describe('OfficeStore: reconexão', () => {
+describe('OfficeStore: reconnection', () => {
   let sources: FakeSource[];
   let store: OfficeStore;
   const last = () => sources[sources.length - 1];
@@ -84,7 +84,7 @@ describe('OfficeStore: reconexão', () => {
     vi.useRealTimers();
   });
 
-  it('connect() repetido mantém um único stream, fechado por disconnect()', () => {
+  it('repeated connect() maintains a single stream, closed by disconnect()', () => {
     store.connect();
     store.connect();
     last().open();
@@ -93,7 +93,7 @@ describe('OfficeStore: reconexão', () => {
     expect(sources.map((s) => s.closed)).toEqual([true]);
   });
 
-  it('religa sozinho com espera crescente quando o navegador desiste do stream', () => {
+  it('reconnects automatically with exponential backoff when browser drops stream', () => {
     const states: string[] = [];
     store.on('connection', (s) => states.push(s));
     store.connect();
@@ -107,14 +107,14 @@ describe('OfficeStore: reconexão', () => {
     expect(sources).toHaveLength(2);
     expect(sources[0].closed).toBe(true);
 
-    // Segunda falha seguida: espera 4 s.
+    // Second consecutive failure: waits 4 s.
     last().fail();
     vi.advanceTimersByTime(3_999);
     expect(sources).toHaveLength(2);
     vi.advanceTimersByTime(1);
     expect(sources).toHaveLength(3);
 
-    // Conectou: zera a espera.
+    // Connected: resets wait.
     last().open();
     expect(store.connection).toBe('open');
     last().fail();
@@ -123,7 +123,7 @@ describe('OfficeStore: reconexão', () => {
     expect(states).toEqual(['closed', 'connecting', 'closed', 'connecting', 'open', 'closed', 'connecting']);
   });
 
-  it('erro transitório (o navegador ainda tenta) não agenda reconexão própria', () => {
+  it('transient error (browser retries) does not schedule own reconnection', () => {
     store.connect();
     last().open();
     last().readyState = 0;
@@ -133,7 +133,7 @@ describe('OfficeStore: reconexão', () => {
     expect(sources).toHaveLength(1);
   });
 
-  it('"Tentar agora" religa na hora e cancela a tentativa agendada', () => {
+  it('"Retry now" reconnects immediately and cancels scheduled attempt', () => {
     store.connect();
     last().fail();
     expect(store.nextRetryAt).not.toBeNull();
@@ -145,7 +145,7 @@ describe('OfficeStore: reconexão', () => {
     expect(sources).toHaveLength(2);
   });
 
-  it('disconnect() remove o listener de rede e connect() o restaura sem acumular', () => {
+  it('disconnect() removes network listener and connect() restores it without accumulating', () => {
     const online = new Set<EventListener>();
     vi.stubGlobal('addEventListener', (type: string, cb: EventListener) => {
       if (type === 'online') online.add(cb);
@@ -179,7 +179,7 @@ describe('OfficeStore: reconexão', () => {
     }
   });
 
-  it('disconnect() não reconecta e eventos do stream antigo são ignorados', () => {
+  it('disconnect() does not reconnect and events from old stream are ignored', () => {
     store.connect();
     const old = last();
     store.disconnect();
@@ -189,7 +189,7 @@ describe('OfficeStore: reconexão', () => {
     expect(store.connection).toBe('connecting');
   });
 
-  it('aplica snapshot, feed e avisos; JSON inválido é ignorado', () => {
+  it('applies snapshot, feed, and notices; invalid JSON is ignored', () => {
     const notices: unknown[] = [];
     store.on('notice', (n) => notices.push(n));
     store.connect();
@@ -199,10 +199,10 @@ describe('OfficeStore: reconexão', () => {
     expect(store.snapshot?.rev).toBe(1);
     last().fire('feed', [{ id: 'f1', agentId: 'a', roomId: 'r', agentName: 'Ana', roomName: 'x', activity: { id: 'x', at: 0, kind: 'tool', icon: '·', text: 't' } }]);
     expect(store.feed).toHaveLength(1);
-    last().fire('notice', { id: 'n', level: 'info', text: 'oi', at: 0 });
+    last().fire('notice', { id: 'n', level: 'info', text: 'hi', at: 0 });
     expect(notices).toHaveLength(1);
     expect(() => last().fire('snapshot', undefined)).not.toThrow();
-    const bad = { type: 'snapshot', data: '{quebrado' } as unknown as Event;
+    const bad = { type: 'snapshot', data: '{broken' } as unknown as Event;
     expect(() => (last() as unknown as { handlers: Map<string, ((e: Event) => void)[]> }).handlers.get('snapshot')![0](bad)).not.toThrow();
     expect(store.snapshot?.rev).toBe(1);
   });
@@ -217,46 +217,46 @@ const snap = (rev: number, build?: string): OfficeSnapshot => ({
   meta: { demo: false, sources: [], startedAt: 1, version: '0.1.0', build },
 });
 
-describe('detecção de versão nova', () => {
-  it('lê o build da URL do bundle e ignora o código-fonte do modo dev', () => {
+describe('new version detection', () => {
+  it('reads build from bundle URL and ignores dev mode source files', () => {
     expect(pageBuild('http://localhost:4747/bundle/main-BFqheOCa.js')).toBe('main-BFqheOCa');
     expect(pageBuild('http://192.168.0.10:4747/bundle/main-a_b-C1.js')).toBe('main-a_b-C1');
     expect(pageBuild('http://localhost:5173/src/net/store.ts')).toBeUndefined();
-    expect(pageBuild('não é url')).toBeUndefined();
+    expect(pageBuild('not a url')).toBeUndefined();
   });
 
-  it('avisa uma vez quando o servidor serve outro build', () => {
+  it('notifies once when the server serves a different build', () => {
     const store = new OfficeStore();
-    store.pageBuildId = 'main-velho';
+    store.pageBuildId = 'main-old';
     const seen: string[] = [];
     store.on('update', (u) => seen.push(`${u.current}->${u.build}`));
     const apply = (s: OfficeSnapshot) => (store as unknown as { applySnapshot(s: OfficeSnapshot): void }).applySnapshot(s);
-    apply(snap(1, 'main-velho'));
+    apply(snap(1, 'main-old'));
     expect(seen).toEqual([]);
-    apply(snap(2, 'main-novo'));
-    apply(snap(3, 'main-novo'));
-    expect(seen).toEqual(['main-velho->main-novo']);
+    apply(snap(2, 'main-new'));
+    apply(snap(3, 'main-new'));
+    expect(seen).toEqual(['main-old->main-new']);
   });
 
-  it('não avisa sem build no servidor, no modo dev nem no mock', () => {
+  it('does not notify without server build, in dev mode, or in mock', () => {
     const dev = new OfficeStore();
     dev.pageBuildId = undefined;
     const mock = new OfficeStore({ mock: true });
-    mock.pageBuildId = 'main-velho';
-    const semBuild = new OfficeStore();
-    semBuild.pageBuildId = 'main-velho';
+    mock.pageBuildId = 'main-old';
+    const noBuild = new OfficeStore();
+    noBuild.pageBuildId = 'main-old';
     let count = 0;
-    for (const s of [dev, mock, semBuild]) s.on('update', () => count++);
+    for (const s of [dev, mock, noBuild]) s.on('update', () => count++);
     const apply = (s: OfficeStore, x: OfficeSnapshot) => (s as unknown as { applySnapshot(s: OfficeSnapshot): void }).applySnapshot(x);
-    apply(dev, snap(1, 'main-novo'));
-    apply(mock, snap(1, 'main-novo'));
-    apply(semBuild, snap(1));
+    apply(dev, snap(1, 'main-new'));
+    apply(mock, snap(1, 'main-new'));
+    apply(noBuild, snap(1));
     expect(count).toBe(0);
   });
 });
 
-describe('fonte alternativa (timelapse)', () => {
-  it('guarda os snapshots ao vivo durante o replay e volta a eles no fim', () => {
+describe('alternative source (timelapse)', () => {
+  it('preserves live snapshots during replay and reverts to them at the end', () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     try {
@@ -272,7 +272,7 @@ describe('fonte alternativa (timelapse)', () => {
       expect(store.replaying).toBe(true);
       expect(store.snapshot).toBe(replayed);
       expect(store.agent('tl')).toBeDefined();
-      // Ao vivo chegando por baixo: guardado, sem emitir, e o mais antigo continua descartado.
+      // Live snapshots arriving underneath: preserved without emitting, and older ones remain discarded.
       apply({ ...snap(6), serverTime: 9_500 });
       apply(snap(4));
       expect(store.snapshot).toBe(replayed);
@@ -283,7 +283,7 @@ describe('fonte alternativa (timelapse)', () => {
       store.stopReplay();
       expect(store.replaying).toBe(false);
       expect(store.snapshot?.rev).toBe(6);
-      // O relógio da interface sai do serverTime: avança o tempo que o snapshot ficou guardado.
+      // UI clock derives from serverTime: advances by the time the snapshot was buffered.
       expect(store.snapshot?.serverTime).toBe(9_500 + 2_000);
       expect(store.agent('tl')).toBeUndefined();
       expect(seen).toEqual([5, 1, 6]);
@@ -295,14 +295,14 @@ describe('fonte alternativa (timelapse)', () => {
   });
 });
 
-describe('personagem do projeto (store)', () => {
+describe('project character (store)', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('saveCharacter: PUT JSON na rota do agente; devolve undefined ou a mensagem de erro do servidor', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'Ana já está no escritório em api' }), { status: 409 }));
+  it('saveCharacter: PUT JSON on agent route; returns undefined or server error message', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'Ana is already in the office in api' }), { status: 409 }));
     vi.stubGlobal('fetch', fetchMock);
     const store = new OfficeStore();
-    expect(await store.saveCharacter('.claude:1', { name: 'Ana', seed: 1, parts: {} })).toBe('Ana já está no escritório em api');
+    expect(await store.saveCharacter('.claude:1', { name: 'Ana', seed: 1, parts: {} })).toBe('Ana is already in the office in api');
     expect(fetchMock).toHaveBeenCalledWith('/api/agents/.claude%3A1/character', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -312,15 +312,15 @@ describe('personagem do projeto (store)', () => {
     expect(await store.saveCharacter('.claude:1', { name: 'Ana', seed: 1, parts: {} })).toBeUndefined();
   });
 
-  it('resetCharacter: DELETE com corpo JSON; sem conexão vira mensagem; no mock não chama a rede', async () => {
+  it('resetCharacter: DELETE with JSON body; no connection returns message; mock does not touch network', async () => {
     const fetchMock = vi.fn(async () => new Response('{"ok":true}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     expect(await new OfficeStore().resetCharacter('a')).toBeUndefined();
     expect(fetchMock).toHaveBeenLastCalledWith('/api/agents/a/character', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     fetchMock.mockRejectedValueOnce(new TypeError('failed to fetch'));
-    expect(await new OfficeStore().resetCharacter('a')).toBe('Sem conexão com o Habblaud.');
+    expect(await new OfficeStore().resetCharacter('a')).toBe('No connection to Habblaud.');
     const calls = fetchMock.mock.calls.length;
-    expect(await new OfficeStore({ mock: true }).resetCharacter('a')).toMatch(/ao vivo/);
+    expect(await new OfficeStore({ mock: true }).resetCharacter('a')).toMatch(/live office/);
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
 });

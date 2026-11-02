@@ -1,6 +1,6 @@
-// Aviso de versão nova: quando o servidor passa a servir outro build do cliente (ex.: depois de um
-// `npm run docker:up`), esta página está desatualizada — ela não conhece estados e recursos novos.
-// Mostra o aviso e recarrega sozinha em alguns segundos (dá para adiar).
+// New version notice: when the server starts serving another client build (e.g. after an
+// `npm run docker:up`), this page is outdated — it does not know new states and features.
+// Shows the notice and reloads on its own in a few seconds (can be postponed).
 import type { OfficeStore } from '../net/store';
 import { h, setHidden, setText } from './dom';
 import { tr } from '../../../shared/i18n';
@@ -15,8 +15,8 @@ export class UpdateBanner {
 
   constructor(store: OfficeStore, private reload: () => void = () => location.reload()) {
     this.text = h('span');
-    const now = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Recarregar agora'), on: { click: () => this.reload() } });
-    const later = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Depois'), on: { click: () => this.postpone() } });
+    const now = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Reload now'), on: { click: () => this.reload() } });
+    const later = h('button', { class: 'ui-btn ui-btn--sm', type: 'button', text: tr('Later'), on: { click: () => this.postpone() } });
     this.el = h(
       'div',
       { class: 'ui-banner ui-banner--update', role: 'status', hidden: true },
@@ -40,13 +40,13 @@ export class UpdateBanner {
       this.reload();
       return;
     }
-    setText(this.text, tr('O Habblaud foi atualizado. Recarregando em {0} s…', [this.left]));
+    setText(this.text, tr('Habblaud has been updated. Reloading in {0} s…', [this.left]));
     this.left--;
   }
 
   private postpone(): void {
     this.stop();
-    setText(this.text, tr('O Habblaud foi atualizado. Recarregue a página quando quiser.'));
+    setText(this.text, tr('Habblaud has been updated. Reload the page whenever you like.'));
   }
 
   private stop(): void {

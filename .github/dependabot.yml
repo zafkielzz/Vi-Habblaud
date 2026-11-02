@@ -1,29 +1,29 @@
-# Atualizações automáticas de dependências (Dependabot).
-# Documentação: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Automatic dependency updates (Dependabot).
+# Documentation: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 version: 2
 updates:
-  # Dependências npm (package.json e package-lock.json na raiz)
+  # npm dependencies (package.json and package-lock.json at root)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
     ignore:
-      # Os tipos acompanham a menor versão do Node que o Habblaud suporta (engines: >=22.12). Com os de uma versão
-      # mais nova, o typecheck deixaria passar APIs que não existem nela. Sobe à mão, junto com o engines e o CI.
+      # Types match the lowest Node version Habblaud supports (engines: >=22.12). With those of a newer
+      # version, typecheck would allow APIs that do not exist in it. Bump manually, along with engines and CI.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
-  # Imagens base do Dockerfile (node:24-alpine)
+  # Base Dockerfile images (node:24-alpine)
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
     ignore:
-      # A imagem fica numa versão LTS do Node. Trocar de versão principal (ex.: 24 -> 26 quando o 26 virar LTS) é à mão.
+      # The image stays on an LTS Node version. Major version upgrades (e.g. 24 -> 26 when 26 becomes LTS) are manual.
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
 
-  # Actions usadas em .github/workflows/ci.yml (actions/checkout, actions/setup-node)
+  # Actions used in .github/workflows/ci.yml (actions/checkout, actions/setup-node)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

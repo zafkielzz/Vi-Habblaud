@@ -1,6 +1,6 @@
-// Pisos gerados em blocos ("chunks") de 8x8 tiles a partir de coordenadas de MUNDO (puro).
-// Assim tábuas de madeira, veios de mármore e manchas do cimento continuam de um tile para o
-// outro sem emendas, e o cache fica limitado ao tamanho do mundo (não ao formato das áreas).
+// Floors generated in 8x8 tile chunks from WORLD coordinates (pure).
+// This way wood planks, marble veins, and concrete mottling continue from one tile to
+// another seamlessly, and cache size is bounded by world size (not area shapes).
 import { TILE, type FloorKind } from '../api';
 import { mix, parseColor, ramp, shade, type RGBA } from '../core/color';
 import { PixelBuf } from '../core/pixbuf';
@@ -8,7 +8,7 @@ import { PixelBuf } from '../core/pixbuf';
 export const CHUNK_TILES = 8;
 export const CHUNK_PX = CHUNK_TILES * TILE;
 
-/** Hash inteiro determinístico de até 3 coordenadas + semente. */
+/** Deterministic integer hash of up to 3 coordinates + seed. */
 export function h3(a: number, b: number, c = 0, seed = 0): number {
   let h = Math.imul(a | 0, 0x9e3779b1) ^ Math.imul(b | 0, 0x85ebca77) ^ Math.imul(c | 0, 0xc2b2ae3d) ^ Math.imul(seed | 0, 0x27d4eb2f);
   h ^= h >>> 15;
@@ -23,7 +23,7 @@ function rnd01(a: number, b: number, c = 0, seed = 0): number {
   return h3(a, b, c, seed) / 4294967296;
 }
 
-/** Ruído de valor suave (bilinear) em coordenadas de mundo, 0..1. */
+/** Smooth value noise (bilinear) in world coordinates, 0..1. */
 function noise(x: number, y: number, cell: number, seed: number): number {
   const gx = Math.floor(x / cell);
   const gy = Math.floor(y / cell);
@@ -44,7 +44,7 @@ export interface FloorOpts {
   tint2?: string;
 }
 
-/** Gera o bloco (cx, cy) — em unidades de chunk — de um tipo de piso. */
+/** Generates chunk block (cx, cy) — in chunk units — for a floor kind. */
 export function floorChunk(kind: FloorKind, cx: number, cy: number, o: FloorOpts): PixelBuf {
   const b = new PixelBuf(CHUNK_PX, CHUNK_PX);
   const x0 = cx * CHUNK_PX;
@@ -76,13 +76,13 @@ export function floorChunk(kind: FloorKind, cx: number, cy: number, o: FloorOpts
   return b;
 }
 
-// ------------------------------------------------------------------ pisos por tile
+// ------------------------------------------------------------------ tiled floors
 
 function paintTile(b: PixelBuf, kind: FloorKind, tx: number, ty: number, o: FloorOpts): void {
   const r = (i: number) => rnd01(tx, ty, i, o.seed);
   switch (kind) {
     case 'carpet': {
-      // Placas de carpete modular: trama discreta que alterna de direção (xadrez de orientação).
+      // Modular carpet tiles: subtle weave alternating in direction (checkerboard orientation).
       const c1 = o.tint ?? '#c9d1dc';
       const c2 = o.tint2 ?? shade(c1, -0.03);
       const odd = (tx + ty) & 1;
@@ -173,20 +173,20 @@ function paintTile(b: PixelBuf, kind: FloorKind, tx: number, ty: number, o: Floo
   }
 }
 
-// ------------------------------------------------------------------ pisos contínuos
+// ------------------------------------------------------------------ continuous floors
 
-/** Tabela de cores (RGBA) pré-calculada para escrita rápida. */
+/** Precalculated RGBA color table for fast writing. */
 function rgba(c: string): RGBA {
   return parseColor(c);
 }
 
 const WOOD_TONES = ['#c99668', '#c48f61', '#cf9f72', '#c6925f'] as const;
-/** [tom][0 normal, 1 topo, 2 base, 3 veio, 4 emenda, 5 após emenda, 6 nó]. */
+/** [tone][0 normal, 1 top, 2 base, 3 grain, 4 seam, 5 after seam, 6 knot]. */
 const WOOD: readonly (readonly RGBA[])[] = WOOD_TONES.map((t) =>
   [t, shade(t, 0.03), shade(t, -0.075), shade(t, -0.03), shade(t, -0.1), shade(t, 0.03), shade(t, -0.12)].map(rgba),
 );
 
-/** Tábuas de madeira: 4px de altura, 48px de comprimento, emendas desencontradas, veios e nós. */
+/** Wood planks: 4px tall, 48px long, staggered joints, grain, and knots. */
 function paintWood(b: PixelBuf, x0: number, y0: number, seed: number): void {
   for (let py = 0; py < CHUNK_PX; py++) {
     const wy = y0 + py;
@@ -217,7 +217,7 @@ const CONCRETE_EDGE: readonly RGBA[] = CONCRETE.map((c) => rgba(shade(`rgb(${c[0
 const CONCRETE_SEAM = rgba('#c8cdd2');
 const CONCRETE_SPECK = [rgba('#cdd1d5'), rgba('#eceeef')] as const;
 
-/** Cimento polido claro em placas de 2x2 tiles, com manchas suaves contínuas. */
+/** Light polished concrete in 2x2 tile slabs with smooth continuous mottling. */
 function paintConcrete(b: PixelBuf, x0: number, y0: number, seed: number): void {
   for (let py = 0; py < CHUNK_PX; py++) {
     for (let px = 0; px < CHUNK_PX; px++) {
@@ -245,7 +245,7 @@ const MARBLE: readonly RGBA[] = Array.from({ length: LEVELS }, (_, i) => rgba(mi
 const MARBLE_VEIN = [rgba('#e2e3e6'), rgba('#cfd2d7')] as const;
 const MARBLE_SEAM = rgba('#d6d3ce');
 
-/** Mármore branco em placas de 2x2 tiles com veios cinza contínuos dentro da placa. */
+/** White marble in 2x2 tile slabs with continuous gray veins within the slab. */
 function paintMarble(b: PixelBuf, x0: number, y0: number, seed: number): void {
   for (let py = 0; py < CHUNK_PX; py++) {
     for (let px = 0; px < CHUNK_PX; px++) {
@@ -257,7 +257,7 @@ function paintMarble(b: PixelBuf, x0: number, y0: number, seed: number): void {
       }
       const slab = h3(wx >> 5, wy >> 5, 4, seed);
       const ax = (slab % 1000) / 1000;
-      // Só parte das placas tem veios (uma ou duas linhas suaves e contínuas).
+      // Only some slabs have veins (one or two smooth continuous lines).
       const veined = (slab >>> 12) % 5 < 2;
       const v = veined ? Math.sin(wx * 0.08 + wy * (0.14 + ax * 0.1) + noise(wx, wy, 14, seed + 12) * 2.4 + ax * 6.28) : 0;
       if (v > 0.997) b.put(px, py, MARBLE_VEIN[1]);
@@ -268,10 +268,10 @@ function paintMarble(b: PixelBuf, x0: number, y0: number, seed: number): void {
 }
 
 const WALK_TONES = ['#d3cdc2', '#cfc8bc', '#d8d2c8'] as const;
-/** [tom][0 normal, 1 junta, 2 borda clara, 3 mancha]. */
+/** [tone][0 normal, 1 joint, 2 light border, 3 speckle]. */
 const WALK: readonly (readonly RGBA[])[] = WALK_TONES.map((t) => [t, '#b8b1a5', shade(t, 0.03), shade(t, -0.05)].map(rgba));
 
-/** Calçada de placas 16x8 em fileiras desencontradas. */
+/** Sidewalk of 16x8 slabs in staggered rows. */
 function paintSidewalk(b: PixelBuf, x0: number, y0: number, seed: number): void {
   for (let py = 0; py < CHUNK_PX; py++) {
     for (let px = 0; px < CHUNK_PX; px++) {

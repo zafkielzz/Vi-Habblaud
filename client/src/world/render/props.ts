@@ -1,6 +1,6 @@
-// Sprites procedurais da área externa (árvores, arbustos, postes, carros...) e utilitários
-// visuais do mundo (sombra, brilhos). Mesma direção de arte do módulo de arte: contorno
-// cinza-azulado escuro, 3–4 tons por material, luz vinda de cima/esquerda.
+// Procedural outdoor sprites (trees, bushes, lamps, cars...) and world visual
+// utilities (shadows, glows). Same art direction as art module: dark bluish-gray
+// outline, 3–4 shades per material, light from top-left.
 import { mulberry32 } from '../../../../shared/hash';
 import type { ExteriorProp } from '../layout/types';
 
@@ -26,7 +26,7 @@ function hex(c: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Pintor por pixel (ImageData) para formas orgânicas. */
+/** Pixel painter (ImageData) for organic shapes. */
 class Painter {
   readonly data: ImageData;
   constructor(
@@ -34,7 +34,7 @@ class Painter {
     readonly w: number,
     readonly h: number,
   ) {
-    // parte do conteúdo já desenhado (ex.: sombra) para não apagá-lo no putImageData
+    // preserve already drawn content (e.g. shadow) to avoid wiping it on putImageData
     this.data = ctx.getImageData(0, 0, w, h);
   }
   set(x: number, y: number, color: string, a = 255): void {
@@ -63,7 +63,7 @@ function shadowEllipse(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx
   }
 }
 
-/** Copa arredondada: união de círculos com sombreamento por luz superior-esquerda. */
+/** Rounded canopy: union of circles shaded by top-left light. */
 function canopy(p: Painter, rng: () => number, cx: number, cy: number, r: number, tones: string[], outline: string): void {
   const blobs: [number, number, number][] = [[cx, cy, r]];
   for (let i = 0; i < 4; i++) {
@@ -84,7 +84,7 @@ function canopy(p: Painter, rng: () => number, cx: number, cy: number, r: number
         p.set(x, y, outline);
         continue;
       }
-      // luz: topo-esquerda mais claro; ruído para "folhas"
+      // light: top-left brighter; noise for "leaves"
       const nx = (x - cx) / r;
       const ny = (y - cy) / r;
       const light = -nx * 0.45 - ny * 0.75 + (rng() - 0.5) * 0.55;
@@ -99,7 +99,7 @@ function treeSprite(seed: number): PropSprite {
   const [c, ctx] = makeCanvas(36, 48);
   shadowEllipse(ctx, 18, 45, 12, 3, 0.25);
   const p = new Painter(ctx, 36, 48);
-  // tronco
+  // trunk
   for (let y = 30; y < 46; y++) {
     for (let x = 16; x < 21; x++) {
       const col = x === 16 ? '#8a6243' : x === 20 ? '#4a3222' : '#6b4a32';
@@ -148,7 +148,7 @@ function bushSprite(seed: number): PropSprite {
   shadowEllipse(ctx, 11, 14, 9, 2, 0.22);
   const p = new Painter(ctx, 22, 16);
   canopy(p, rng, 11, 9, 6, ['#34663f', '#47864c', '#62a45a', '#8cc66f'], '#264a36');
-  // florzinhas
+  // small flowers
   if (rng() < 0.6) {
     const col = ['#f2d14b', '#f28aa5', '#ffffff'][Math.floor(rng() * 3)];
     for (let i = 0; i < 4; i++) p.set(6 + Math.floor(rng() * 10), 5 + Math.floor(rng() * 6), col);
@@ -161,7 +161,7 @@ function flowersSprite(seed: number): PropSprite {
   const rng = mulberry32(seed);
   const [c, ctx] = makeCanvas(30, 14);
   const p = new Painter(ctx, 30, 14);
-  // canteiro: borda de pedra + terra
+  // flower bed: stone edge + soil
   for (let y = 4; y < 13; y++) {
     for (let x = 1; x < 29; x++) {
       const border = y === 4 || y === 12 || x === 1 || x === 28;
@@ -221,7 +221,7 @@ function benchSprite(): PropSprite {
   ctx.fillStyle = '#2e3648';
   ctx.fillRect(3, 8, 2, 4);
   ctx.fillRect(21, 8, 2, 4);
-  // encosto e assento em ripas
+  // slatted backrest and seat
   ctx.fillStyle = '#7a5232';
   ctx.fillRect(1, 1, 24, 3);
   ctx.fillRect(1, 6, 24, 3);
@@ -243,7 +243,7 @@ function rockSprite(seed: number): PropSprite {
   return { canvas: c, ax: 8, ay: 11 };
 }
 
-/** Mesa de jardim com guarda-sol listrado (vista de cima, 3/4) e duas cadeirinhas. */
+/** Garden table with striped parasol (top-down 3/4 view) and two chairs. */
 function parasolSprite(seed: number): PropSprite {
   const [c, ctx] = makeCanvas(32, 34);
   const palettes: [string, string, string][] = [
@@ -252,9 +252,9 @@ function parasolSprite(seed: number): PropSprite {
     ['#f2b33d', '#fbf4e4', '#c88a1f'],
   ];
   const [a, b, dk] = palettes[seed % palettes.length];
-  // sombra do guarda-sol no chão
+  // parasol shadow on ground
   shadowEllipse(ctx, 16, 29, 12, 3, 0.24);
-  // cadeirinhas (laterais) e mesa
+  // small chairs (sides) and table
   ctx.fillStyle = '#5b3c25';
   ctx.fillRect(2, 24, 6, 5);
   ctx.fillRect(24, 24, 6, 5);
@@ -267,10 +267,10 @@ function parasolSprite(seed: number): PropSprite {
   ctx.fillRect(10, 24, 12, 2);
   ctx.fillStyle = '#8d96a3';
   ctx.fillRect(10, 28, 12, 1);
-  // haste
+  // pole
   ctx.fillStyle = '#4a5468';
   ctx.fillRect(15, 11, 2, 14);
-  // lona: octógono achatado com gomos alternados e borda escura
+  // canvas: flattened octagon with alternating wedges and dark border
   const p = new Painter(ctx, 32, 34);
   const cx = 15.5;
   const cy = 8;
@@ -293,7 +293,7 @@ function parasolSprite(seed: number): PropSprite {
   return { canvas: c, ax: 16, ay: 29 };
 }
 
-/** Totem da entrada com a marca (azul-marinho e laranja, como a placa da recepção). */
+/** Entrance totem with brand (navy and orange, like the reception sign). */
 function totemSprite(): PropSprite {
   const [c, ctx] = makeCanvas(14, 34);
   shadowEllipse(ctx, 7, 32, 6, 1.5, 0.25);
@@ -303,7 +303,7 @@ function totemSprite(): PropSprite {
   ctx.fillRect(3, 3, 8, 28);
   ctx.fillStyle = '#2a355a';
   ctx.fillRect(3, 3, 1, 28);
-  // faixa laranja no topo, "H" claro e "b" laranja (as cores de "Hab" e "blaud" na placa)
+  // orange stripe on top, light "H" and orange "b" (colors of "Hab" and "blaud" on the sign)
   ctx.fillStyle = '#f2a33a';
   ctx.fillRect(3, 5, 8, 2);
   ctx.fillStyle = '#f5f1e6';
@@ -357,7 +357,7 @@ export function propSprite(prop: ExteriorProp): PropSprite {
       s = totemSprite();
       break;
     default:
-      // 'paving' e outros tipos desenhados pelo próprio renderer
+      // 'paving' and other types drawn by renderer itself
       s = { canvas: makeCanvas(1, 1)[0], ax: 0, ay: 0 };
   }
   cache.set(key, s);
@@ -373,7 +373,7 @@ const CAR_COLORS: [string, string, string][] = [
   ['#4a5468', '#323a4a', '#76819a'],
 ];
 
-/** Carro visto de lado (3/4), virado para a direita; `flip` desenha para a esquerda. */
+/** Car seen from the side (3/4), facing right; `flip` draws facing left. */
 export function carSprite(variant: number, flip: boolean): PropSprite {
   const key = `car:${variant % CAR_COLORS.length}:${flip ? 1 : 0}`;
   const hit = cache.get(key);
@@ -386,7 +386,7 @@ export function carSprite(variant: number, flip: boolean): PropSprite {
   }
   shadowEllipse(ctx, 18, 17, 16, 2, 0.3);
   const o = '#2e3648';
-  // carroceria
+  // body
   ctx.fillStyle = o;
   ctx.fillRect(2, 8, 32, 8);
   ctx.fillRect(8, 3, 18, 6);
@@ -398,19 +398,19 @@ export function carSprite(variant: number, flip: boolean): PropSprite {
   ctx.fillRect(9, 4, 16, 1);
   ctx.fillStyle = dark;
   ctx.fillRect(3, 13, 30, 2);
-  // vidros
+  // windows
   ctx.fillStyle = '#3a5f86';
   ctx.fillRect(10, 5, 6, 3);
   ctx.fillRect(18, 5, 6, 3);
   ctx.fillStyle = '#9cc7ec';
   ctx.fillRect(10, 5, 2, 1);
   ctx.fillRect(18, 5, 2, 1);
-  // farol e lanterna
+  // headlight and taillight
   ctx.fillStyle = '#fff3c4';
   ctx.fillRect(32, 10, 2, 2);
   ctx.fillStyle = '#e04a3a';
   ctx.fillRect(2, 10, 1, 2);
-  // rodas
+  // wheels
   for (const wx of [7, 25]) {
     ctx.fillStyle = o;
     ctx.fillRect(wx, 13, 5, 5);
@@ -424,7 +424,7 @@ export function carSprite(variant: number, flip: boolean): PropSprite {
   return s;
 }
 
-/** Sombra de contato sob os personagens. */
+/** Contact shadow under characters. */
 export function shadowSprite(): PropSprite {
   const hit = cache.get('shadow');
   if (hit) return hit;
@@ -435,7 +435,7 @@ export function shadowSprite(): PropSprite {
   return s;
 }
 
-/** Brilho radial (desenhado com composição aditiva). */
+/** Radial glow (drawn with additive blend). */
 export function glowSprite(color: string, size = 64): HTMLCanvasElement {
   const key = `glow:${color}:${size}`;
   const hit = cache.get(key);

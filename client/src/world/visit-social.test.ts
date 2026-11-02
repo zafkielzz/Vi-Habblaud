@@ -1,22 +1,22 @@
-// O social dentro do prédio (Fase 5), a parte pura: o carimbo de hoje (dia UTC) e o quadro de carimbos da recepção.
+// In-building social features (Phase 5), pure logic: today's stamp (UTC day) and the reception stamp board.
 import { describe, expect, it } from 'vitest';
 import { stampBoard, stampedToday, stampKey, stampPinTitle, stampReply, utcDay } from './visit-social';
 
-describe('carimbo de hoje', () => {
-  it('um por prédio por dia UTC; o de ontem, um id fora da lista ou lixo não valem', () => {
+describe("today's stamp", () => {
+  it('one per building per UTC day; yesterday\'s, unlisted id, or garbage are invalid', () => {
     const day = utcDay(Date.UTC(2026, 9, 15, 23, 59));
     expect(day).toBe('2026-10-15');
     expect(stampedToday(JSON.stringify({ day, stampId: 'rocket' }), day)).toBe('rocket');
     expect(stampedToday(JSON.stringify({ day: '2026-10-14', stampId: 'rocket' }), day)).toBeNull();
-    expect(stampedToday(JSON.stringify({ day, stampId: 'texto livre' }), day)).toBeNull();
+    expect(stampedToday(JSON.stringify({ day, stampId: 'free text' }), day)).toBeNull();
     expect(stampedToday('{', day)).toBeNull();
     expect(stampedToday(null, day)).toBeNull();
     expect(stampKey('b1')).toBe('habblaud:world-stamp:b1');
   });
 });
 
-describe('quadro de carimbos da recepção', () => {
-  it('o meu primeiro, depois os mais recebidos; posições dentro do quadro e iguais a cada chamada', () => {
+describe('reception stamp board', () => {
+  it('mine first, then most received; positions within board and deterministic per call', () => {
     const entries = [{ stampId: 'star' as const, count: 3 }, { stampId: 'coffee' as const, count: 1 }, { stampId: 'rocket' as const, mine: true }];
     const a = stampBoard(entries, 7);
     expect(a.map((p) => p.stampId)).toEqual(['rocket', 'star', 'coffee']);
@@ -29,20 +29,20 @@ describe('quadro de carimbos da recepção', () => {
       expect(Math.abs(p.rot)).toBeLessThanOrEqual(12);
     }
     expect(stampBoard(entries, 7)).toEqual(a);
-    expect(stampPinTitle(a[1]!)).toBe('Nota 10 ×3');
+    expect(stampPinTitle(a[1]!)).toBe('Top marks ×3');
   });
 
-  it('no máximo `max` carimbos; ids fora da lista ficam de fora', () => {
+  it('at most `max` stamps; unlisted IDs are excluded', () => {
     const many = Array.from({ length: 12 }, () => ({ stampId: 'heart' as const }));
     expect(stampBoard(many, 1, 8)).toHaveLength(8);
     expect(stampBoard([{ stampId: 'xx' as never }], 1)).toEqual([]);
   });
 });
 
-describe('a resposta a um carimbo', () => {
-  it('stamped confirma (o carimbo fica), already_done diz que já havia um, o resto desfaz', () => {
+describe('reply to a stamp', () => {
+  it('stamped confirms (stamp stays), already_done indicates duplicate, others rollback', () => {
     expect(stampReply('stamped')).toBe('ok');
     expect(stampReply('already_done')).toBe('already');
-    for (const t of ['too_far', 'not_found', 'blocked', 'rate_limited', 'id_novo']) expect(stampReply(t), t).toBe('failed');
+    for (const t of ['too_far', 'not_found', 'blocked', 'rate_limited', 'new_id']) expect(stampReply(t), t).toBe('failed');
   });
 });

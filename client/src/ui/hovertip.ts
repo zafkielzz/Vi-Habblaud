@@ -1,4 +1,4 @@
-// Dica flutuante do personagem sob o cursor: acompanha o personagem quadro a quadro.
+// Floating tooltip for character under cursor: tracks the character frame by frame.
 import type { UiComponent, UiContext } from './context';
 import { h, setHidden, setText, setVariant } from './dom';
 import { formatDuration } from './format';
@@ -64,7 +64,7 @@ export class HoverTip implements UiComponent {
     }
   }
 
-  /** Reposiciona a cada quadro enquanto houver alguém sob o cursor. */
+  /** Repositions every frame as long as someone is under the cursor. */
   private follow = (): void => {
     if (!this.id) return;
     const p = this.ctx.world.screenPositionOf(this.id);
@@ -92,19 +92,19 @@ export class HoverTip implements UiComponent {
     setText(this.name, a.name);
     updateAccountChip(this.chip, this.ctx.account(a.account), a.account, a.provider);
     updateProviderTag(this.prov, providerOf(a));
-    // Esperando um shell: o que ele espera (com o tempo correndo) e o que anda fazendo enquanto isso.
+    // Waiting on a shell: what it waits on (with elapsed time) and what it's doing meanwhile.
     const now = this.ctx.now();
     const wait = shellWaitIn(a, this.ctx.store.snapshot?.agents ?? [], now);
     const status = wait ? 'shell' : a.status;
     updateStatusDot(this.dot, status);
     setText(this.status, a.status === 'waiting' && a.waitingFor ? `${statusLabel(a.status)}: ${a.waitingFor}` : `${statusLabel(status)}${a.kind === 'sub' ? ` · ${a.role}` : ''}`);
     setVariant(this.el, 'is-', status);
-    // Do que se trata a sessão (título) e há quanto tempo está nesse estado (ex.: ociosa há 12 min).
+    // What the session is about (title) and how long in this state (e.g. idle for 12 min).
     const title = a.title?.trim();
     setHidden(this.task, !title);
     if (title) setText(this.task, title);
     const inStatus = now - a.statusSince;
-    setText(this.since, a.statusSince && inStatus >= 60_000 ? tr('há {0}', [formatDuration(inStatus)]) : '');
+    setText(this.since, a.statusSince && inStatus >= 60_000 ? tr('{0} ago', [formatDuration(inStatus)]) : '');
     if (wait) updateShellActivityLine(this.activity, wait, now);
     else updateActivityLine(this.activity, a.activity);
     setHidden(this.mood, !wait);

@@ -1,6 +1,6 @@
-// Rotas de /api/permissions: a trava (desligado / Host que não é local), o guard (JSON e Origin), os
-// status (400, 404, 405, 409), o fluxo completo (registrar → esperar → decidir), o long-poll sem decisão,
-// a resposta imediata sem páginas abertas, as perguntas do AskUserQuestion e os pedidos fictícios do demo.
+// Routes in /api/permissions: lock (disabled / non-local Host), guard (JSON and Origin),
+// statuses (400, 404, 405, 409), full flow (register -> wait -> decide), undecided long-poll,
+// immediate response when no pages open, AskUserQuestion questions, and mock demo requests.
 import { afterEach, describe, expect, it } from 'vitest';
 import type { OfficeSnapshot, PermissionRequestInfo } from '../../shared/types';
 import { setQuiet } from '../log';
@@ -17,8 +17,8 @@ afterEach(async () => {
 
 const register = (s: PermissionServer, over: Record<string, unknown> = {}) => request(s.base, '/api/permissions', { method: 'POST', body: hookJson(over) });
 
-describe('trava local', () => {
-  it('desligado (sem bind local): 403 em todas as rotas; health diz permissions: false', async () => {
+describe('local lock', () => {
+  it('disabled (no local bind): 403 on all routes; health reports permissions: false', async () => {
     srv = await servePermissions({ enabled: false });
     for (const [method, path] of [
       ['POST', '/api/permissions'],
@@ -28,38 +28,38 @@ describe('trava local', () => {
     ]) {
       const r = await request(srv.base, path, { method, body: method === 'POST' ? {} : undefined });
       expect(r.status, `${method} ${path}`).toBe(403);
-      expect(r.json).toMatchObject({ error: expect.stringMatching(/desligado/) });
+      expect(r.json).toMatchObject({ error: expect.stringMatching(/disabled/) });
     }
     expect((await request(srv.base, '/api/health')).json).toMatchObject({ permissions: false });
   });
 
-  it('Host que não é local (proxy/túnel de HABBLAUD_ALLOWED_HOSTS ou IP da rede): 403', async () => {
+  it('non-local Host (proxy/tunnel from HABBLAUD_ALLOWED_HOSTS or network IP): 403', async () => {
     srv = await servePermissions();
     expect((await request(srv.base, '/api/health')).json).toMatchObject({ permissions: true });
     for (const host of ['habblaud.lan', '192.168.0.10:4747']) {
       const r = await request(srv.base, '/api/permissions', { method: 'POST', body: hookJson(), headers: { Host: host } });
       expect(r.status, host).toBe(403);
-      expect(r.json).toMatchObject({ error: expect.stringMatching(/próprio computador/) });
+      expect(r.json).toMatchObject({ error: expect.stringMatching(/computer running Habblaud/) });
     }
-    // Host local com porta e localhost: valem.
+    // Local Host with port and localhost work.
     expect((await request(srv.base, '/api/permissions', { method: 'POST', body: hookJson(), headers: { Host: `localhost:${srv.port}` } })).status).toBe(201);
   });
 
-  it('guard: POST sem JSON (415) ou de outra origem (403) é barrado antes da rota', async () => {
+  it('guard: POST without JSON (415) or from other origin (403) blocked before route', async () => {
     srv = await servePermissions();
     const id = ((await register(srv)).json as { id: string }).id;
     const form = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: 'behavior=allow', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
     expect(form.status).toBe(415);
     const evil = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'allow' }, headers: { Origin: 'https://evil.example' } });
     expect(evil.status).toBe(403);
-    // Da própria página (Origin local): passa.
+    // From page itself (local Origin): allowed.
     const ok = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'allow' }, headers: { Origin: srv.base } });
     expect(ok.status).toBe(200);
   });
 });
 
-describe('rotas', () => {
-  it('sem página aberta: resposta imediata {skip: no-viewers}; sessão desconhecida: {skip: unknown-session}', async () => {
+describe('routes', () => {
+  it('no open page: immediate response {skip: no-viewers}; unknown session: {skip: unknown-session}', async () => {
     srv = await servePermissions({ viewers: 0 });
     const t0 = Date.now();
     const r = await register(srv);
@@ -67,23 +67,23 @@ describe('rotas', () => {
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ skip: 'no-viewers' });
     srv.setViewers(1);
-    expect((await register(srv, { session_id: 'nao-existe' })).json).toEqual({ skip: 'unknown-session' });
+    expect((await register(srv, { session_id: 'not-found' })).json).toEqual({ skip: 'unknown-session' });
   });
 
-  it('corpo inválido: 400; ids desconhecidos: 404; métodos errados: 405', async () => {
+  it('invalid body: 400; unknown ids: 404; wrong methods: 405', async () => {
     srv = await servePermissions();
     expect((await request(srv.base, '/api/permissions', { method: 'POST', body: { foo: 1 } })).status).toBe(400);
-    expect((await request(srv.base, '/api/permissions', { method: 'POST', body: '{quebrado' })).status).toBe(400);
-    expect((await request(srv.base, '/api/permissions/nao-existe/wait?timeout=0.1')).status).toBe(404);
-    expect((await request(srv.base, '/api/permissions/nao-existe')).status).toBe(404);
-    expect((await request(srv.base, '/api/permissions/nao-existe/decision', { method: 'POST', body: { behavior: 'allow' } })).status).toBe(404);
+    expect((await request(srv.base, '/api/permissions', { method: 'POST', body: '{broken' })).status).toBe(400);
+    expect((await request(srv.base, '/api/permissions/not-found/wait?timeout=0.1')).status).toBe(404);
+    expect((await request(srv.base, '/api/permissions/not-found')).status).toBe(404);
+    expect((await request(srv.base, '/api/permissions/not-found/decision', { method: 'POST', body: { behavior: 'allow' } })).status).toBe(404);
     expect((await request(srv.base, '/api/permissions')).status).toBe(405);
     expect((await request(srv.base, '/api/permissions/x/wait', { method: 'POST', body: {} })).status).toBe(405);
     expect((await request(srv.base, '/api/permissions/x/decision')).status).toBe(405);
     expect((await request(srv.base, '/api/permissions/x/y/z')).status).toBe(404);
   });
 
-  it('fluxo: registra (201) → espera sem decisão (pending) → página decide → a espera recebe a decisão', async () => {
+  it('flow: registers (201) → waits undecided (pending) → page decides → wait receives decision', async () => {
     srv = await servePermissions();
     const reg = await register(srv);
     expect(reg.status).toBe(201);
@@ -92,7 +92,7 @@ describe('rotas', () => {
     expect((await request(srv.base, `/api/permissions/${id}/wait?timeout=0.2`)).json).toEqual({ status: 'pending' });
     expect(Date.now() - t0).toBeLessThan(2_000);
 
-    // A página vê o pedido no snapshot (sem os argumentos) e busca o detalhe.
+    // Page sees request in snapshot (without arguments) and fetches detail.
     const snap = (await request(srv.base, '/api/snapshot')).json as OfficeSnapshot;
     const agent = snap.agents.find((a) => a.id === MAIN)!;
     expect(agent).toMatchObject({ status: 'waiting', permission: { id, tool: 'Bash', title: 'Bash(npm test)' } });
@@ -102,16 +102,16 @@ describe('rotas', () => {
 
     const waiting = request(srv.base, `/api/permissions/${id}/wait?timeout=20`);
     await new Promise((ok) => setTimeout(ok, 50));
-    const bad = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'talvez' } });
+    const bad = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'maybe' } });
     expect(bad.status).toBe(400);
     expect((await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'allow', suggestion: 3 } })).status).toBe(400);
-    const dec = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'deny', message: 'agora não' } });
+    const dec = await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'deny', message: 'not now' } });
     expect(dec).toMatchObject({ status: 200, json: { ok: true } });
-    expect((await waiting).json).toEqual({ status: 'decided', behavior: 'deny', message: 'agora não' });
+    expect((await waiting).json).toEqual({ status: 'decided', behavior: 'deny', message: 'not now' });
     expect((await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'allow' } })).status).toBe(404);
   });
 
-  it('decidir duas vezes antes de o hook buscar: 409', async () => {
+  it('deciding twice before hook fetches: 409', async () => {
     srv = await servePermissions();
     const { id } = (await register(srv)).json as { id: string };
     expect((await request(srv.base, `/api/permissions/${id}/decision`, { method: 'POST', body: { behavior: 'allow' } })).status).toBe(200);
@@ -119,7 +119,7 @@ describe('rotas', () => {
     expect((await request(srv.base, `/api/permissions/${id}/wait`)).json).toEqual({ status: 'decided', behavior: 'allow' });
   });
 
-  it('hook que desiste (conexão fechada) vira órfão e o pedido some', async () => {
+  it('hook that gives up (closed connection) becomes orphan and request disappears', async () => {
     srv = await servePermissions({ registry: { orphanMs: 150 } });
     const { id } = (await register(srv)).json as { id: string };
     expect(srv.registry!.size).toBe(1);
@@ -128,18 +128,18 @@ describe('rotas', () => {
     expect((await request(srv.base, `/api/permissions/${id}/wait?timeout=0.1`)).json).toEqual({ status: 'released', reason: 'orphan' });
   });
 
-  it('pergunta (AskUserQuestion): responder pela rota entrega as respostas ao hook; respostas que não servem: 400', async () => {
+  it('question (AskUserQuestion): answering via route delivers answers to hook; invalid answers: 400', async () => {
     srv = await servePermissions();
     const questions = [
-      { question: 'Qual banco usar?', header: 'Banco', options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
-      { question: 'Quais testes rodar?', multiSelect: true, options: [{ label: 'Unidade' }, { label: 'E2E' }] },
+      { question: 'Which database to use?', header: 'Database', options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
+      { question: 'Which tests to run?', multiSelect: true, options: [{ label: 'Unit' }, { label: 'E2E' }] },
     ];
     const reg = await register(srv, { tool_name: 'AskUserQuestion', tool_input: { questions }, permission_suggestions: [] });
     expect(reg.status).toBe(201);
     const { id } = reg.json as { id: string };
     const agent = ((await request(srv.base, '/api/snapshot')).json as OfficeSnapshot).agents.find((a) => a.id === MAIN)!;
-    expect(agent).toMatchObject({ status: 'waiting', waitingFor: 'responder uma pergunta', permission: { id, tool: 'AskUserQuestion' } });
-    expect(agent.permission!.questions!.map((q) => q.question)).toEqual(['Qual banco usar?', 'Quais testes rodar?']);
+    expect(agent).toMatchObject({ status: 'waiting', waitingFor: 'answer a question', permission: { id, tool: 'AskUserQuestion' } });
+    expect(agent.permission!.questions!.map((q) => q.question)).toEqual(['Which database to use?', 'Which tests to run?']);
 
     const decide = (body: unknown) => request(srv!.base, `/api/permissions/${id}/decision`, { method: 'POST', body });
     for (const body of [{ behavior: 'answer' }, { behavior: 'answer', answers: [{ question: 0, options: [0, 0] }] }]) {
@@ -149,7 +149,7 @@ describe('rotas', () => {
     }
     const allow = await decide({ behavior: 'allow' });
     expect(allow.status).toBe(400);
-    expect(allow.json).toMatchObject({ error: expect.stringMatching(/^resposta que não serve/) });
+    expect(allow.json).toMatchObject({ error: expect.stringMatching(/^response doesn't fit/) });
     expect((await decide({ behavior: 'answer', answers: [{ question: 0, options: [1] }] })).status).toBe(400);
 
     const waiting = request(srv.base, `/api/permissions/${id}/wait?timeout=20`);
@@ -165,7 +165,7 @@ describe('rotas', () => {
     });
   });
 
-  it('demo: a pergunta fictícia responde pela mesma rota (e aprovar não serve)', async () => {
+  it('demo: mock question answered via same route (and approving is rejected)', async () => {
     srv = await servePermissions({ demo: true });
     const sim = (srv.office as unknown as { demo: { forcePermission(now: number, kind?: string): string | undefined } }).demo;
     const agentId = sim.forcePermission(Date.now(), 'question');
@@ -180,12 +180,12 @@ describe('rotas', () => {
     const after = ((await request(srv.base, '/api/snapshot')).json as OfficeSnapshot).agents.find((a) => a.id === agentId)!;
     expect(after.permission).toBeUndefined();
     expect(after.status).toBe('working');
-    expect(after.recent.at(-1)).toMatchObject({ icon: '💬', text: 'Respondido no Habblaud' });
+    expect(after.recent.at(-1)).toMatchObject({ icon: '💬', text: 'Answered in Habblaud' });
   });
 
-  it('demo: o pedido fictício responde pela mesma rota', async () => {
+  it('demo: mock request answered via same route', async () => {
     srv = await servePermissions({ demo: true });
-    // Algum agente do demo pede permissão agora.
+    // Some demo agent requests permission now.
     const sim = (srv.office as unknown as { demo: { forcePermission(now: number, kind?: string): string | undefined } }).demo;
     const agentId = sim.forcePermission(Date.now(), 'permission');
     srv.office.tick();
@@ -202,7 +202,7 @@ describe('rotas', () => {
     expect(after.status).toBe('working');
   });
 
-  it('waitMs: ?timeout= em segundos, limitado a 25 s', () => {
+  it('waitMs: ?timeout= in seconds, capped at 25 s', () => {
     expect(waitMs(new URL('http://x/?timeout=5'))).toBe(5_000);
     expect(waitMs(new URL('http://x/?timeout=999'))).toBe(25_000);
     expect(waitMs(new URL('http://x/?timeout=0.001'))).toBe(50);

@@ -1,9 +1,9 @@
-// Estado da cidade no navegador (puro): prédios por chunk e por lote, jogadores visíveis com as amostras de posição,
-// minimapa e eu. Começa do `world.snapshot` do servidor local (net/world-stream.ts, evento `snapshot`) e consome as
-// mensagens do servidor do mundo como vieram (evento `message`; o servidor local já conferiu o `rev` dos patches);
-// devolve os efeitos que a cena precisa tratar (correção de posição, ausente, perfil, aviso). As regras são as de
-// shared/world/scene.ts: `area` substitui o chunk; item de `area.patch` com `lot` substitui o prédio e sem `lot` mescla;
-// ficam só os chunks dos 3×3 em volta da minha posição (o servidor não avisa quando deixa de assinar).
+// Browser city state (pure): buildings by chunk and lot, visible players with position samples,
+// minimap, and self. Starts from local server `world.snapshot` (net/world-stream.ts, `snapshot` event) and consumes
+// world server messages as received (`message` event; local server already verified patch `rev`);
+// returns effects the scene must handle (position correction, afk, profile, notice). Rules follow
+// shared/world/scene.ts: `area` replaces the chunk; `area.patch` item with `lot` replaces building, without `lot` merges;
+// retains only the 3×3 chunks around self position (server does not notify on unsubscribe).
 import type { WorldSceneInside, WorldSceneMe, WorldSceneSnapshot } from '../../../../shared/world/api';
 import { blockAt, chunkId, chunkOf, chunksAround, parseChunkId } from '../../../../shared/world/city';
 import type { BuildingPatchMessage, WorldBuildingDetail, WorldBuildingPublic, WorldPlayerPublic, WorldPosition } from '../../../../shared/world/protocol';
@@ -13,7 +13,7 @@ import { pushSample, type Sample } from './players';
 export interface RemotePlayer {
   info: WorldPlayerPublic;
   samples: Sample[];
-  /** Atraso (ms) com que este jogador é desenhado agora (players.ts, `interpDelay`); sobe e desce devagar. */
+  /** Delay (ms) for rendering this player now (players.ts, `interpDelay`); ramps up/down smoothly. */
   delay?: number;
 }
 
@@ -22,9 +22,9 @@ export type CityEffect =
   | { type: 'afk' }
   | { type: 'profile'; player: WorldPlayerPublic }
   | { type: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
-  /** Fase 4: o interior do prédio onde entrei (ao entrar, num `resync` ou num `enter` repetido). */
+  /** Phase 4: building interior entered (on enter, on `resync`, or repeated `enter`). */
   | { type: 'building'; inside: WorldSceneInside }
-  /** Fase 4: mudança no interior (o servidor local já conferiu o `rev`; a cena Visita confere de novo). */
+  /** Phase 4: interior change (local server verified `rev`; Visit scene re-verifies). */
   | { type: 'building.patch'; msg: BuildingPatchMessage };
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -55,16 +55,16 @@ const isBlock = (b: unknown): b is { x: number; y: number; lit: number } => isOb
 
 export class CityState {
   me: WorldSceneMe | null = null;
-  /** Posição validada que veio no snapshot ou num `pos` antes de a cena me pôr na rua (consumida uma vez). */
+  /** Validated position from snapshot or `pos` before scene puts me on street (consumed once). */
   startPos: { x: number; y: number } | null = null;
   myBuildingId: string | null = null;
-  /** O servidor local está ligado ao servidor do mundo (sem isso, nada desce). */
+  /** Local server is connected to the world server (without this, no data arrives). */
   connected = false;
-  /** O servidor do mundo já mandou `afk` e ninguém mexeu desde então. */
+  /** World server sent `afk` and no user input occurred since. */
   afk = false;
-  /** Dentro de um prédio, segundo o último snapshot do servidor local (um stream novo no meio da visita). */
+  /** Inside a building according to local server's last snapshot (new stream mid-visit). */
   inside: WorldSceneInside | null = null;
-  /** Distrito dos ids de chunk (`<distrito>:<cx>,<cy>`). */
+  /** District of chunk IDs (`<district>:<cx>,<cy>`). */
   district: string | undefined;
   readonly buildings = new Map<string, WorldBuildingPublic>();
   private readonly lots = new Map<string, string>();
@@ -72,11 +72,11 @@ export class CityState {
   readonly chunkRev = new Map<string, number>();
   readonly players = new Map<string, RemotePlayer>();
   minimap: Array<{ x: number; y: number; lit: number }> = [];
-  /** Sobe quando algum prédio muda (caches de quem desenha). */
+  /** Increments when any building changes (renderer caches). */
   version = 0;
   minimapVersion = 0;
 
-  /** O prédio do lote, se houver. */
+  /** Building on lot, if any. */
   buildingAt(lot: { x: number; y: number }): WorldBuildingPublic | undefined {
     const id = this.lots.get(lotKey(lot));
     return id ? this.buildings.get(id) : undefined;
@@ -86,7 +86,7 @@ export class CityState {
     return this.myBuildingId ? this.buildings.get(this.myBuildingId) : undefined;
   }
 
-  /** O `world.snapshot`: troca o estado inteiro (prédios, jogadores, minimapa) pelo do servidor local. */
+  /** The `world.snapshot`: replaces entire state (buildings, players, minimap) with local server's. */
   applySnapshot(snap: WorldSceneSnapshot, now: number): void {
     this.buildings.clear();
     this.lots.clear();
@@ -99,8 +99,8 @@ export class CityState {
     this.district = typeof snap.district === 'string' ? snap.district : undefined;
     if (snap.me) {
       this.me = snap.me;
-      // O id do prédio é o id opaco do dono (protocolo): sem `buildingId` no `welcome` (o prédio nasceu da primeira
-      // remessa, depois dele), o meu prédio é o que tem o meu id.
+      // Building ID is owner's opaque ID (protocol): without `buildingId` in `welcome` (building created in first
+      // batch, after welcome), my building is the one with my ID.
       this.myBuildingId = snap.me.buildingId ?? snap.me.id;
     }
     const pos = readPosition(snap.pos);
@@ -115,7 +115,7 @@ export class CityState {
     this.version++;
   }
 
-  /** Uma mensagem do servidor do mundo; devolve o efeito para a cena, se houver. */
+  /** A message from world server; returns effect for the scene, if any. */
   apply(msg: unknown, now: number): CityEffect | null {
     if (!isObject(msg) || typeof msg.t !== 'string') return null;
     switch (msg.t) {
@@ -192,8 +192,8 @@ export class CityState {
   }
 
   /**
-   * Ficam só os chunks dos 3×3 em volta de (x, y) tiles (os que o servidor assina); o resto sai, com os prédios. A cena
-   * chama ao trocar de chunk. Devolve se tirou algum.
+   * Keeps only 3×3 chunks around (x, y) tiles (subscribed by server); remainder dropped with buildings. Scene
+   * calls this on chunk change. Returns whether any were removed.
    */
   keepAround(x: number, y: number): boolean {
     let district = this.district;
@@ -249,7 +249,7 @@ export class CityState {
     for (const set of this.chunkIds.values()) set.delete(id);
   }
 
-  /** `area`: o conteúdo inteiro do chunk e o `rev` (mesmo menor): quem saiu da lista sai da cidade. */
+  /** `area`: entire chunk content and `rev` (even if lower): buildings omitted from list are removed. */
   private applyArea(chunk: string, rev: number, list: WorldBuildingPublic[]): void {
     const keep = new Set(list.map((b) => b.id));
     for (const id of this.chunkIds.get(chunk) ?? []) if (!keep.has(id)) this.removeBuilding(id);
@@ -259,8 +259,8 @@ export class CityState {
   }
 
   /**
-   * `area.patch`: item com `lot` é o prédio inteiro e substitui o que havia (prédio novo, ou um campo opcional que sumiu,
-   * como `agents` no modo discreto); sem `lot`, só os campos que mudaram, mesclados; `removed` (ids) tira prédios.
+   * `area.patch`: item with `lot` is full building and replaces existing (new building, or omitted optional field
+   * like `agents` in discreet mode); without `lot`, changed fields are merged; `removed` (ids) deletes buildings.
    */
   private applyPatch(chunk: string, msg: Record<string, unknown>): void {
     if (finite(msg.rev)) this.chunkRev.set(chunk, msg.rev);

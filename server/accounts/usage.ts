@@ -1,16 +1,16 @@
-// Uso do plano (sessão de 5h e semanal) por conta, vindo de fontes locais:
-// - 'statusline': rate_limits que o Claude Code envia ao statusline, gravados pelo
-//   scripts/statusline-tap.mjs (recomendado: ao vivo);
-// - 'cache': cachedUsageUtilization gravado pelo próprio Claude Code (quando alguém roda /usage);
-// - 'codex': rate_limits dos arquivos de sessão do Codex, empurrados pela fonte do Codex (AccountsService.setUsage).
-// Vale sempre a fonte com os números mais recentes (maior fetchedAt). Nenhuma delas lê credenciais
-// nem faz chamadas de rede: são só arquivos que o Claude Code já grava na máquina.
+// Plan usage (5h and weekly session) per account, from local sources:
+// - 'statusline': rate_limits that Claude Code sends to statusline, written by
+//   scripts/statusline-tap.mjs (recommended: live);
+// - 'cache': cachedUsageUtilization written by Claude Code itself (when running /usage);
+// - 'codex': rate_limits from Codex session files, pushed by Codex source (AccountsService.setUsage).
+// The source with the newest numbers always wins (highest fetchedAt). None of them reads credentials
+// or makes network calls: only files Claude Code already writes to disk.
 import type { AccountInfo, AccountUsage, UsageWindow } from '../../shared/types';
 
 export type UsageSource = AccountUsage['source'];
 export type UsageStatus = AccountInfo['usageStatus'];
 
-/** Números com mais de 30 min são exibidos como "desatualizados". */
+/** Numbers older than 30 min are displayed as "stale". */
 export const STALE_AFTER_MS = 30 * 60_000;
 const WINDOW_KEYS = ['fiveHour', 'sevenDay', 'sevenDayOpus', 'sevenDaySonnet'] as const;
 
@@ -20,7 +20,7 @@ function num(v: unknown): number | undefined {
   return undefined;
 }
 
-/** Converte data ISO, epoch em ms ou epoch em segundos para epoch ms. */
+/** Converts ISO date, epoch in ms, or epoch in seconds to epoch ms. */
 export function toEpochMs(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v < 1e12 ? Math.round(v * 1000) : Math.round(v);
   if (typeof v === 'string' && v.trim()) {
@@ -30,7 +30,7 @@ export function toEpochMs(v: unknown): number | undefined {
   return undefined;
 }
 
-/** Uma janela no formato do Claude Code ({utilization, resets_at}) -> UsageWindow. */
+/** One window in Claude Code format ({utilization, resets_at}) -> UsageWindow. */
 function parseWindow(raw: unknown): UsageWindow | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
@@ -43,8 +43,8 @@ function parseWindow(raw: unknown): UsageWindow | undefined {
 }
 
 /**
- * Normaliza as janelas de uso no formato que o Claude Code grava (cache do /usage) e envia ao
- * statusline: {five_hour, seven_day, seven_day_opus, seven_day_sonnet, ...}. Sem nenhuma janela -> undefined.
+ * Normalizes usage windows to the format Claude Code writes (/usage cache) and sends to
+ * statusline: {five_hour, seven_day, seven_day_opus, seven_day_sonnet, ...}. No windows -> undefined.
  */
 export function usageFromWindows(raw: unknown, source: UsageSource, fetchedAt: number): AccountUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
@@ -61,7 +61,7 @@ export function usageFromWindows(raw: unknown, source: UsageSource, fetchedAt: n
   return five || week || opus || sonnet ? usage : undefined;
 }
 
-/** `cachedUsageUtilization` do .claude.json ({fetchedAtMs, utilization:{...}}) -> AccountUsage. */
+/** `cachedUsageUtilization` from .claude.json ({fetchedAtMs, utilization:{...}}) -> AccountUsage. */
 export function usageFromCache(cached: unknown): AccountUsage | undefined {
   if (!cached || typeof cached !== 'object') return undefined;
   const c = cached as Record<string, unknown>;
@@ -71,9 +71,9 @@ export function usageFromCache(cached: unknown): AccountUsage | undefined {
 }
 
 /**
- * Janelas cujo reinício já passou desde a coleta ficam SEM DADOS (são omitidas): o percentual
- * antigo não vale mais e não dá para saber quanto já foi usado na janela nova — exibir 0% faria
- * a cota parecer cheia. Voltam a aparecer quando a fonte trouxer números novos.
+ * Windows whose reset time has passed since collection are marked as NO DATA (omitted): the
+ * old percentage is no longer valid and new window usage is unknown — showing 0% would make
+ * the quota look full. Reappears when source brings new numbers.
  */
 export function rollover(usage: AccountUsage, now: number): AccountUsage {
   const out: AccountUsage = { ...usage };
@@ -89,11 +89,11 @@ export interface UsageView {
   status: UsageStatus;
 }
 
-/** Guarda os números de cada fonte por conta e decide o que exibir. */
+/** Stores numbers from each source per account and decides what to display. */
 export class UsageStore {
   private entries = new Map<string, Map<UsageSource, AccountUsage>>();
 
-  /** Registra números de uma fonte. Devolve true se algo mudou. */
+  /** Records numbers from a source. Returns true if anything changed. */
   set(accountId: string, usage: AccountUsage): boolean {
     let m = this.entries.get(accountId);
     if (!m) this.entries.set(accountId, (m = new Map()));
@@ -106,7 +106,7 @@ export class UsageStore {
     return this.entries.get(accountId)?.delete(source) ?? false;
   }
 
-  /** Esquece todas as origens da conta (ela saiu). Devolve true se havia algo. */
+  /** Forgets all sources for the account (account removed). Returns true if anything was stored. */
   forget(accountId: string): boolean {
     const had = !!this.entries.get(accountId)?.size;
     this.entries.delete(accountId);

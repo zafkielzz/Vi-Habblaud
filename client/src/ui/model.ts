@@ -1,68 +1,71 @@
-// Modelo de apresentação da UI: agrupamento salas -> agentes -> subagentes, filtros, contadores e rótulos.
-// Funções puras (sem DOM), testadas em ui/model.test.ts.
-import type { AccountInfo, Activity, AgentInfo, AgentStatus, OfficeSnapshot, RoomInfo, ShellJob, TaskItem } from '../../../shared/types';
+// UI presentation model: rooms -> agents -> subagents grouping, filters, counters, and labels.
+// Pure functions (no DOM), tested in ui/model.test.ts.
+import type { AccountInfo, Activity, AgentInfo, AgentStatus, OfficeInfo, OfficeSnapshot, RoomInfo, ShellJob, TaskItem, TeamInfo } from '../../../shared/types';
 import { formatElapsed, normalizeSearch } from './format';
 import { tr } from '../../../shared/i18n';
+import { workerOfAgent } from './workers-api';
+import { agentOfficeId, officeBoss, teamOffices } from './offices';
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
-  working: tr('Trabalhando'),
-  waiting: tr('Precisa de você'),
-  shell: tr('Esperando o shell'),
-  idle: tr('Ocioso'),
-  done: tr('Concluído'),
-  offline: tr('Saindo'),
+  working: tr('Working'),
+  waiting: tr('Needs you'),
+  shell: tr('Waiting on shell'),
+  idle: tr('Idle'),
+  done: tr('Done'),
+  offline: tr('Leaving'),
 };
 
-/** Ordem de urgência (menor = mais urgente), usada para destacar quem precisa de atenção. */
+/** Urgency order (lower = more urgent), used to highlight agents needing attention. */
 const STATUS_URGENCY: Record<AgentStatus, number> = { waiting: 0, shell: 1, working: 2, idle: 3, done: 4, offline: 5 };
 
 export function statusLabel(status: AgentStatus): string {
   return STATUS_LABEL[status];
 }
 
-/** Texto da linha de atividade quando o agente ainda não tem nenhuma (ex.: sessão recém-aberta, sem pedido). */
+/** Fallback activity text when the agent has none yet (e.g. newly opened session, no prompt). */
 export function activityFallback(agent: Pick<AgentInfo, 'status' | 'waitingFor'>): string {
   switch (agent.status) {
     case 'working':
-      return tr('Trabalhando…');
+      return tr('Working…');
     case 'waiting':
-      return agent.waitingFor ? tr('Precisa de você: {0}', [agent.waitingFor]) : tr('Precisa de você');
+      return agent.waitingFor ? tr('Needs you: {0}', [agent.waitingFor]) : tr('Needs you');
     case 'shell':
-      return tr('Esperando o shell terminar');
+      return tr('Waiting for the shell to finish');
     case 'done':
-      return tr('Concluiu a tarefa');
+      return tr('Finished the task');
     case 'offline':
-      return tr('Saindo do escritório');
+      return tr('Leaving the office');
     default:
-      return tr('Aguardando instruções');
+      return tr('Waiting for instructions');
   }
 }
 
-/** Selo de papel: "Agente principal" ou o tipo do subagente ("Explore", "Plan"...). */
-export function roleLabel(agent: Pick<AgentInfo, 'kind' | 'role'>): string {
-  if (agent.kind === 'main') return agent.role || tr('Agente principal');
-  return agent.role || tr('Subagente');
+/** Role badge: "Main agent" or the subagent's role ("Explore", "Plan"...). */
+export function roleLabel(agent: Pick<AgentInfo, 'kind' | 'role' | 'boss'>): string {
+  if (agent.boss) return tr('👑 Boss of the workers');
+  if (agent.kind === 'main') return agent.role || tr('Main agent');
+  return agent.role || tr('Subagent');
 }
 
-/** Agente ainda "presente" (não está indo embora). */
+/** Agent still "present" (not leaving). */
 export function isPresent(agent: Pick<AgentInfo, 'status'>): boolean {
   return agent.status !== 'offline';
 }
 
 export interface Counters {
   rooms: number;
-  /** Agentes presentes (principais + subagentes, exceto os que estão saindo). */
+  /** Present agents (main + subagents, except those leaving). */
   agents: number;
-  /** Agentes processando um pedido (sem contar quem está parado esperando um comando longo). */
+  /** Agents processing a request (excluding those waiting on a long command). */
   working: number;
-  /** Subagentes ativos (não concluídos nem saindo). */
+  /** Active subagents (not completed or leaving). */
   subagents: number;
   waiting: number;
-  /** Shells que algum agente está esperando terminar (segundo plano e comandos longos em primeiro plano). */
+  /** Shells any agent is waiting to finish (background and long foreground commands). */
   shells: number;
 }
 
-/** `now` (relógio do servidor) decide quando um comando em primeiro plano já conta como espera. */
+/** `now` (server clock) determines when a foreground command counts as waiting. */
 export function computeCounters(snap: Pick<OfficeSnapshot, 'rooms' | 'agents'> | null, now = Date.now()): Counters {
   const c: Counters = { rooms: 0, agents: 0, working: 0, subagents: 0, waiting: 0, shells: 0 };
   if (!snap) return c;
@@ -79,35 +82,35 @@ export function computeCounters(snap: Pick<OfficeSnapshot, 'rooms' | 'agents'> |
   return c;
 }
 
-/** Agentes esperando o usuário, do que espera há mais tempo para o mais recente. */
+/** Agents waiting on user, from longest-waiting to most recent. */
 export function waitingAgents(agents: readonly AgentInfo[]): AgentInfo[] {
   return agents.filter((a) => a.status === 'waiting').sort((a, b) => a.statusSince - b.statusSince);
 }
 
-// ---------------------------------------------------------------- esperando o shell
+// ---------------------------------------------------------------- waiting on shell
 
-/** Um comando em primeiro plano só conta como "esperando o shell" depois deste tempo (o mesmo limiar do mundo). */
+/** A foreground command only counts as "waiting on shell" after this duration (same threshold as world). */
 export const FOREGROUND_WAIT_MS = 10_000;
-/** Na gaveta, comandos em primeiro plano só aparecem depois deste tempo (comandos rápidos não fazem a lista piscar). */
+/** In drawer, foreground commands only appear after this duration (fast commands won't flicker list). */
 export const FOREGROUND_SHOW_MS = 2_000;
 
 export interface ShellWait {
-  /** Comandos que o agente está esperando, do mais antigo para o mais recente. */
+  /** Commands the agent is waiting on, oldest to newest. */
   jobs: ShellJob[];
-  /** Comando que dirige o tempo e a fase da espera (o shell mais antigo); ausente se o servidor ainda não conhece os comandos. */
+  /** Command driving wait time and stage (oldest shell); absent if server doesn't know commands yet. */
   main?: ShellJob;
-  /** Desde quando espera (epoch ms). */
+  /** Waiting since (epoch ms). */
   since: number;
-  /** true = parado num comando longo em primeiro plano (status 'working'); false = terminou o turno (status 'shell'). */
+  /** true = blocked on long foreground command (status 'working'); false = finished turn (status 'shell'). */
   foreground: boolean;
 }
 
 const byStart = (a: ShellJob, b: ShellJob) => a.startedAt - b.startedAt || a.id.localeCompare(b.id);
 
 /**
- * O agente está esperando algum shell terminar? Vale para o status 'shell' (terminou o turno com shells em segundo plano)
- * e para 'working' parado num comando em primeiro plano há mais de FOREGROUND_WAIT_MS. Devolve null caso contrário.
- * O tempo é o do shell (Bash) mais antigo; monitores só contam se não houver nenhum shell.
+ * Is the agent waiting on any shell? Applies to 'shell' status (finished turn with background shells)
+ * and 'working' stuck on foreground command for over FOREGROUND_WAIT_MS. Returns null otherwise.
+ * Time tracked from oldest shell (Bash); monitors only count if there are no shells.
  */
 export function shellWait(agent: Pick<AgentInfo, 'status' | 'shells' | 'statusSince'>, now: number): ShellWait | null {
   const all = agent.shells ?? [];
@@ -120,7 +123,7 @@ export function shellWait(agent: Pick<AgentInfo, 'status' | 'shells' | 'statusSi
   return { jobs, main, since: Math.min(main?.startedAt ?? agent.statusSince, now), foreground: agent.status === 'working' };
 }
 
-/** Shells em segundo plano disparados pelos subagentes (e subagentes deles) de um agente. */
+/** Background shells spawned by an agent's subagents (and their subagents). */
 function descendantShells(id: string, agents: readonly AgentInfo[]): ShellJob[] {
   const out: ShellJob[] = [];
   const seen = new Set([id]);
@@ -138,8 +141,8 @@ function descendantShells(id: string, agents: readonly AgentInfo[]): ShellJob[] 
 }
 
 /**
- * Como `shellWait`, olhando o escritório todo: um agente em 'shell' sem shells próprios conhecidos pode estar
- * esperando um comando que um subagente dele deixou rodando em segundo plano (o servidor faz o mesmo no balão).
+ * Like `shellWait`, checking the whole office: an agent in 'shell' with no known shells of its own
+ * may be waiting on a command a subagent left running in background (server does the same in bubble).
  */
 export function shellWaitIn(agent: AgentInfo, agents: readonly AgentInfo[], now: number): ShellWait | null {
   if (agent.status === 'shell' && !agent.shells?.length) {
@@ -149,17 +152,17 @@ export function shellWaitIn(agent: AgentInfo, agents: readonly AgentInfo[], now:
   return shellWait(agent, now);
 }
 
-/** Status mostrado na interface: quem está parado esperando um comando longo aparece como "Esperando o shell". */
+/** Display status in UI: agents stuck waiting on long commands appear as "Waiting on shell". */
 export function displayStatus(agent: Pick<AgentInfo, 'status' | 'shells' | 'statusSince'>, now: number): AgentStatus {
   return shellWait(agent, now) ? 'shell' : agent.status;
 }
 
-/** Comandos listados na gaveta ("Shells rodando"): todos, menos os em primeiro plano recém-iniciados. */
+/** Commands listed in drawer ("Running shells"): all except recently started foreground commands. */
 export function visibleShells(agent: Pick<AgentInfo, 'shells'>, now: number): ShellJob[] {
   return (agent.shells ?? []).filter((j) => j.background || j.kind === 'monitor' || now - j.startedAt >= FOREGROUND_SHOW_MS).sort(byStart);
 }
 
-/** Agentes esperando shells, de quem espera há mais tempo para o mais recente (botão "⏳ N shells"). */
+/** Agents waiting on shells, from longest-waiting to most recent ("⏳ N shells" button). */
 export function shellWaitingAgents(agents: readonly AgentInfo[], now: number): AgentInfo[] {
   return agents
     .filter((a) => isPresent(a))
@@ -169,94 +172,94 @@ export function shellWaitingAgents(agents: readonly AgentInfo[], now: number): A
     .map((x) => x.a);
 }
 
-/** Há algum shell rodando? (A interface passa a atualizar o cronômetro a cada segundo.) */
+/** Is there any running shell? (UI updates stopwatch every second if so.) */
 export function hasRunningShells(snap: Pick<OfficeSnapshot, 'agents'> | null): boolean {
   return !!snap?.agents.some((a) => isPresent(a) && (a.status === 'shell' || (a.shells?.length ?? 0) > 0));
 }
 
-/** Selo do tipo de comando. */
+/** Command type badge. */
 export function shellKindLabel(job: Pick<ShellJob, 'kind' | 'background'>): string {
   if (job.kind === 'monitor') return 'monitor';
-  return job.background ? tr('segundo plano') : tr('primeiro plano');
+  return job.background ? tr('background') : tr('foreground');
 }
 
 export interface ShellLine {
-  /** Rótulo do shell principal (ou um texto genérico). */
+  /** Main shell label (or generic text). */
   label: string;
-  /** Cronômetro: "0:42", "12:31", "1:02:10". */
+  /** Stopwatch: "0:42", "12:31", "1:02:10". */
   time: string;
-  /** "×2" quando espera mais de um comando; "" com um só. */
+  /** "×2" when waiting on multiple commands; "" with just one. */
   count: string;
-  /** Frase completa para dicas e leitores de tela: "⏳ Rodar a suíte · 12:31 (2 shells)". */
+  /** Full sentence for tooltips and screen readers: "⏳ Run suite · 12:31 (2 shells)". */
   text: string;
 }
 
-/** Linha de atividade de quem espera um shell: "⏳ <label> · <tempo>" (e "×N" se vários). */
+/** Activity line when waiting on shell: "⏳ <label> · <time>" (and "×N" if multiple). */
 export function shellLine(wait: ShellWait, now: number): ShellLine {
-  const label = wait.main?.label?.trim() || (wait.foreground ? tr('Esperando o comando terminar') : tr('Esperando o shell terminar'));
+  const label = wait.main?.label?.trim() || (wait.foreground ? tr('Waiting for the command to finish') : tr('Waiting for the shell to finish'));
   const time = formatElapsed(now - wait.since);
   const n = wait.jobs.length;
   const count = n > 1 ? `×${n}` : '';
   return { label, time, count, text: `⏳ ${label} · ${time}${n > 1 ? ` (${n} shells)` : ''}` };
 }
 
-/** Texto da caixa "Esperando o shell". */
+/** Text for "Waiting on shell" box. */
 export function shellBoxText(wait: Pick<ShellWait, 'foreground' | 'jobs'>): string {
-  if (wait.foreground) return tr('Está parado num comando no terminal, esperando ele terminar para continuar o turno.');
+  if (wait.foreground) return tr('Stuck on a terminal command, waiting for it to finish to continue the turn.');
   const n = wait.jobs.length;
   return n > 1
-    ? tr('Terminou o turno e está esperando {0} shells terminarem. A cada um que termina, o agente recebe o resultado.', [n])
-    : tr('Terminou o turno e está esperando o shell terminar. Quando ele terminar, o agente recebe o resultado.');
+    ? tr('Finished the turn and is waiting for {0} shells to finish. As each one finishes, the agent gets its result.', [n])
+    : tr('Finished the turn and is waiting for the shell to finish. When it does, the agent gets the result.');
 }
 
 export type ShellStage = 'popcorn' | 'spin' | 'cobweb' | 'nap';
 
 export interface ShellStageInfo {
   stage: ShellStage;
-  /** A partir de quanto tempo de espera a fase começa (ms). */
+  /** Elapsed wait duration when stage begins (ms). */
   from: number;
   emoji: string;
-  /** Frase curta do que o personagem está fazendo. */
+  /** Short phrase describing what character is doing. */
   text: string;
-  /** Explicação para a ajuda. */
+  /** Help description. */
   help: string;
 }
 
 const MIN = 60_000;
 
-/** As fases da espera no escritório (a "escalada cômica"), pela idade do shell mais antigo. */
+/** Wait stages in the office ("comic escalation"), by age of oldest shell. */
 export const SHELL_STAGES: readonly ShellStageInfo[] = [
   {
     stage: 'popcorn',
     from: 0,
     emoji: '🍿',
-    text: tr('Comendo pipoca e assistindo ao terminal'),
-    help: tr('Até 3 min: recosta na cadeira com um balde de pipoca e assiste ao terminal como se fosse um filme.'),
+    text: tr('Eating popcorn and watching the terminal'),
+    help: tr('Up to 3 min: leans back in the chair with a bucket of popcorn and watches the terminal like a movie.'),
   },
   {
     stage: 'spin',
     from: 3 * MIN,
     emoji: '🪑',
-    text: tr('A pipoca acabou: girando na cadeira'),
-    help: tr('De 3 a 10 min: a pipoca acaba; braços cruzados, dedos batendo e, de vez em quando, um giro completo na cadeira.'),
+    text: tr('Out of popcorn: spinning in the chair'),
+    help: tr('From 3 to 10 min: the popcorn runs out; arms crossed, fingers tapping and, now and then, a full spin in the chair.'),
   },
   {
     stage: 'cobweb',
     from: 10 * MIN,
     emoji: '🕸️',
-    text: tr('Já tem teia de aranha na cadeira'),
-    help: tr('Depois de 10 min: aparece uma teia de aranha na cadeira (ela cresce depois de 20 min) e escapa um bocejo.'),
+    text: tr("There's a cobweb on the chair already"),
+    help: tr('After 10 min: a cobweb appears on the chair (it grows after 20 min) and a yawn slips out.'),
   },
   {
     stage: 'nap',
     from: 25 * MIN,
     emoji: '😴',
-    text: tr('Cochilou esperando o shell'),
-    help: tr('Depois de 25 min: cochila na mesa, coberto de teia.'),
+    text: tr('Dozed off waiting on the shell'),
+    help: tr('After 25 min: naps at the desk, covered in cobwebs.'),
   },
 ];
 
-/** Fase da espera para um shell rodando há `ms`, e quanto falta para a próxima (null na última). */
+/** Wait stage for shell running for `ms`, and time until next stage (null on last). */
 export function shellStage(ms: number): ShellStageInfo & { nextIn: number | null } {
   const v = Math.max(0, ms);
   let i = 0;
@@ -265,7 +268,7 @@ export function shellStage(ms: number): ShellStageInfo & { nextIn: number | null
   return { ...SHELL_STAGES[i], nextIn: next ? next.from - v : null };
 }
 
-/** Marcador do servidor para o fim de um shell (Activity com tool 'ShellDone'; error = falhou ou foi interrompido). */
+/** Server marker for shell completion (Activity with tool 'ShellDone'; error = failed or interrupted). */
 export function shellDoneKind(activity: Pick<Activity, 'tool' | 'error'> | undefined): 'ok' | 'fail' | null {
   if (activity?.tool !== 'ShellDone') return null;
   return activity.error ? 'fail' : 'ok';
@@ -286,47 +289,47 @@ export function taskProgress(tasks: readonly Pick<TaskItem, 'status'>[]): TaskPr
   return p;
 }
 
-/** Soma as tarefas de vários agentes (progresso agregado de uma sala). */
+/** Sums tasks across multiple agents (aggregated progress for a room). */
 export function aggregateTasks(agents: readonly Pick<AgentInfo, 'tasks'>[]): TaskProgress {
   return taskProgress(agents.flatMap((a) => a.tasks));
 }
 
-// ---------------------------------------------------------------- agrupamento e filtros
+// ---------------------------------------------------------------- grouping and filters
 
 export interface AgentFilter {
-  /** Texto livre: nome, papel, título, sala, caminho ou conta. */
+  /** Free text: name, role, title, room, path, or account. */
   query: string;
-  /** Contas ocultas (AccountInfo.id). */
+  /** Hidden accounts (AccountInfo.id). */
   hiddenAccounts: ReadonlySet<string>;
 }
 
 export interface AgentNode {
   agent: AgentInfo;
-  /** Subagentes visíveis (após filtros), ordenados por chegada. */
+  /** Visible subagents (after filters), ordered by arrival. */
   subs: AgentInfo[];
-  /** Total de subagentes presentes no snapshot (independe do filtro). */
+  /** Total present subagents in snapshot (filter-independent). */
   subTotal: number;
 }
 
 export interface RoomGroup {
   room: RoomInfo;
-  /** Contas presentes na sala (ids, na ordem de `accounts` do snapshot). */
+  /** Accounts present in room (ids, in snapshot `accounts` order). */
   accounts: string[];
   nodes: AgentNode[];
-  /** Todos os agentes da sala (sem filtro). */
+  /** All agents in the room (unfiltered). */
   agents: AgentInfo[];
   tasks: TaskProgress;
-  /** Quantos agentes da sala passam no filtro. */
+  /** How many agents in room match filter. */
   matches: number;
 }
 
 function accountText(account: AccountInfo | undefined): string {
   if (!account) return '';
-  // A ferramenta entra na busca: "codex" acha os agentes do Codex.
+  // Tool included in search: "codex" finds Codex agents.
   return [account.short, account.name, account.email ?? '', account.id, account.provider === 'codex' ? 'Codex' : ''].join(' ');
 }
 
-/** Verdadeiro se o agente bate com a busca textual (sem acentos, sem diferenciar maiúsculas). */
+/** True if agent matches text search (case- and accent-insensitive). */
 export function matchesQuery(agent: AgentInfo, room: RoomInfo | undefined, account: AccountInfo | undefined, query: string): boolean {
   const q = normalizeSearch(query);
   if (!q) return true;
@@ -339,7 +342,7 @@ export function matchesQuery(agent: AgentInfo, room: RoomInfo | undefined, accou
       room?.path ?? '',
       accountText(account),
       agent.activity?.text ?? '',
-      // Quem espera um shell também aparece ao buscar "shell" (ou pelo rótulo do comando).
+      // Agents waiting on a shell also match search for "shell" (or command label).
       agent.status === 'shell' ? STATUS_LABEL.shell : '',
       ...(agent.shells ?? []).map((j) => `shell ${j.label}`),
     ].join(' \u0001 '),
@@ -350,10 +353,10 @@ export function matchesQuery(agent: AgentInfo, room: RoomInfo | undefined, accou
 const byArrival = (a: AgentInfo, b: AgentInfo) => a.startedAt - b.startedAt || a.id.localeCompare(b.id);
 
 /**
- * Agrupa o snapshot em salas (ordenadas por slot) -> agentes principais -> subagentes.
- * Subagentes cujo pai não está na mesma sala viram itens de primeiro nível.
- * Com filtro: um principal aparece se ele ou algum subagente bater; se o principal bate, todos os subs aparecem.
- * Salas sem nenhum agente visível são omitidas (exceto sem filtro ativo).
+ * Groups snapshot into rooms (ordered by slot) -> main agents -> subagents.
+ * Subagents whose parent is not in the same room become top-level items.
+ * With filter: main agent appears if it or a subagent matches; if main matches, all subs appear.
+ * Rooms with no visible agents are omitted (unless no filter active).
  */
 export function groupRooms(snap: Pick<OfficeSnapshot, 'rooms' | 'agents' | 'accounts'> | null, filter?: AgentFilter): RoomGroup[] {
   if (!snap) return [];
@@ -405,7 +408,87 @@ export function groupRooms(snap: Pick<OfficeSnapshot, 'rooms' | 'agents' | 'acco
   return groups;
 }
 
-/** Contas distintas presentes em uma lista de agentes, na ordem das contas do snapshot. */
+/**
+ * Sidebar groups by role: the one boss (orchestrator), the Antigravity accounts registered as workers (team.json), and
+ * "others" (every other session: a boss that stepped down, a Claude session asking something on the side, Codex).
+ */
+export type RoleKey = 'boss' | 'workers' | 'others';
+export const ROLE_KEYS: readonly RoleKey[] = ['boss', 'workers', 'others'];
+
+export interface RoleGroup {
+  key: RoleKey;
+  nodes: AgentNode[];
+  /** Agents of the group still in the office (main agents, unfiltered by subagents). */
+  present: number;
+}
+
+/** Who is boss and who are workers in the office shown (ui/offices.ts); absent = the old single team. */
+export interface RoleScope {
+  bossId?: string;
+  workers: readonly string[];
+  /** The office shown (OfficeInfo.id): the sidebar lists the characters of its building only (searches find all). */
+  office?: string;
+}
+
+/** The scope of an office: its boss character, its workers and its building. */
+export function roleScope(snap: Pick<OfficeSnapshot, 'agents' | 'team'> | null | undefined, office: OfficeInfo | undefined): RoleScope | undefined {
+  if (!office) return undefined;
+  return { bossId: officeBoss(snap, office)?.id ?? office.pendingBoss, workers: office.workers, office: office.id };
+}
+
+/** The character is drawn in the building of the scope's office (no scope or no office: everyone is). */
+function inScopeBuilding(snap: Pick<OfficeSnapshot, 'agents'> | null | undefined, team: Parameters<typeof teamOffices>[0], a: Pick<AgentInfo, 'office' | 'parentId'>, scope: RoleScope | undefined): boolean {
+  if (!scope?.office) return true;
+  return agentOfficeId(snap, a, teamOffices(team)) === scope.office;
+}
+
+/**
+ * Group of an agent. Workers = the characters of registered workers (snapshot.team: their terminal sessions, or the
+ * Antigravity profiles in `workers`; without a team every Antigravity worker). `pendingBoss` = the session opened with
+ * "＋ Boss", a boss before the server crowns it. With a `scope` (an office): its boss and its workers only; the
+ * bosses and workers of the other offices go to Others.
+ */
+export function roleKey(
+  a: Pick<AgentInfo, 'id' | 'boss' | 'provider' | 'office' | 'parentId'>,
+  team?: Pick<TeamInfo, 'workers' | 'pendingBoss' | 'sessions' | 'offices'>,
+  scope?: RoleScope,
+  snap?: Pick<OfficeSnapshot, 'agents' | 'team'> | null,
+): RoleKey {
+  if (scope) {
+    if (a.id === scope.bossId) return 'boss';
+    // a character of another office's building (found by a search) is not this office's boss or worker
+    if (!inScopeBuilding(snap, team, a, scope)) return 'others';
+    const w = workerOfAgent(team, a);
+    return w && scope.workers.includes(w) ? 'workers' : 'others';
+  }
+  if (a.boss || (team?.pendingBoss && a.id === team.pendingBoss)) return 'boss';
+  return workerOfAgent(team, a) ? 'workers' : 'others';
+}
+
+/**
+ * The sidebar by role instead of by folder: the same nodes as groupRooms (filters and subagents under their main
+ * agent), regrouped. Boss and Workers are always there (empty = nobody yet, with their ＋); Others only when it has
+ * someone. Inside a group: room order, then arrival. `scope`: the office shown (roleScope).
+ */
+export function groupRoles(snap: Pick<OfficeSnapshot, 'rooms' | 'agents' | 'accounts' | 'team'> | null, filter?: AgentFilter, scope?: RoleScope): RoleGroup[] {
+  if (!snap) return [];
+  const byKey = new Map<RoleKey, AgentNode[]>(ROLE_KEYS.map((k) => [k, []]));
+  // Several offices: the building of the office shown; a search looks in every building (a hit elsewhere switches the tab).
+  const everywhere = !!filter?.query.trim();
+  for (const g of groupRooms(snap, filter)) {
+    for (const n of g.nodes) {
+      if (!everywhere && !inScopeBuilding(snap, snap.team, n.agent, scope)) continue;
+      byKey.get(roleKey(n.agent, snap.team, scope, snap))!.push(n);
+    }
+  }
+  return ROLE_KEYS.flatMap((key) => {
+    const nodes = byKey.get(key)!;
+    if (!nodes.length && key === 'others') return [];
+    return [{ key, nodes, present: nodes.filter((n) => n.agent.status !== 'offline').length }];
+  });
+}
+
+/** Distinct accounts present in agent list, in snapshot account order. */
 export function accountsOf(agents: readonly Pick<AgentInfo, 'account'>[], accounts: readonly Pick<AccountInfo, 'id'>[]): string[] {
   const present = new Set(agents.map((a) => a.account));
   const ordered = accounts.map((a) => a.id).filter((id) => present.has(id));
@@ -413,22 +496,22 @@ export function accountsOf(agents: readonly Pick<AgentInfo, 'account'>[], accoun
   return ordered;
 }
 
-/** Ordena por urgência e depois por chegada (para listas de subagentes na gaveta). */
+/** Sorts by urgency then arrival (for subagent lists in drawer). */
 export function sortByUrgency(agents: readonly AgentInfo[]): AgentInfo[] {
   return agents.slice().sort((a, b) => STATUS_URGENCY[a.status] - STATUS_URGENCY[b.status] || byArrival(a, b));
 }
 
-/** Atalhos de shell para o texto do estado vazio: ["c", "d"] -> "atalhos c ou d". */
+/** Shell shortcuts for empty state text: ["c", "d"] -> "shortcuts c or d". */
 export function shortcutHint(accounts: readonly Pick<AccountInfo, 'short'>[]): string {
   const keys = accounts.map((a) => a.short.toLowerCase()).filter((s) => /^[a-z0-9]{1,3}$/.test(s));
   if (keys.length === 0) return '';
-  if (keys.length === 1) return tr('atalho {0}', [keys[0]]);
-  return tr('atalhos {0} ou {1}', [keys.slice(0, -1).join(', '), keys[keys.length - 1]]);
+  if (keys.length === 1) return tr('shortcut {0}', [keys[0]]);
+  return tr('shortcuts {0} or {1}', [keys.slice(0, -1).join(', '), keys[keys.length - 1]]);
 }
 
 /**
- * Mescla histórico longo (servidor) com as atividades recentes, sem duplicar, do mais antigo ao mais recente.
- * `until` (instante do replay) descarta o que aconteceu depois — ao retroceder, a gaveta não fica com o futuro.
+ * Merges long history (server) with recent activities, deduplicated, oldest to newest.
+ * `until` (replay timestamp) discards subsequent events — rewinding won't show future in drawer.
  */
 export function mergeHistory<T extends { id: string; at: number }>(history: readonly T[], recent: readonly T[], limit = 200, until?: number): T[] {
   const seen = new Map<string, T>();

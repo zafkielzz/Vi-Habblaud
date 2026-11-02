@@ -1,10 +1,10 @@
-// Iluminação do ciclo dia/noite: um mapa de luz em cache (exterior escurecido e azulado, interiores
-// acesos, halos de postes e luminárias) multiplicado sobre a cena, e os brilhos por frame (monitores,
-// TV, máquinas, faróis dos carros, vaga-lumes). As cores vêm de daylight.ts (puro).
+// Day/night cycle lighting: cached light map (darkened and bluish exterior, lit
+// interiors, lamp and streetlamp halos) multiplied over the scene, and per-frame glows (monitors,
+// TV, machines, car headlights, fireflies). Colors come from daylight.ts (pure).
 //
-// Custo: de dia nada é desenhado. Fora isso, o mapa (meia resolução do mundo) só é refeito quando
-// a chave de luz muda (hora em passos de poucos segundos, luz das salas, ocupação das áreas comuns,
-// montagem de salas); por frame, um drawImage em 'multiply' e alguns sprites de brilho em cache.
+// Cost: nothing is drawn during the day. Otherwise, the map (half world resolution) is only rebuilt
+// when lighting state changes (time in steps of a few seconds, room light, common area occupancy,
+// room assembly); per frame, one drawImage in 'multiply' and a few cached glow sprites.
 import { TILE, type ArtModule, type ScreenMode } from '../../art/api';
 import { mulberry32 } from '../../../../shared/hash';
 import { BUILDING_H, COL_W, CORRIDOR_H, CORRIDOR_Y } from '../constants';
@@ -16,13 +16,13 @@ import { ambientAt, ambientDistance, approachAmbient, effectiveHour, isNeutral, 
 import { glowSprite } from './props';
 import { furnitureSprites, wallItemOrigin, wallSprites, type AreaVis, type FurnVis, type WallVis } from './scene';
 
-/** O nível de luz é recalculado no máximo a cada isto (ms). */
+/** Light level is recalculated at most every this (ms). */
 export const RECALC_MS = 4_000;
-/** Pixels de mundo por pixel do mapa de luz. */
+/** World pixels per light map pixel. */
 const MAP_SCALE = 2;
-/** Duração (ms) da transição ao trocar a preferência ou a hora forçada. */
+/** Duration (ms) of transition when changing preference or forced time. */
 const FADE_MS = 1_200;
-/** Ocupação das áreas comuns (luz por presença) reavaliada a cada isto (ms). */
+/** Common area occupancy (presence-based lighting) re-evaluated every this (ms). */
 const OCCUPANCY_MS = 250;
 const LAMP_WARM: Rgb = [255, 236, 196];
 const STREET_WARM: Rgb = [255, 214, 150];
@@ -30,7 +30,7 @@ const SCREEN_COOL: Rgb = [196, 222, 255];
 const ARCADE_GLOW: Rgb = [236, 190, 255];
 const FIREFLIES = 26;
 
-/** O que a iluminação precisa do renderer (satisfeito pelo próprio Renderer). */
+/** What lighting needs from the renderer (satisfied by Renderer itself). */
 export interface LightScene {
   readonly areas: ReadonlyMap<string, AreaVis>;
   readonly exterior: ExteriorLayout;
@@ -41,7 +41,7 @@ export interface LightScene {
   deskScreen(f: FurnVis, area: AreaVis): ScreenMode;
 }
 
-/** Retângulo visível (px de mundo). */
+/** Visible rectangle (world px). */
 export interface View {
   x0: number;
   y0: number;
@@ -61,8 +61,8 @@ interface Firefly {
 const halos = new Map<string, HTMLCanvasElement>();
 
 /**
- * Halo para o mapa de luz: gradiente radial da cor `c` (opaca no centro) até transparente. Desenhado
- * com 'lighten', clareia o mapa até a cor da lâmpada sem nunca escurecer o que já está aceso.
+ * Halo for light map: radial gradient from color `c` (opaque at center) to transparent. Drawn
+ * with 'lighten', brightens the map up to lamp color without darkening what is already lit.
  */
 function haloSprite(c: Rgb, size: number): HTMLCanvasElement {
   const key = `${c.join(',')}:${size}`;
@@ -86,7 +86,7 @@ function haloSprite(c: Rgb, size: number): HTMLCanvasElement {
 
 let vignette: HTMLCanvasElement | null = null;
 
-/** Vinheta (multiplicação) das salas acesas à noite: centro neutro, cantos um pouco mais escuros e quentes. */
+/** Vignette (multiplication) of rooms lit at night: neutral center, slightly darker and warmer corners. */
 function vignetteSprite(): HTMLCanvasElement {
   if (vignette) return vignette;
   const size = 64;
@@ -105,7 +105,7 @@ function vignetteSprite(): HTMLCanvasElement {
 
 const beams = new Map<string, HTMLCanvasElement>();
 
-/** Faixa de sol (gradiente vertical: forte junto à janela, some no fim). */
+/** Sunbeam (vertical gradient: strong near window, fades at end). */
 function beamSprite(c: Rgb): HTMLCanvasElement {
   const key = c.join(',');
   let s = beams.get(key);
@@ -120,7 +120,7 @@ function beamSprite(c: Rgb): HTMLCanvasElement {
   g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 8, 64);
-  // bordas laterais suaves
+  // soft lateral edges
   ctx.globalCompositeOperation = 'destination-out';
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(0, 0, 1, 64);
@@ -138,7 +138,7 @@ const prefersReducedMotion = (): boolean => {
 };
 
 export class Lighting {
-  /** Ambiente aplicado (pode estar em transição até `target`). */
+  /** Applied ambient (may be transitioning to `target`). */
   ambient: Ambient = ambientAt(12);
   private target: Ambient = this.ambient;
   private calcAt = -1e9;
@@ -150,7 +150,7 @@ export class Lighting {
   private mapKey = '';
   private mapX = 0;
   private mapY = 0;
-  /** Luz por presença das áreas comuns (0 = penumbra, 1 = acesa), com transição. */
+  /** Presence-based light of common areas (0 = dim, 1 = lit), with transition. */
   private coreLevel = new Map<string, number>();
   private coreBusy = new Map<string, boolean>();
   private occAt = 0;
@@ -165,8 +165,8 @@ export class Lighting {
   ) {}
 
   /**
-   * Atualiza o ambiente (recalcula a luz no máximo a cada RECALC_MS, ou já ao trocar a preferência
-   * ou a hora forçada) e devolve a hora efetiva, para o céu das janelas.
+   * Updates ambient (recalculates light at most every RECALC_MS, or immediately upon changing preference
+   * or forced time) and returns effective hour, for window skies.
    */
   update(now: number, mode: DaylightMode, override: number | null, date: Date): number {
     const hour = effectiveHour(mode, override, date);
@@ -186,7 +186,7 @@ export class Lighting {
     const dt = Math.max(0, Math.min(250, now - this.lastNow));
     this.lastNow = now;
     if (this.ambient !== this.target) {
-      // transição suave (com movimento reduzido, troca direto)
+      // smooth transition (with reduced motion, switches instantly)
       this.ambient = this.reduced ? this.target : approachAmbient(this.ambient, this.target, (dt / FADE_MS) * 3);
       if (ambientDistance(this.ambient, this.target) < 3) this.ambient = this.target;
     }
@@ -197,9 +197,9 @@ export class Lighting {
     return this.ambient.night;
   }
 
-  // =================================================================== mapa de luz
+  // =================================================================== light map
 
-  /** Multiplica o mapa de luz sobre o que está visível (nada de dia). */
+  /** Multiplies light map over visible area (nothing during the day). */
   drawAmbient(ctx: CanvasRenderingContext2D, scene: LightScene, view: View, now: number, dt: number): void {
     const amb = this.ambient;
     this.updateOccupancy(scene, now, dt);
@@ -212,14 +212,14 @@ export class Lighting {
     const my1 = my0 + map.height * MAP_SCALE;
     ctx.save();
     ctx.globalCompositeOperation = 'multiply';
-    // parte visível do mapa (em pixels inteiros do mapa)
+    // visible part of the map (in integer map pixels)
     const sx = Math.max(0, Math.floor((view.x0 - mx0) / MAP_SCALE) - 1);
     const sy = Math.max(0, Math.floor((view.y0 - my0) / MAP_SCALE) - 1);
     const ex = Math.min(map.width, Math.ceil((view.x1 - mx0) / MAP_SCALE) + 1);
     const ey = Math.min(map.height, Math.ceil((view.y1 - my0) / MAP_SCALE) + 1);
-    // sem suavização: pixels nítidos como o resto da arte (e bem mais barato de ampliar)
+    // no smoothing: sharp pixels like the rest of the art (and much cheaper to upscale)
     if (ex > sx && ey > sy) ctx.drawImage(map, sx, sy, ex - sx, ey - sy, mx0 + sx * MAP_SCALE, my0 + sy * MAP_SCALE, (ex - sx) * MAP_SCALE, (ey - sy) * MAP_SCALE);
-    // além do mapa: o mesmo tom do exterior
+    // outside the map: same tint as exterior
     ctx.fillStyle = rgbCss(amb.outside);
     const w = view.x1 - view.x0 + 4;
     if (view.y0 < my0) ctx.fillRect(view.x0 - 2, view.y0 - 2, w, my0 - view.y0 + 2);
@@ -233,7 +233,7 @@ export class Lighting {
     ctx.restore();
   }
 
-  /** Áreas comuns acendem com gente dentro (banheiro com sensor de presença, copa, lounge). */
+  /** Common areas light up when people enter (restroom with motion sensor, cafe, lounge). */
   private updateOccupancy(scene: LightScene, now: number, dt: number): void {
     if (now - this.occAt >= OCCUPANCY_MS) {
       this.occAt = now;
@@ -250,7 +250,7 @@ export class Lighting {
     }
   }
 
-  /** Copa, lounge e banheiros: luz por presença. Recepção e corredor ficam sempre acesos. */
+  /** Cafe, lounge and restrooms: presence-based light. Reception and corridor stay lit. */
   private presenceLit(vis: AreaVis): boolean {
     const kind = vis.layout.kind;
     return kind === 'cafe' || kind === 'lounge' || kind === 'restroom';
@@ -264,7 +264,7 @@ export class Lighting {
     return false;
   }
 
-  /** Luz (0..1) e cobertura (montagem/desmontagem) de uma área. */
+  /** Light (0..1) and coverage (assembly/dismantling) of an area. */
   private areaLight(vis: AreaVis, now: number): { lit: number; cover: number } {
     const room = vis.room;
     if (room) {
@@ -275,12 +275,12 @@ export class Lighting {
     return { lit: 1, cover: 1 };
   }
 
-  /** Cor de multiplicação de uma área no mapa. */
+  /** Multiplication color of an area on the map. */
   private areaColor(vis: AreaVis, lit: number, cover: number): Rgb {
     const amb = this.ambient;
     let c: Rgb;
     if (vis.room) {
-      // sala apagada fica neutra no mapa: o escurecimento dela é a sombra da sala (renderer)
+      // unlit room is neutral on the map: its darkening is the room shadow (renderer)
       c = mixRgb(WHITE, amb.inside, lit);
     } else if (vis.layout.kind === 'corridor') {
       c = mixRgb(amb.inside, amb.dim, 0.18);
@@ -317,7 +317,7 @@ export class Lighting {
     return this.map;
   }
 
-  /** Tudo o que muda o mapa, em passos discretos (evita refazê-lo a cada frame). */
+  /** Everything that changes the map, in discrete steps (avoids rebuilding every frame). */
   private lightKey(scene: LightScene, now: number): string {
     const a = this.ambient;
     let k = `${Math.round(a.night * 200)}|${a.outside.join(',')}|${a.inside.join(',')}|${a.dim.join(',')}|${this.sim.building.cols}`;
@@ -337,10 +337,10 @@ export class Lighting {
     m.globalAlpha = 1;
     m.fillStyle = rgbCss(amb.outside);
     m.fillRect(0, 0, this.map!.width, this.map!.height);
-    // daqui em diante, coordenadas de mundo
+    // from here on, world coordinates
     m.setTransform(1 / MAP_SCALE, 0, 0, 1 / MAP_SCALE, -this.mapX / MAP_SCALE, -this.mapY / MAP_SCALE);
     const corridorLit = rgbCss(mixRgb(amb.inside, amb.dim, 0.18));
-    // fechamentos do corredor nos slots vazios (fachada com janelas ao norte, mureta ao sul)
+    // corridor enclosures in empty slots (facade with windows to the north, low wall to the south)
     for (const sh of scene.shells) {
       if (scene.roomInSlot(sh.slot)) continue;
       const r = sh.rect;
@@ -352,12 +352,12 @@ export class Lighting {
     for (const vis of scene.areas.values()) {
       const l = this.areaLight(vis, now);
       if (l.cover <= 0.01) continue;
-      // quanto de luz a área "irradia" (janelas): salas pela luz, áreas comuns vazias na penumbra
+      // how much light the area "radiates" (windows): rooms by light, empty common areas in dim light
       lit.set(vis, vis.room ? l.lit * l.cover : this.presenceLit(vis) ? 0.4 + 0.6 * l.lit : 1);
       const p = vis.px;
       const shade = vis.room ? vis.layout.shade : undefined;
       if (shade && l.cover >= 1) {
-        // a mureta das salas ao norte (fora da sombra) recebe a luz do corredor
+        // low wall of north rooms (outside shadow) receives corridor light
         m.fillStyle = corridorLit;
         m.fillRect(p.x, p.y, p.w, p.h);
         m.fillStyle = rgbCss(this.areaColor(vis, l.lit, l.cover));
@@ -366,7 +366,7 @@ export class Lighting {
         m.fillStyle = rgbCss(this.areaColor(vis, l.lit, l.cover));
         m.fillRect(p.x, p.y, p.w, p.h);
       }
-      // à noite, o centro das salas acesas fica mais claro que os cantos (luz do teto)
+      // at night, center of lit rooms is brighter than corners (ceiling light)
       const glow = (vis.room ? l.lit : this.presenceLit(vis) ? l.lit : vis.layout.kind === 'corridor' ? 0 : 1) * l.cover * n;
       if (glow > 0.05) {
         const r = shade ?? p;
@@ -381,7 +381,7 @@ export class Lighting {
       m.setTransform(1, 0, 0, 1, 0, 0);
       return;
     }
-    // halos: luminárias acesas, máquinas, postes, a luz das janelas no gramado
+    // halos: lit lamps, machines, streetlamps, window light spilling onto lawn
     m.globalCompositeOperation = 'lighten';
     const lamp = haloSprite(LAMP_WARM, 64);
     const street = haloSprite(STREET_WARM, 64);
@@ -394,8 +394,8 @@ export class Lighting {
       m.drawImage(img, cx - w / 2, cy - h / 2, w, h);
     };
     for (const [vis, l] of lit) {
-      // nas salas, só com a luz acesa; nas áreas comuns, abajures e máquinas ficam sempre ligados
-      // (luz de vigia quando não há ninguém)
+      // in rooms, only when light is on; in common areas, lamps and machines stay on
+      // (nightlight when empty)
       const on = vis.room ? vis.room.lightOn && l >= 0.3 : true;
       if (!on) continue;
       const a = vis.room ? k * l : k;
@@ -417,7 +417,7 @@ export class Lighting {
     m.setTransform(1, 0, 0, 1, 0, 0);
   }
 
-  /** À noite, a luz das janelas e das fachadas de vidro se projeta no gramado e na calçada. */
+  /** At night, light from windows and glass facades spills onto lawn and sidewalk. */
   private paintWindowSpill(
     scene: LightScene,
     lit: Map<AreaVis, number>,
@@ -425,24 +425,26 @@ export class Lighting {
     halo: (img: HTMLCanvasElement, cx: number, cy: number, w: number, h: number, a: number) => void,
     warm: HTMLCanvasElement,
   ): void {
-    const bw = this.sim.building.cols * COL_W * TILE;
     const bh = BUILDING_H * TILE;
     for (const [vis, l] of lit) {
       if (l < 0.3) continue;
       const r = vis.layout.rect;
       if (r.y === 0) {
-        // janelas da parede norte -> gramado ao norte do prédio
+        // north wall windows -> lawn north of building
         for (const w of vis.wallItems) if (w.kind === 'window') halo(warm, w.cx, -12, 58, 30, 0.55 * k * l);
       } else if (vis.layout.kind !== 'corridor' && r.y + r.h >= BUILDING_H) {
-        // salas ao sul: brilho suave sobre a cerca viva e a calçada
+        // south rooms: soft glow over hedge and sidewalk
         for (const fx of [0.25, 0.75]) halo(warm, (r.x + r.w * fx) * TILE, bh + 16, 96, 30, 0.35 * k * l);
       }
     }
-    // fachadas de vidro do corredor (entrada a oeste e ponta leste)
+    // corridor glass facades (west entrance and east end)
     const cy = (CORRIDOR_Y + CORRIDOR_H / 2) * TILE;
-    halo(warm, -20, cy, 56, 92, 0.6 * k);
-    halo(warm, bw + 20, cy, 56, 92, 0.45 * k);
-    // janelas do corredor que dão para os pátios dos slots vazios
+    for (const b of this.sim.building.buildings) {
+      const x0 = b.col0 * COL_W * TILE;
+      halo(warm, x0 - 20, cy, 56, 92, 0.6 * k);
+      halo(warm, x0 + b.cols * COL_W * TILE + 20, cy, 56, 92, 0.45 * k);
+    }
+    // corridor windows facing empty slot courtyards
     for (const w of scene.shellWindows) {
       const slot = Number(w.areaId.slice(6));
       if (scene.roomInSlot(slot)) continue;
@@ -450,9 +452,9 @@ export class Lighting {
     }
   }
 
-  // =================================================================== brilhos por frame
+  // =================================================================== per-frame glows
 
-  /** Brilhos aditivos: monitores, TV, máquinas, bulbos dos postes, faróis e vaga-lumes. */
+  /** Additive glows: monitors, TV, machines, streetlamp bulbs, headlights, and fireflies. */
   drawGlows(ctx: CanvasRenderingContext2D, scene: LightScene, view: View, now: number): void {
     const n = this.ambient.night;
     ctx.save();
@@ -472,11 +474,11 @@ export class Lighting {
         if (f.kind === 'desk' || f.kind === 'desk_back') {
           const mode = scene.deskScreen(f, vis);
           if (mode === 'off') continue;
-          // quem trabalha à noite fica com o rosto iluminado pela tela
+          // anyone working at night has their face illuminated by the screen
           ctx.globalAlpha = (mode === 'idle' ? 0.2 : 0.35) * k;
           ctx.drawImage(cool, Math.round(f.ax - 24), Math.round(f.ay - 34));
         } else if (f.kind === 'floor_lamp' && n > 0.2 && (!room || room.lightOn)) {
-          // bulbo aceso (o halo no chão está no mapa de luz)
+          // lit bulb (halo on floor is in light map)
           const g = this.lampHead(f);
           ctx.globalAlpha = 0.5 * n;
           ctx.drawImage(warm, Math.round(g.x - 16), Math.round(g.y - 16), 32, 32);
@@ -485,7 +487,7 @@ export class Lighting {
           ctx.drawImage(cool, Math.round(f.ax - 24), Math.round(f.ay - 36));
         }
       }
-      // TV de parede ligada: luz azulada na frente da tela
+      // wall TV on: bluish light in front of screen
       if (n > 0.2) {
         for (const w of vis.wallItems) {
           if (w.kind !== 'tv' || !inView(w.cx, w.baseY, 60)) continue;
@@ -508,16 +510,16 @@ export class Lighting {
   }
 
   /**
-   * Sol entrando pelas janelas da parede norte (o sol do Brasil passa ao norte): faixas de luz no
-   * piso, curtas ao meio-dia e longas e alaranjadas de manhã cedo e no fim da tarde; de manhã
-   * tombam para oeste, à tarde para leste.
+   * Sunlight entering through north wall windows (Brazil's sun passes to the north): light beams on
+   * the floor, short at midday and long and orange in early morning and late afternoon; in the morning
+   * tilting west, in the afternoon east.
    */
   private drawSunbeams(ctx: CanvasRenderingContext2D, scene: LightScene, view: View): void {
     const sun = sunbeamAt(this.ambient.hour);
     if (!sun) return;
     const img = beamSprite(mixRgb([255, 226, 160], [255, 150, 64], this.ambient.warm));
     ctx.globalCompositeOperation = 'lighter';
-    /** Faixas das janelas `ws`, recortadas no piso `clip` (a luz não atravessa paredes). */
+    /** Window beams `ws`, clipped to floor `clip` (light does not pass through walls). */
     const draw = (ws: readonly WallVis[], clip: { x: number; y: number; w: number; h: number }) => {
       if (clip.x > view.x1 || clip.x + clip.w < view.x0 || clip.y > view.y1 || clip.y + clip.h < view.y0) return;
       ctx.save();
@@ -528,7 +530,7 @@ export class Lighting {
       for (const w of ws) {
         const r = this.windowGlass(w);
         if (!r) continue;
-        // paralelogramo: começa na base da parede e escorrega em x conforme desce
+        // parallelogram: starts at wall base and skews in x as it descends
         ctx.save();
         ctx.transform(1, 0, sun.skew, 1, r.x - sun.skew * w.baseY, 0);
         ctx.drawImage(img, 0, w.baseY, r.w, sun.len);
@@ -551,7 +553,7 @@ export class Lighting {
     }
   }
 
-  /** Retângulo do vidro de uma janela (px de mundo, só x e largura importam). */
+  /** Window glass rectangle (world px, only x and width matter). */
   private windowGlass(w: WallVis): { x: number; w: number } | null {
     const s = wallSprites(this.art, 'window', w.variant, 0, w.seed);
     if (!s) return null;
@@ -560,7 +562,7 @@ export class Lighting {
     return g ? { x: o.x + g.x, w: g.w } : { x: o.x + 3, w: s.base.canvas.width - 6 };
   }
 
-  /** Centro do bulbo da luminária (rects.glow da arte, ou um palpite pela altura). */
+  /** Lamp bulb center (rects.glow from art, or a guess based on height). */
   private lampHead(f: FurnVis): { x: number; y: number } {
     const s = furnitureSprites(this.art, f)?.base;
     const r = s?.rects?.glow;
@@ -568,7 +570,7 @@ export class Lighting {
     return { x: f.ax, y: f.ay - 33 };
   }
 
-  /** Faróis (facho amarelado à frente) e lanternas vermelhas dos carros. */
+  /** Headlights (yellowish beam forward) and car red taillights. */
   private drawHeadlights(ctx: CanvasRenderingContext2D, scene: LightScene, view: View, n: number): void {
     if (!scene.cars.length) return;
     const beam = glowSprite('#fff1c4', 64);
@@ -583,7 +585,7 @@ export class Lighting {
     }
   }
 
-  /** Vaga-lumes piscando sobre o gramado e os jardins (só com a noite fechada). */
+  /** Fireflies blinking over lawn and gardens (only in deep night). */
   private drawFireflies(ctx: CanvasRenderingContext2D, scene: LightScene, view: View, now: number, k: number): void {
     if (this.fliesFor !== scene.exterior) this.seedFireflies(scene.exterior);
     const dot = glowSprite('#d8ff7a', 12);
@@ -603,7 +605,7 @@ export class Lighting {
     }
   }
 
-  /** Vaga-lumes perto de arbustos, flores e árvores (posições fixas pela semente). */
+  /** Fireflies near bushes, flowers, and trees (fixed positions by seed). */
   private seedFireflies(ext: ExteriorLayout): void {
     this.fliesFor = ext;
     this.flies = [];

@@ -1,16 +1,16 @@
-// O texto de cada aviso do servidor do mundo na cena (`notice {level, text}`): o `text` é um id de NOTICE_IDS do
-// protocolo, traduzido aqui (o servidor nunca manda frases). Alguns ids dizem coisas diferentes conforme onde estou:
-// na rua, esperando a resposta de um `enter` (na porta) ou dentro de um prédio (posto para fora).
+// Text of each world server notice in the scene (`notice {level, text}`): `text` is a NOTICE_IDS id from
+// protocol, translated here (server never sends sentences). Some ids differ depending on location:
+// on street, awaiting response to `enter` (at door), or inside a building (kicked out).
 import { tr } from '../../../../shared/i18n';
 import type { NoticeId } from '../../../../shared/world/protocol';
 
-/** Onde o aviso chegou: na rua, logo depois de um `enter` (a porta) ou dentro de um prédio. */
+/** Where notice arrived: on street, shortly after `enter` (at door), or inside a building. */
 export type NoticePlace = 'street' | 'door' | 'inside';
 
 /**
- * Texto de um `notice` (o `text` é um id de NOTICE_IDS do protocolo, traduzido aqui; um id desconhecido vira um aviso
- * genérico). null = nada para mostrar (ids que só interessam a quem depura). Um id novo no protocolo sem `case` aqui
- * não compila.
+ * Text of a `notice` (`text` is a protocol NOTICE_IDS id, translated here; unknown id becomes a generic
+ * notice). null = nothing to show (ids only relevant for debugging). A new protocol id without a `case` here
+ * fails compilation.
  */
 export function noticeText(raw: NoticeId | (string & {}), place: NoticePlace = 'street'): string | null {
   const id = raw as NoticeId;
@@ -20,43 +20,43 @@ export function noticeText(raw: NoticeId | (string & {}), place: NoticePlace = '
     case 'view_required':
       return null;
     case 'rate_limited':
-      return tr('Devagar: o mundo pediu um tempo entre as ações.');
+      return tr('Slow down: the world asked for a pause between actions.');
     case 'not_found':
-      if (place === 'door') return tr('Este prédio não está no mundo agora.');
-      if (place === 'inside') return tr('O prédio saiu do mundo: você voltou para a rua.');
-      return tr('Essa pessoa não está mais por perto.');
+      if (place === 'door') return tr("This building isn't in the world right now.");
+      if (place === 'inside') return tr("The building left the world: you're back on the street.");
+      return tr("That person isn't nearby anymore.");
     case 'street_left':
-      return tr('Você ficou um bom tempo parado e saiu da rua: ande para voltar.');
+      return tr('You stood still for a long time and left the street: walk to come back.');
     case 'chunk_full':
-      return tr('A área está cheia: só os jogadores mais perto aparecem.');
+      return tr('The area is full: only the closest players show up.');
     case 'afk':
-      return tr('Você ficou um tempo parado.');
+      return tr('You stood still for a while.');
     case 'server_restart':
-      return tr('O Habblaud World vai reiniciar: a conexão cai e volta sozinha.');
+      return tr('Habblaud World is restarting: the connection drops and comes back on its own.');
     case 'left':
-      return tr('Sua conta saiu do mundo: o prédio volta com "Voltar ao mundo", em Configurações.');
+      return tr('Your account left the world: the building comes back with "Back to the world", in Settings.');
     case 'too_far':
-      return tr('Chegue mais perto da porta para entrar.');
+      return tr('Get closer to the door to go in.');
     case 'closed':
-      return place === 'inside' ? tr('O prédio fechou a visitas: você voltou para a rua.') : tr('Este prédio está fechado a visitas.');
+      return place === 'inside' ? tr("The building closed to visitors: you're back on the street.") : tr('This building is closed to visitors.');
     case 'blocked':
-      return place === 'inside' ? tr('Você não pode mais ficar neste prédio: voltou para a rua.') : tr('Você não pode entrar neste prédio.');
+      return place === 'inside' ? tr("You can't stay in this building anymore: you're back on the street.") : tr("You can't enter this building.");
     case 'full':
-      return tr('O prédio está lotado (20 visitantes). Tente daqui a pouco.');
-    // Fase 5 (social leve). As confirmações (reported, blocked_ok, stamped) quase sempre já foram ditas na hora pelo
-    // social (city/social.ts e visit-social.ts as tiram daqui); chegando tarde, viram este aviso.
+      return tr('The building is full (20 visitors). Try again in a bit.');
+    // Phase 5 (lightweight social). Confirmations (reported, blocked_ok, stamped) were almost always shown immediately
+    // by social (city/social.ts and visit-social.ts suppress them here); if arriving late, they become this notice.
     case 'daily_limit':
-      return tr('Limite do dia atingido: amanhã tem mais.');
+      return tr('Daily limit reached: more tomorrow.');
     case 'already_done':
-      return tr('Você já fez isso hoje.');
+      return tr('You already did that today.');
     case 'reported':
-      return tr('Denúncia enviada. Obrigado: a moderação vai olhar.');
+      return tr('Report sent. Thanks: the moderators will take a look.');
     case 'blocked_ok':
-      return tr('Bloqueio feito: vocês deixam de se ver.');
+      return tr('Blocked: you no longer see each other.');
     case 'stamped':
-      return tr('Carimbo deixado na portaria.');
+      return tr('Stamp left at the front desk.');
     default:
       void (id satisfies never);
-      return tr('Aviso do Habblaud World.');
+      return tr('Notice from Habblaud World.');
   }
 }

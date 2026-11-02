@@ -1,6 +1,6 @@
-// Histórico do terminal: listagem das sessões recentes (pastas temporárias com JSONLs sintéticos), ordem,
-// janela de 7 dias, limite, cache por mtime, aberta vs. encerrada, leitura só do começo e do fim, e a
-// validação de conta/id/caminho de resolve().
+// Terminal history: listing recent sessions (temporary directories with synthetic JSONLs), ordering,
+// 7-day window, limit, mtime cache, open vs. finished, reading only head and tail, and
+// resolve() validation of account/id/path.
 import { appendFileSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,7 +17,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const sid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-/** Linha de conversa com o cwd do projeto (como o Claude Code grava). */
+/** Conversation line with project cwd (as Claude Code writes). */
 const withCwd = (line: string, cwd: string) => JSON.stringify({ ...JSON.parse(line), cwd });
 
 let cleanups: Array<() => void> = [];
@@ -32,7 +32,7 @@ function setup(): { root: string; acc: (name: string) => HistoryAccount } {
   return { root: tmp.dir, acc: (name) => ({ id: name, dir: join(tmp.dir, name) }) };
 }
 
-/** Escreve o transcript <conta>/projects/<cwd codificado>/<sessionId>.jsonl com o mtime dado. */
+/** Writes transcript <account>/projects/<encoded cwd>/<sessionId>.jsonl with given mtime. */
 function session(acc: HistoryAccount, cwd: string, id: string, lines: string[], mtime: number): string {
   const path = join(acc.dir, 'projects', encodeCwd(cwd), `${id}.jsonl`);
   writeLines(path, lines);
@@ -45,15 +45,15 @@ function history(accounts: HistoryAccount[], extra: Partial<ConstructorParameter
 }
 
 describe('SessionHistory.list', () => {
-  it('sessões dos últimos 7 dias, da mais recente para a mais antiga, com projeto, título e horários', async () => {
+  it('sessions from last 7 days, newest to oldest, with project, title, and timestamps', async () => {
     const { acc } = setup();
     const c = acc('.claude');
     const d = acc('.claude-b');
-    session(c, '/projetos/loja', sid(1), [withCwd(L.prompt('Arruma o carrinho', { at: NOW - 3 * HOUR }), '/projetos/loja'), L.raw('ai-title', { aiTitle: 'Carrinho de compras' })], NOW - 3 * HOUR);
-    session(d, '/projetos/api', sid(2), [withCwd(L.prompt('Cria a rota de login', { at: NOW - 2 * HOUR }), '/projetos/api'), withCwd(L.assistant([L.text('Feito.')], { at: NOW - HOUR }), '/projetos/api')], NOW - HOUR);
-    // Fora da janela, nome que não é UUID e transcript de subagente: nada disso entra.
-    session(c, '/projetos/velho', sid(3), [L.prompt('antigo', { at: NOW - 8 * 24 * HOUR })], NOW - HISTORY_MAX_AGE_MS - HOUR);
-    session(c, '/projetos/loja', 'anotacoes', [L.prompt('x', { at: NOW - HOUR })], NOW - HOUR);
+    session(c, '/projetos/loja', sid(1), [withCwd(L.prompt('Fix the cart', { at: NOW - 3 * HOUR }), '/projetos/loja'), L.raw('ai-title', { aiTitle: 'Shopping cart' })], NOW - 3 * HOUR);
+    session(d, '/projetos/api', sid(2), [withCwd(L.prompt('Create login route', { at: NOW - 2 * HOUR }), '/projetos/api'), withCwd(L.assistant([L.text('Done.')], { at: NOW - HOUR }), '/projetos/api')], NOW - HOUR);
+    // Outside window, non-UUID filename, and subagent transcript: none are included.
+    session(c, '/projetos/velho', sid(3), [L.prompt('old', { at: NOW - 8 * 24 * HOUR })], NOW - HISTORY_MAX_AGE_MS - HOUR);
+    session(c, '/projetos/loja', 'notes', [L.prompt('x', { at: NOW - HOUR })], NOW - HOUR);
     writeLines(join(c.dir, 'projects', encodeCwd('/projetos/loja'), sid(1), 'subagents', 'agent-a1.jsonl'), [L.prompt('sub', { at: NOW - MIN })]);
 
     const list = await history([c, d]).list();
@@ -62,35 +62,35 @@ describe('SessionHistory.list', () => {
       account: '.claude-b',
       project: '/projetos/api',
       projectDir: encodeCwd('/projetos/api'),
-      // Sem título no transcript: o primeiro prompt.
-      title: 'Cria a rota de login',
+      // Without title in transcript: uses first prompt.
+      title: 'Create login route',
       firstAt: NOW - 2 * HOUR,
       lastAt: NOW - HOUR,
       open: false,
     });
     expect(list[0].size).toBeGreaterThan(0);
     expect(list[0].agentId).toBeUndefined();
-    expect(list[1]).toMatchObject({ account: '.claude', title: 'Carrinho de compras', project: '/projetos/loja' });
+    expect(list[1]).toMatchObject({ account: '.claude', title: 'Shopping cart', project: '/projetos/loja' });
   });
 
-  it('título: custom-title.json da sessão; sem horário no fim, lastAt = mtime', async () => {
+  it('title: custom-title.json from session; no timestamp at end, lastAt = mtime', async () => {
     const { acc } = setup();
     const c = acc('.claude');
-    const path = session(c, '/p', sid(1), [L.raw('ai-title', { aiTitle: 'Automático' })], NOW - 2 * HOUR);
-    // Uma linha com horário no começo (senão a sessão nem entra) e nada com horário no fim do arquivo.
-    writeFileSync(path, `${L.prompt('oi', { at: NOW - 5 * HOUR })}\n${L.raw('ai-title', { aiTitle: 'Automático' })}\n`);
+    const path = session(c, '/p', sid(1), [L.raw('ai-title', { aiTitle: 'Automatic' })], NOW - 2 * HOUR);
+    // Line with timestamp at head (otherwise session is ignored) and nothing with timestamp at tail.
+    writeFileSync(path, `${L.prompt('hi', { at: NOW - 5 * HOUR })}\n${L.raw('ai-title', { aiTitle: 'Automatic' })}\n`);
     utimesSync(path, (NOW - 2 * HOUR) / 1000, (NOW - 2 * HOUR) / 1000);
     mkdirSync(path.replace(/\.jsonl$/, ''), { recursive: true });
-    writeFileSync(join(path.replace(/\.jsonl$/, ''), 'custom-title.json'), JSON.stringify({ customTitle: 'Renomeada' }));
+    writeFileSync(join(path.replace(/\.jsonl$/, ''), 'custom-title.json'), JSON.stringify({ customTitle: 'Renamed' }));
     const [s] = await history([c]).list();
-    expect(s.title).toBe('Renomeada');
+    expect(s.title).toBe('Renamed');
     expect(s.lastAt).toBe(NOW - 5 * HOUR);
     expect(s.firstAt).toBe(NOW - 5 * HOUR);
-    // O cwd que as linhas sintéticas trazem.
+    // Cwd brought by synthetic lines.
     expect(s.project).toBe('/projetos/demo');
   });
 
-  it('limite: só as N modificadas por último', async () => {
+  it('limit: only the N most recently modified', async () => {
     const { acc } = setup();
     const c = acc('.claude');
     for (let i = 1; i <= 5; i++) session(c, `/p${i}`, sid(i), [L.prompt(`p${i}`, { at: NOW - i * HOUR })], NOW - i * HOUR);
@@ -98,29 +98,29 @@ describe('SessionHistory.list', () => {
     expect(list.map((s) => s.title)).toEqual(['p1', 'p2', 'p3']);
   });
 
-  it('cache por mtime: o arquivo que não mudou não é relido; o que mudou é', async () => {
+  it('mtime cache: unchanged file is not re-read; modified file is', async () => {
     const { acc } = setup();
     const c = acc('.claude');
-    const a = session(c, '/a', sid(1), [L.prompt('primeiro', { at: NOW - 2 * HOUR })], NOW - 2 * HOUR);
-    session(c, '/b', sid(2), [L.prompt('segundo', { at: NOW - 3 * HOUR })], NOW - 3 * HOUR);
+    const a = session(c, '/a', sid(1), [L.prompt('first', { at: NOW - 2 * HOUR })], NOW - 2 * HOUR);
+    session(c, '/b', sid(2), [L.prompt('second', { at: NOW - 3 * HOUR })], NOW - 3 * HOUR);
     const h = history([c]);
     await h.list();
     expect(h.reads).toBe(2);
     await h.list();
     expect(h.reads).toBe(2);
-    appendFileSync(a, `${L.raw('ai-title', { aiTitle: 'Novo título' })}\n`);
+    appendFileSync(a, `${L.raw('ai-title', { aiTitle: 'New title' })}\n`);
     utimesSync(a, (NOW - HOUR) / 1000, (NOW - HOUR) / 1000);
     const list = await h.list();
     expect(h.reads).toBe(3);
-    expect(list[0]).toMatchObject({ sessionId: sid(1), title: 'Novo título' });
+    expect(list[0]).toMatchObject({ sessionId: sid(1), title: 'New title' });
   });
 
-  it('aberta (com o agente do escritório) vs. encerrada; sem conversa só entra se estiver aberta', async () => {
+  it('open (with office agent) vs. closed; without conversation only included if open', async () => {
     const { acc } = setup();
     const c = acc('.claude');
-    session(c, '/a', sid(1), [L.prompt('aberta', { at: NOW - MIN })], NOW - MIN);
-    session(c, '/b', sid(2), [L.prompt('encerrada', { at: NOW - HOUR })], NOW - HOUR);
-    // Só metadados, sem horário: a sessão recém-aberta entra; a encerrada sem conversa, não.
+    session(c, '/a', sid(1), [L.prompt('open', { at: NOW - MIN })], NOW - MIN);
+    session(c, '/b', sid(2), [L.prompt('closed', { at: NOW - HOUR })], NOW - HOUR);
+    // Only metadata, no timestamp: recently opened session enters; closed without conversation does not.
     session(c, '/c', sid(3), [L.raw('permission-mode', { permissionMode: 'default' })], NOW - 2 * MIN);
     session(c, '/d', sid(4), [L.raw('permission-mode', { permissionMode: 'default' })], NOW - 3 * MIN);
     const open = new Map([[sid(1), '.claude:100'], [sid(3), '.claude:300']]);
@@ -132,95 +132,95 @@ describe('SessionHistory.list', () => {
     ]);
   });
 
-  it('arquivo grande: lê só o começo e o fim (o título do meio não é visto)', async () => {
+  it('large file: reads only head and tail (middle title is skipped)', async () => {
     const { acc } = setup();
     const c = acc('.claude');
     const filler = (n: number) => Array.from({ length: n }, (_, i) => L.assistant([L.text(`${'x'.repeat(900)} ${i}`)], { at: NOW - 3 * HOUR + i }));
     const lines = [
-      withCwd(L.prompt('Começo', { at: NOW - 4 * HOUR }), '/projetos/grande'),
+      withCwd(L.prompt('Head', { at: NOW - 4 * HOUR }), '/projetos/grande'),
       ...filler(200),
-      L.raw('custom-title', { customTitle: 'Do meio' }),
+      L.raw('custom-title', { customTitle: 'From middle' }),
       ...filler(200),
-      L.raw('ai-title', { aiTitle: 'Do fim' }),
-      L.assistant([L.text('tchau')], { at: NOW - HOUR }),
+      L.raw('ai-title', { aiTitle: 'From tail' }),
+      L.assistant([L.text('bye')], { at: NOW - HOUR }),
     ];
     session(c, '/projetos/grande', sid(1), lines, NOW - HOUR);
     const [s] = await history([c]).list();
     expect(s.size).toBeGreaterThan(HEAD_BYTES + TAIL_BYTES + 100_000);
-    expect(s).toMatchObject({ project: '/projetos/grande', title: 'Do fim', firstAt: NOW - 4 * HOUR, lastAt: NOW - HOUR });
+    expect(s).toMatchObject({ project: '/projetos/grande', title: 'From tail', firstAt: NOW - 4 * HOUR, lastAt: NOW - HOUR });
   });
 
-  it('título antes de um resultado enorme no fim: procura num trecho maior', async () => {
+  it('title before a huge result at tail: searches larger slice', async () => {
     const { acc } = setup();
     const c = acc('.claude');
     const lines = [
-      L.prompt('Começo', { at: NOW - 4 * HOUR }),
+      L.prompt('Head', { at: NOW - 4 * HOUR }),
       ...Array.from({ length: 100 }, (_, i) => L.assistant([L.text(`${'y'.repeat(900)} ${i}`)], { at: NOW - 3 * HOUR + i })),
-      L.raw('ai-title', { aiTitle: 'Antes do resultado' }),
+      L.raw('ai-title', { aiTitle: 'Before result' }),
       L.result('t1', 'z'.repeat(TAIL_BYTES + 10_000), { at: NOW - HOUR }),
     ];
     session(c, '/p', sid(1), lines, NOW - HOUR);
     const [s] = await history([c]).list();
-    expect(s.title).toBe('Antes do resultado');
+    expect(s.title).toBe('Before result');
   });
 
-  it('conta sem projects/ ou pasta ilegível: lista vazia, sem erro', async () => {
+  it('account without projects/ or unreadable directory: empty list, no error', async () => {
     const { acc } = setup();
     expect(await history([acc('.claude-nada')]).list()).toEqual([]);
   });
 });
 
 describe('SessionHistory.resolve', () => {
-  it('conta conhecida + id UUID + arquivo dentro de projects/', () => {
+  it('known account + UUID id + file inside projects/', () => {
     const { root, acc } = setup();
     const c = acc('.claude');
-    const path = session(c, '/projetos/loja', sid(1), [L.prompt('oi')], NOW);
+    const path = session(c, '/projetos/loja', sid(1), [L.prompt('hi')], NOW);
     const h = history([c]);
     const ok = h.resolve('.claude', sid(1));
     expect('path' in ok && ok.path.endsWith(join(encodeCwd('/projetos/loja'), `${sid(1)}.jsonl`))).toBe(true);
     expect(path.endsWith(`${sid(1)}.jsonl`)).toBe(true);
 
     for (const bad of ['../../etc/passwd', '..', `${sid(1)}/../${sid(1)}`, `${sid(1)}.jsonl`, 'x', '', `${sid(1)} `]) {
-      expect(h.resolve('.claude', bad)).toEqual({ status: 400, error: 'id de sessão inválido' });
+      expect(h.resolve('.claude', bad)).toEqual({ status: 400, error: 'invalid session id' });
     }
     for (const account of ['.claude/..', '..', '.claude-outra', '', join(root, '.claude')]) {
-      expect(h.resolve(account, sid(1))).toEqual({ status: 404, error: 'conta desconhecida' });
+      expect(h.resolve(account, sid(1))).toEqual({ status: 404, error: 'unknown account' });
     }
-    expect(h.resolve('.claude', sid(9))).toEqual({ status: 404, error: 'sessão não encontrada' });
+    expect(h.resolve('.claude', sid(9))).toEqual({ status: 404, error: 'session not found' });
   });
 
-  it('link dentro de projects/ apontando para fora não serve', ({ skip }) => {
+  it('link inside projects/ pointing outside is rejected', ({ skip }) => {
     const { root, acc } = setup();
     const c = acc('.claude');
-    session(c, '/p', sid(1), [L.prompt('oi')], NOW);
-    // Pasta de projeto que é um link para fora (junction: no Windows não pede privilégio).
+    session(c, '/p', sid(1), [L.prompt('hi')], NOW);
+    // Project folder linking outside (junction: on Windows does not require elevation).
     mkdirSync(join(root, 'outra'), { recursive: true });
-    writeFileSync(join(root, 'outra', `${sid(3)}.jsonl`), `${L.prompt('segredo')}\n`);
+    writeFileSync(join(root, 'outra', `${sid(3)}.jsonl`), `${L.prompt('secret')}\n`);
     symlinkSync(join(root, 'outra'), join(c.dir, 'projects', 'link'), 'junction');
     const h = history([c]);
-    expect(h.resolve('.claude', sid(3))).toEqual({ status: 404, error: 'sessão não encontrada' });
+    expect(h.resolve('.claude', sid(3))).toEqual({ status: 404, error: 'session not found' });
     expect('path' in h.resolve('.claude', sid(1))).toBe(true);
-    // Arquivo que é um link para fora também não.
+    // File linking outside is also rejected.
     const outside = join(root, 'fora.jsonl');
-    writeFileSync(outside, `${L.prompt('segredo')}\n`);
+    writeFileSync(outside, `${L.prompt('secret')}\n`);
     symlinkOrSkip(skip, outside, join(c.dir, 'projects', encodeCwd('/p'), `${sid(2)}.jsonl`));
-    expect(h.resolve('.claude', sid(2))).toEqual({ status: 404, error: 'sessão não encontrada' });
+    expect(h.resolve('.claude', sid(2))).toEqual({ status: 404, error: 'session not found' });
   });
 
-  it('conta sem projects/: 404', () => {
+  it('account without projects/: 404', () => {
     const { acc } = setup();
-    expect(history([acc('.claude')]).resolve('.claude', sid(1))).toEqual({ status: 404, error: 'sessão não encontrada' });
+    expect(history([acc('.claude')]).resolve('.claude', sid(1))).toEqual({ status: 404, error: 'session not found' });
   });
 });
 
-describe('utilitários', () => {
-  it('isSessionId: só o formato de UUID', () => {
+describe('utilities', () => {
+  it('isSessionId: only UUID format', () => {
     expect(isSessionId(sid(1))).toBe(true);
     expect(isSessionId('7F3C2A10-0B1D-4E2F-9A8B-0123456789AB')).toBe(true);
     for (const v of ['', 'abc', `${sid(1)}x`, `../${sid(1)}`, sid(1).replace(/-/g, '')]) expect(isSessionId(v)).toBe(false);
   });
 
-  it('openMainAgent: principal da conta e da sessão, ainda no escritório', () => {
+  it('openMainAgent: main agent for account and session, still in office', () => {
     const a = (p: Partial<AgentInfo>) => ({ id: 'x', kind: 'main', account: '.claude', sessionId: 's1', status: 'idle', ...p }) as AgentInfo;
     const agents = [a({ id: '.claude:1' }), a({ id: 's1:sub', kind: 'sub' }), a({ id: '.claude:2', sessionId: 's2', status: 'offline' }), a({ id: '.b:3', account: '.b', sessionId: 's3' })];
     expect(openMainAgent(agents, '.claude', 's1')).toBe('.claude:1');

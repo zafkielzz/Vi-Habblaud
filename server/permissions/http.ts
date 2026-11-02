@@ -1,11 +1,11 @@
-// Rotas de /api/permissions (responder pelo escritório). A trava (bind local + Host local) já foi
-// conferida em http/app.ts; o guard (http/guard.ts) já exigiu JSON e Origin local nos POST (contra CSRF).
+// /api/permissions routes (reply from the office). The lock (local bind + local Host) was already
+// checked in http/app.ts; guard (http/guard.ts) already required JSON and local Origin on POST (against CSRF).
 //
-//   POST /api/permissions                 (hook)    registra o pedido: 201 {id, expiresAt} ou 200 {skip}
-//                                                   (o hook do Codex manda também provider: "codex", account e codexHome)
+//   POST /api/permissions                 (hook)    registers request: 201 {id, expiresAt} or 200 {skip}
+//                                                   (Codex hook also sends provider: "codex", account, and codexHome)
 //   GET  /api/permissions/:id/wait        (hook)    long-poll: {status: pending | decided | released}
-//   GET  /api/permissions/:id             (página)  detalhe com os argumentos (comando, diff...)
-//   POST /api/permissions/:id/decision    (página)  {behavior: allow | deny | terminal | answer, message?, answers?, ...}
+//   GET  /api/permissions/:id             (page)    detail with arguments (command, diff...)
+//   POST /api/permissions/:id/decision    (page)    {behavior: allow | deny | terminal | answer, message?, answers?, ...}
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HttpError, readJson, sendJson } from '../http/app';
 import { InvalidRequest, parseDecision, WAIT_MAX_MS, type PermissionRegistry } from './registry';
@@ -15,17 +15,17 @@ const ITEM = /^\/api\/permissions\/([^/]+)(?:\/(wait|decision))?$/;
 
 function methodNotAllowed(res: ServerResponse, allow: string): void {
   res.setHeader('Allow', allow);
-  sendJson(res, 405, { error: tr('método não permitido') });
+  sendJson(res, 405, { error: tr('method not allowed') });
 }
 
 function fail(res: ServerResponse, err: unknown): void {
   if (res.headersSent) return void res.destroy();
   if (err instanceof HttpError) sendJson(res, err.status, { error: err.message });
   else if (err instanceof InvalidRequest) sendJson(res, 400, { error: err.message });
-  else sendJson(res, 500, { error: tr('erro interno') });
+  else sendJson(res, 500, { error: tr('internal error') });
 }
 
-/** Tempo de espera pedido em `?timeout=` (segundos), limitado a WAIT_MAX_MS. */
+/** Wait time requested in `?timeout=` (seconds), capped at WAIT_MAX_MS. */
 export function waitMs(url: URL): number {
   const raw = Number(url.searchParams.get('timeout'));
   if (!Number.isFinite(raw) || raw <= 0) return WAIT_MAX_MS;
@@ -42,9 +42,9 @@ export function createPermissionRoutes(registry: PermissionRegistry): (req: Inco
 
   const wait = (req: IncomingMessage, res: ServerResponse, id: string) => {
     const w = registry.wait(id, waitMs(new URL(req.url ?? '/', 'http://localhost')));
-    if (!w) return sendJson(res, 404, { error: tr('pedido desconhecido') });
+    if (!w) return sendJson(res, 404, { error: tr('unknown request') });
     req.socket.setTimeout(0);
-    // Conexão fechada antes da resposta (o hook morreu ou desistiu): larga a espera.
+    // Connection closed before response (hook died or aborted): drops wait.
     res.on('close', () => {
       if (!res.writableEnded) w.cancel();
     });
@@ -59,21 +59,25 @@ export function createPermissionRoutes(registry: PermissionRegistry): (req: Inco
   const decide = async (req: IncomingMessage, res: ServerResponse, id: string) => {
     const d = parseDecision(await readJson(req));
     if (!d) {
-      throw new HttpError(400, 'esperado {behavior: "allow" | "deny" | "terminal", message?, interrupt?, suggestion?} ou {behavior: "answer", answers: [{question, options?, other?}]}');
+      throw new HttpError(
+        400,
+        'expected {behavior: "allow" | "deny" | "terminal", message?, interrupt?, suggestion?} ' +
+          'or {behavior: "answer", answers: [{question, options?, other?}]}',
+      );
     }
     switch (registry.decide(id, d)) {
       case 'ok':
         return sendJson(res, 200, { ok: true });
       case 'not-found':
-        return sendJson(res, 404, { error: tr('pedido desconhecido: já foi respondido, expirou ou foi respondido no terminal') });
+        return sendJson(res, 404, { error: tr('unknown request: already answered, expired, or answered in the terminal') });
       case 'conflict':
-        return sendJson(res, 409, { error: tr('este pedido já foi respondido') });
+        return sendJson(res, 409, { error: tr('this request has already been answered') });
       case 'invalid':
-        return sendJson(res, 400, { error: tr('sugestão de regra desconhecida para este pedido') });
+        return sendJson(res, 400, { error: tr('unknown rule suggestion for this request') });
       case 'invalid-answer':
-        return sendJson(res, 400, { error: tr('resposta que não serve para este pedido: pergunta se responde com "answer" (cada pergunta uma vez, com as opções dela); os outros pedidos, com "allow" ou "deny"') });
+        return sendJson(res, 400, { error: tr('response doesn\'t fit this request: questions are answered with "answer" (each question once, with its own options); other requests, with "allow" or "deny"') });
       case 'unsupported':
-        return sendJson(res, 400, { error: tr('o Codex não aceita interromper nem "sempre permitir" pelo Habblaud: aprove, recuse (com um motivo, se quiser) ou responda no terminal') });
+        return sendJson(res, 400, { error: tr('Codex doesn\'t accept interrupting or "always allow" from Habblaud: approve, deny (with a reason, if you want) or answer in the terminal') });
     }
   };
 
@@ -85,12 +89,12 @@ export function createPermissionRoutes(registry: PermissionRegistry): (req: Inco
       return;
     }
     const m = ITEM.exec(path);
-    if (!m) return sendJson(res, 404, { error: tr('rota desconhecida') });
+    if (!m) return sendJson(res, 404, { error: tr('unknown route') });
     let id: string;
     try {
       id = decodeURIComponent(m[1]);
     } catch {
-      return sendJson(res, 400, { error: tr('id inválido') });
+      return sendJson(res, 400, { error: tr('invalid id') });
     }
     if (m[2] === 'wait') {
       if (method !== 'GET') return methodNotAllowed(res, 'GET');
@@ -104,6 +108,6 @@ export function createPermissionRoutes(registry: PermissionRegistry): (req: Inco
     if (method !== 'GET' && method !== 'HEAD') return methodNotAllowed(res, 'GET');
     const detail = registry.detail(id);
     if (detail) sendJson(res, 200, detail);
-    else sendJson(res, 404, { error: tr('pedido desconhecido') });
+    else sendJson(res, 404, { error: tr('unknown request') });
   };
 }

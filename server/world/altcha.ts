@@ -1,18 +1,18 @@
-// ALTCHA: prova de trabalho que o servidor do Habblaud World pede no cadastro e nos envios de e-mail (no lugar de um
-// captcha). O servidor manda {algorithm, challenge, salt, maxnumber, signature}; quem pede acha o número n (0..maxnumber)
-// com SHA-256(salt + n) = challenge e devolve, em base64, o JSON {algorithm, challenge, number, salt, signature, took}
-// (o formato do widget ALTCHA). Quem resolve é o servidor local do Habblaud, por força bruta, sem dependências.
+// ALTCHA: proof-of-work required by the Habblaud World server during registration and email dispatches (replacing a
+// captcha). The server sends {algorithm, challenge, salt, maxnumber, signature}; requester finds number n (0..maxnumber)
+// where SHA-256(salt + n) = challenge and returns base64 JSON {algorithm, challenge, number, salt, signature, took}
+// (ALTCHA widget format). Solved by Habblaud's local server via brute force, without dependencies.
 //
-// A busca roda em lotes, devolvendo a vez ao event loop entre eles: o escritório continua respondendo enquanto isso.
+// The search runs in batches, yielding to the event loop between them: the office continues responding in the meantime.
 import { createHash } from 'node:crypto';
 import type { AltchaChallenge } from '../../shared/world/protocol';
 
-/** Teto aceito para `maxnumber` (acima disso o desafio é recusado em vez de travar o computador por minutos). */
+/** Accepted ceiling for `maxnumber` (above this the challenge is rejected instead of hanging the machine for minutes). */
 export const ALTCHA_MAX_NUMBER = 10_000_000;
-/** Tentativas por lote entre duas devoluções da vez ao event loop. */
+/** Attempts per batch between yields to the event loop. */
 const BATCH = 5_000;
 
-/** Valida o desafio que veio do servidor do mundo; undefined se algo estiver fora do formato. */
+/** Validates challenge received from world server; undefined if malformed. */
 export function parseAltchaChallenge(raw: unknown, maxNumber = ALTCHA_MAX_NUMBER): AltchaChallenge | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const v = raw as Record<string, unknown>;
@@ -30,13 +30,13 @@ export function altchaHash(salt: string, n: number): string {
 
 export interface AltchaSolution {
   number: number;
-  /** Quanto a busca levou (ms). */
+  /** How long the search took (ms). */
   took: number;
 }
 
 /**
- * Acha o número do desafio. Devolve undefined se nenhum n até `maxnumber` servir (desafio inválido). Interrompe com
- * `signal` (lança o motivo do abort).
+ * Solves challenge number. Returns undefined if no n up to `maxnumber` matches (invalid challenge). Aborts with
+ * `signal` (throws abort reason).
  */
 export async function solveAltcha(
   ch: AltchaChallenge,
@@ -54,7 +54,7 @@ export async function solveAltcha(
   return undefined;
 }
 
-/** A solução no formato do campo `altcha` do cadastro: base64 de {algorithm, challenge, number, salt, signature, took}. */
+/** Solution in registration `altcha` field format: base64 of {algorithm, challenge, number, salt, signature, took}. */
 export function encodeAltchaPayload(ch: AltchaChallenge, sol: AltchaSolution): string {
   const payload = { algorithm: ch.algorithm, challenge: ch.challenge, number: sol.number, salt: ch.salt, signature: ch.signature, took: sol.took };
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');

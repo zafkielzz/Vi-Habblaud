@@ -1,11 +1,11 @@
-// Construtores de linhas SINTÉTICAS de rollout do Codex (formatos paginated e legacy) e de um CODEX_HOME temporário
-// (sessions/AAAA/MM/DD/rollout-*.jsonl, archived_sessions/ e thread-writer-locks/), para testes. Os formatos seguem o
-// código do Codex 0.162 (codex-rs/protocol); nada aqui vem de conversas reais.
+// Builders for SYNTHETIC Codex rollout lines (paginated and legacy formats) and temporary CODEX_HOME
+// (sessions/YYYY/MM/DD/rollout-*.jsonl, archived_sessions/, and thread-writer-locks/), for tests. Formats follow
+// Codex 0.162 (codex-rs/protocol) code; nothing here comes from real conversations.
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { appendLines, tempDir, writeLines } from './fixtures';
 
-/** Id de thread sintético (UUID v7 de mentira). */
+/** Synthetic thread id (mock UUID v7). */
 export function threadId(n: number): string {
   return `0199b0c0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 }
@@ -23,7 +23,7 @@ function item(thread: string, turn: string, it: Record<string, unknown>, at: num
 export interface MetaOpts {
   at?: number;
   cwd?: string;
-  /** null = sem history_mode (legacy). */
+  /** null = without history_mode (legacy). */
   history?: 'paginated' | 'legacy' | null;
   source?: unknown;
   sessionId?: string;
@@ -32,14 +32,14 @@ export interface MetaOpts {
 }
 
 export interface RateLimitsOpts {
-  /** null = sem cota (rate_limit_reached_type). */
+  /** null = without quota (rate_limit_reached_type). */
   primary?: { used: number; minutes?: number; resetsAt?: number } | null;
   secondary?: { used: number; minutes?: number; resetsAt?: number } | null;
   plan?: string;
   reached?: string;
 }
 
-/** Linhas de rollout. `t` = id do thread; `turn` = id do turno. */
+/** Rollout lines. `t` = thread id; `turn` = turn id. */
 export const R = {
   meta(t: string, o: MetaOpts = {}): string {
     const payload: Record<string, unknown> = {
@@ -101,7 +101,7 @@ export const R = {
       o.at ?? Date.now(),
     );
   },
-  /** FileChange no formato do rollout: mapa {caminho: {type: add|delete|update, ...}}. */
+  /** FileChange in rollout format: map {path: {type: add|delete|update, ...}}. */
   fileChange(t: string, turn: string, id: string, changes: Record<string, Record<string, unknown>>, o: { status?: string; at?: number } = {}): string {
     return item(t, turn, { type: 'FileChange', id, changes, status: o.status ?? 'completed' }, o.at ?? Date.now());
   },
@@ -148,13 +148,13 @@ export const R = {
   functionOutput(callId: string, output: string, at = Date.now()): string {
     return line('response_item', { type: 'function_call_output', call_id: callId, output }, at);
   },
-  /** Mensagem de contexto (developer/user/assistant) mandada ao modelo: não é a conversa. */
+  /** Context message (developer/user/assistant) sent to model: not part of the conversation. */
   message(role: string, text: string, at = Date.now()): string {
     return line('response_item', { type: 'message', role, content: [{ type: role === 'assistant' ? 'output_text' : 'input_text', text }] }, at);
   },
   /**
-   * Resposta entregue no code mode do app: response_item message/assistant com o marcador em `metadata` (no
-   * "incomplete", o texto cortado vem no próprio marcador). `callId` = a chamada user_messaging.send_message.
+   * Response delivered in app's code mode: response_item message/assistant with marker in `metadata` (in
+   * "incomplete", truncated text is in marker itself). `callId` = user_messaging.send_message call.
    */
   delivered(callId: string, text: string, at = Date.now(), complete = true): string {
     return JSON.stringify({
@@ -181,7 +181,7 @@ export const R = {
   },
 };
 
-/** session_meta.source de um subagente (thread_spawn) e de threads internos, como o Codex grava. */
+/** session_meta.source of a subagent (thread_spawn) and internal threads, as recorded by Codex. */
 export const SOURCES = {
   sub: (parent: string, role = 'explorer') => ({ subagent: { thread_spawn: { parent_thread_id: parent, depth: 1, agent_nickname: 'Kepler', agent_role: role } } }),
   guardian: () => ({ subagent: { other: 'guardian' } }),
@@ -189,7 +189,7 @@ export const SOURCES = {
   review: () => ({ subagent: 'review' }),
 };
 
-/** Um CODEX_HOME temporário (apagado com `cleanup`). */
+/** Temporary CODEX_HOME (deleted via `cleanup`). */
 export function codexHome(name = '.codex') {
   const tmp = tempDir('habblaud-codex-');
   const dir = join(tmp.dir, name);
@@ -199,7 +199,7 @@ export function codexHome(name = '.codex') {
     home: tmp.dir,
     dir,
     cleanup: tmp.cleanup,
-    /** Grava o rollout de um thread (sessions/AAAA/MM/DD por padrão; `archived` em archived_sessions/). */
+    /** Writes thread rollout (sessions/YYYY/MM/DD by default; `archived` in archived_sessions/). */
     rollout(t: string, lines: string[], o: { date?: string; archived?: boolean; mtime?: number } = {}): string {
       const date = o.date ?? '2026/10/09';
       const base = o.archived ? join(dir, 'archived_sessions') : join(dir, 'sessions', ...date.split('/'));
@@ -211,7 +211,7 @@ export function codexHome(name = '.codex') {
     append(path: string, lines: string[]): void {
       appendLines(path, lines);
     },
-    /** Cria o lock do thread; `createdAt` (epoch ms) recua o mtime (o Codex nunca escreve no lock). */
+    /** Creates thread lock; `createdAt` (epoch ms) sets back mtime (Codex never writes to lock). */
     lock(t: string, createdAt?: number): string {
       const path = join(dir, 'thread-writer-locks', `${t}.lock`);
       writeFileSync(path, '');

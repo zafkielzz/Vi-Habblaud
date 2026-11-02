@@ -12,7 +12,7 @@ function drain(t: FileTail): string[] {
     all.push(...r.lines);
     if (!r.more) return all;
   }
-  throw new Error('leitura não terminou');
+  throw new Error('reading did not finish');
 }
 
 describe('FileTail', () => {
@@ -24,7 +24,7 @@ describe('FileTail', () => {
   });
   afterEach(() => tmp.cleanup());
 
-  it('lê só linhas completas e guarda a linha parcial para o próximo ciclo', () => {
+  it('reads only complete lines and keeps partial line for next cycle', () => {
     writeFileSync(file, '{"a":1}\n{"b":');
     const t = new FileTail(file);
     expect(t.read().lines).toEqual(['{"a":1}']);
@@ -33,7 +33,7 @@ describe('FileTail', () => {
     expect(t.read().lines).toEqual(['{"b":2}', '{"c":3}']);
   });
 
-  it('não quebra caracteres multibyte divididos entre leituras', () => {
+  it('does not break multibyte characters split across reads', () => {
     const line = JSON.stringify({ t: 'ação — café ☕' });
     const buf = Buffer.from(`${line}\n`);
     writeFileSync(file, buf.subarray(0, 12));
@@ -43,28 +43,28 @@ describe('FileTail', () => {
     expect(t.read().lines).toEqual([line]);
   });
 
-  it('detecta truncamento e recomeça do início', () => {
-    writeFileSync(file, 'um\ndois\n');
+  it('detects truncation and restarts from beginning', () => {
+    writeFileSync(file, 'one\ntwo\n');
     const t = new FileTail(file);
-    expect(t.read().lines).toEqual(['um', 'dois']);
+    expect(t.read().lines).toEqual(['one', 'two']);
     writeFileSync(file, 'x\n');
     const r = t.read();
     expect(r.reset).toBe(true);
     expect(r.lines).toEqual(['x']);
   });
 
-  it('detecta arquivo substituído (rotação) mesmo maior', () => {
+  it('detects replaced file (rotation) even if larger', () => {
     writeFileSync(file, 'a\n');
     const t = new FileTail(file);
     t.read();
     rmSync(file);
-    writeFileSync(file, 'novo-1\nnovo-2\n');
+    writeFileSync(file, 'new-1\nnew-2\n');
     const r = t.read();
     expect(r.reset).toBe(true);
-    expect(r.lines).toEqual(['novo-1', 'novo-2']);
+    expect(r.lines).toEqual(['new-1', 'new-2']);
   });
 
-  it('não trata linhas acrescentadas ao mesmo arquivo como rotação', () => {
+  it('does not treat appended lines to same file as rotation', () => {
     writeFileSync(file, 'a\n');
     const t = new FileTail(file);
     t.read();
@@ -74,33 +74,33 @@ describe('FileTail', () => {
     expect(r.lines).toEqual(['b', 'c']);
   });
 
-  describe('reescrita no mesmo inode', () => {
-    /** Espera o relógio do sistema de arquivos andar (o ext4 grava os tempos em ticks de alguns ms). */
+  describe('rewrite on same inode', () => {
+    /** Waits for filesystem clock to advance (ext4 stores timestamps in ticks of a few ms). */
     const tick = () => new Promise((ok) => setTimeout(ok, 15));
 
-    it('conteúdo novo do mesmo tamanho recomeça do início', async () => {
+    it('new content of same size restarts from beginning', async () => {
       writeFileSync(file, 'aaaa\nbbbb\ncccc\n');
       const t = new FileTail(file);
       expect(t.read().lines).toEqual(['aaaa', 'bbbb', 'cccc']);
       await tick();
-      writeFileSync(file, 'xxxx\nyyyy\nzzzz\n'); // mesmo inode, mesmo tamanho
+      writeFileSync(file, 'xxxx\nyyyy\nzzzz\n'); // same inode, same size
       const r = t.read();
       expect(r.reset).toBe(true);
       expect(r.lines).toEqual(['xxxx', 'yyyy', 'zzzz']);
     });
 
-    it('conteúdo novo maior recomeça do início', async () => {
-      writeFileSync(file, 'um\ndois\n');
+    it('new larger content restarts from beginning', async () => {
+      writeFileSync(file, 'one\ntwo\n');
       const t = new FileTail(file);
       t.read();
       await tick();
-      writeFileSync(file, 'novo-1\nnovo-2\nnovo-3\n');
+      writeFileSync(file, 'new-1\nnew-2\nnew-3\n');
       const r = t.read();
       expect(r.reset).toBe(true);
-      expect(r.lines).toEqual(['novo-1', 'novo-2', 'novo-3']);
+      expect(r.lines).toEqual(['new-1', 'new-2', 'new-3']);
     });
 
-    it('só acrescentar linhas (o mtime muda, o começo não) não é troca', async () => {
+    it('only appending lines (mtime changes, head does not) is not a replacement', async () => {
       writeFileSync(file, 'a\n');
       const t = new FileTail(file);
       t.read();
@@ -112,7 +112,7 @@ describe('FileTail', () => {
       expect(t.read()).toMatchObject({ reset: false, lines: ['c'] });
     });
 
-    it('tocar no arquivo sem mudar o conteúdo não é troca', async () => {
+    it('touching file without changing content is not a replacement', async () => {
       writeFileSync(file, 'a\nb\n');
       const t = new FileTail(file);
       t.read();
@@ -123,31 +123,31 @@ describe('FileTail', () => {
     });
   });
 
-  it('informa arquivo inexistente sem lançar erro', () => {
+  it('reports missing file without throwing error', () => {
     const t = new FileTail(join(tmp.dir, 'nao-existe.jsonl'));
     expect(t.read()).toMatchObject({ missing: true, lines: [] });
   });
 
-  it('seekTail alinha no início da próxima linha', () => {
-    const lines = Array.from({ length: 50 }, (_, i) => `linha-${String(i).padStart(3, '0')}`);
+  it('seekTail aligns at beginning of next line', () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line-${String(i).padStart(3, '0')}`);
     writeFileSync(file, lines.map((l) => `${l}\n`).join(''));
     const t = new FileTail(file);
     const start = t.seekTail(25);
     expect(start).toBeGreaterThan(0);
     const got = t.read().lines;
     expect(got.length).toBeGreaterThan(0);
-    expect(got.every((l) => /^linha-\d{3}$/.test(l))).toBe(true);
-    expect(got.at(-1)).toBe('linha-049');
+    expect(got.every((l) => /^line-\d{3}$/.test(l))).toBe(true);
+    expect(got.at(-1)).toBe('line-049');
   });
 
-  it('seekTail em arquivo pequeno lê tudo', () => {
+  it('seekTail on small file reads everything', () => {
     writeFileSync(file, 'a\nb\n');
     const t = new FileTail(file);
     expect(t.seekTail(1024)).toBe(0);
     expect(t.read().lines).toEqual(['a', 'b']);
   });
 
-  it('respeita o limite por leitura e sinaliza que há mais', () => {
+  it('respects per-read chunk limit and signals more available', () => {
     writeFileSync(file, 'aaaa\nbbbb\ncccc\n');
     const t = new FileTail(file, { maxChunk: 6 });
     const r1 = t.read();
@@ -158,7 +158,7 @@ describe('FileTail', () => {
     expect(all).toEqual(['aaaa', 'bbbb', 'cccc']);
   });
 
-  it('descarta a linha parcial que passa do teto e segue na próxima', () => {
+  it('discards partial line exceeding cap and resumes on next line', () => {
     writeFileSync(file, Buffer.alloc(MAX_LINE_BYTES + 64 * 1024, 0x61));
     const t = new FileTail(file, { maxChunk: 256 * 1024 });
     const warn = vi.spyOn(log, 'warnOnce').mockImplementation(() => {});
@@ -166,7 +166,7 @@ describe('FileTail', () => {
       expect(drain(t)).toEqual([]);
       appendFileSync(file, '\n{"ok":1}\n');
       const lines = drain(t);
-      // O tamanho vem antes do texto: uma falha não despeja a linha gigante no diff.
+      // Size checked before text: failure does not dump huge line into diff.
       expect(lines.map((l) => l.length)).toEqual([8]);
       expect(lines).toEqual(['{"ok":1}']);
       expect(warn).toHaveBeenCalledWith(`oversize-line:${file}`, expect.stringContaining('8 MiB'));
@@ -175,7 +175,7 @@ describe('FileTail', () => {
     }
   });
 
-  it('entrega uma linha do tamanho exato do teto', () => {
+  it('delivers line of exact cap size', () => {
     expect(MAX_LINE_BYTES).toBe(8 * 1024 * 1024);
     writeFileSync(file, Buffer.concat([Buffer.alloc(MAX_LINE_BYTES, 0x62), Buffer.from('\nok\n')]));
     const t = new FileTail(file, { maxChunk: 256 * 1024 });

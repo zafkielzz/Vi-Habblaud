@@ -1,56 +1,56 @@
-// Fachada procedural dos prédios da cidade (pixel art no estilo do escritório: contorno cinza-azulado, 3–4 tons por
-// material, luz de cima/esquerda, brilhos e sombras de contato).
+// Procedural facade of city buildings (pixel art in office style: blue-gray outline, 3–4 tones per
+// material, top/left light, highlights and contact shadows).
 //
-// Em 3/4 a câmera só vê a face SUL dos prédios. A fileira de baixo do quarteirão tem a porta ao sul: vemos a fachada
-// da frente (térreo com vitrine, porta e letreiro). A fileira de cima tem a porta ao norte: vemos o telhado com a
-// marquise listrada da entrada na borda norte e, embaixo, a face dos fundos (janelas, escada de incêndio, porta de
-// serviço). Nos dois casos o desenho cabe inteiro no lote (12 tiles de fundo): a fileira de cima encosta o topo na
-// calçada norte e a de baixo encosta a base na calçada sul, então nenhum prédio cobre calçada nem rua.
+// In 3/4 view the camera only sees the SOUTH face of buildings. The bottom row of the block has doors facing south:
+// we see the front facade (ground floor with storefront, door, and sign). The top row has doors facing north: we see
+// the roof with the striped entrance marquee on the north edge and, below, the back face (windows, fire escape,
+// service door). In both cases the drawing fits entirely on the lot (depth of 12 tiles): the top row touches its top
+// to the north sidewalk and the bottom row touches its base to the south sidewalk, so no building covers sidewalk or street.
 //
-// Modelo puro (`facadeModel`: andares, "+N", janelas acesas e piscando, estilo) e o sprite em cache por chave
-// (`facadeSprites`): base + camada emissiva (o que brilha à noite: janelas acesas, letreiro, luzes do tema).
+// Pure model (`facadeModel`: floors, "+N", lit and blinking windows, style) and sprite cached by key
+// (`facadeSprites`): base + emissive layer (what glows at night: lit windows, sign, theme lights).
 import { mulberry32 } from '../../../../shared/hash';
 import { tr } from '../../../../shared/i18n';
 import type { WorldBuildingPublic, WorldTheme } from '../../../../shared/world/protocol';
 import { pixelText, pixelTextWidth } from '../../art/pixelfont';
 import { renderSeasonalProp, type SeasonalProp } from '../../art/seasonal';
 
-/** Medidas da fachada (px de mundo). */
+/** Facade dimensions (world px). */
 export const FACADE = {
-  /** Largura do prédio: 12 tiles (o lote tem 14; 1 tile de beco de cada lado). */
+  /** Building width: 12 tiles (the lot has 14; 1 tile alley on each side). */
   w: 192,
-  /** Sombra à direita (no beco). */
+  /** Shadow on the right (in the alley). */
   shadow: 6,
-  /** Telhado visto de cima + beiral. */
+  /** Roof viewed from above + eaves. */
   roof: 26,
-  /** Cada andar (janelas). */
+  /** Each floor (windows). */
   floor: 11,
-  /** Térreo (vitrine, porta e letreiro na frente; porta de serviço nos fundos). */
+  /** Ground floor (storefront, door, and sign in front; service door in back). */
   ground: 30,
-  /** A fachada desenha até 12 andares; acima disso, placa "+N" no telhado. */
+  /** Facade draws up to 12 floors; above that, "+N" rooftop sign. */
   maxFloors: 12,
-  /** Janelas por andar. */
+  /** Windows per floor. */
   cols: 11,
-  /** Primeira janela (x) e passo entre janelas. */
+  /** First window (x) and step between windows. */
   winX: 11,
   winPitch: 16,
   winW: 10,
   winH: 7,
 } as const;
 
-/** Estilos de fachada (cor, material, detalhes), escolhidos pela semente do lote. */
+/** Facade styles (color, material, details), chosen by the lot seed. */
 export interface FacadeStyle {
   name: string;
-  /** Tons da parede, do mais escuro ao mais claro. */
+  /** Wall tones, from darkest to lightest. */
   wall: [string, string, string, string];
   pattern: 'brick' | 'panel' | 'stucco' | 'glass' | 'stone';
-  /** Pedra/cornija/peitoris. */
+  /** Stone/cornice/sills. */
   trim: [string, string];
-  /** Telhado (laje vista de cima): base e borda. */
+  /** Roof (slab viewed from above): base and edge. */
   roof: [string, string];
-  /** Cor de destaque (marquise, letreiro, toldo). */
+  /** Accent color (marquee, sign, awning). */
   accent: [string, string];
-  /** Caixilho das janelas. */
+  /** Window frame. */
   frame: string;
 }
 
@@ -67,10 +67,10 @@ export const FACADE_STYLES: readonly FacadeStyle[] = [
   { name: 'menta', wall: ['#7fae96', '#93bea8', '#a9cdb8', '#c3dfcd'], pattern: 'stucco', trim: ['#f0ece2', '#fbf9f4'], roof: ['#5f6871', '#7b848d'], accent: ['#c95e8e', '#e47aa8'], frame: '#3d5a4c' },
 ];
 
-/** Variações por lote (estilo × ordem das janelas acesas): o cache não cresce com o número de lotes. */
+/** Variations per lot (style × lit window order): cache does not grow with the number of lots. */
 export const FACADE_VARIANTS = 40;
 
-/** Níveis de luz (proporção de janelas acesas em oitavos). */
+/** Light levels (ratio of lit windows in eighths). */
 export const LIT_LEVELS = 8;
 
 export type FacadeSide = 'front' | 'back';
@@ -79,29 +79,29 @@ export interface FacadeModel {
   side: FacadeSide;
   variant: number;
   style: number;
-  /** Andares desenhados (0..12) e os que sobram para a placa "+N". */
+  /** Drawn floors (0..12) and remainder for the "+N" sign. */
   drawn: number;
   plus: number;
   state: 'online' | 'away';
   theme: WorldTheme;
-  /** Modo discreto: sem contagens (luz média fixa, nada piscando). */
+  /** Discreet mode: no counts (fixed medium light, nothing blinking). */
   discreet: boolean;
-  /** Oitavos de janelas acesas (0..8). */
+  /** Eighths of lit windows (0..8). */
   litLevel: number;
-  /** Índices (na grade de janelas desenhadas) das acesas e das que piscam (`waiting`). */
+  /** Indices (in the drawn window grid) of lit ones and blinking ones (`waiting`). */
   lit: number[];
   waiting: number[];
-  /** Altura total do sprite (px). */
+  /** Total sprite height (px). */
   height: number;
 }
 
-/** Altura (px) do prédio com `floors` andares desenhados. */
+/** Height (px) of the building with `floors` drawn floors. */
 export function facadeHeight(floors: number): number {
   const drawn = Math.max(0, Math.min(FACADE.maxFloors, Math.floor(floors)));
   return FACADE.roof + drawn * FACADE.floor + FACADE.ground;
 }
 
-/** Ordem determinística em que as janelas acendem (embaralhadas pela variante). */
+/** Deterministic order in which windows light up (shuffled by variant). */
 export function windowOrder(variant: number, count: number): number[] {
   const order = Array.from({ length: count }, (_, i) => i);
   const rng = mulberry32((variant * 2654435761) >>> 0);
@@ -113,9 +113,9 @@ export function windowOrder(variant: number, count: number): number[] {
 }
 
 /**
- * O que a fachada mostra de um prédio. Janelas acesas na proporção `working / total` (em oitavos); as `waiting`
- * piscam (as próximas na ordem, ao menos uma se alguém espera); `away` apaga tudo; modo discreto (sem `agents`) acende
- * metade, sem piscar.
+ * What the facade displays for a building. Lit windows in the ratio `working / total` (in eighths); `waiting` ones
+ * blink (next in order, at least one if someone is waiting); `away` turns off all; discreet mode (no `agents`) lights
+ * half, without blinking.
  */
 export function facadeModel(b: Pick<WorldBuildingPublic, 'floors' | 'state' | 'theme' | 'agents'>, side: FacadeSide, seed: number): FacadeModel {
   const floors = Number.isFinite(b.floors) ? Math.max(0, Math.floor(b.floors)) : 0;
@@ -148,12 +148,12 @@ export function facadeModel(b: Pick<WorldBuildingPublic, 'floors' | 'state' | 't
   return { side, variant, style: variant % FACADE_STYLES.length, drawn, plus, state, theme, discreet, litLevel, lit, waiting, height: facadeHeight(drawn) };
 }
 
-/** Chave do cache do sprite (tudo o que muda o desenho; o nome, a bandeira e os likes ficam fora: são texto na tela). */
+/** Sprite cache key (everything that changes the drawing; name, flag, and likes stay outside: they are screen text). */
 export function facadeKey(m: FacadeModel): string {
   return `${m.side}|${m.variant}|${m.drawn}|${Math.min(99, m.plus)}|${m.state}|${m.theme}|${m.litLevel}`;
 }
 
-/** Retângulo (px, no sprite) da janela `i` da grade desenhada (andar 0 = o de baixo). */
+/** Rectangle (px, in sprite) of window `i` in the drawn grid (floor 0 = bottom one). */
 export function windowRect(m: Pick<FacadeModel, 'drawn'>, i: number): { x: number; y: number; w: number; h: number } {
   const col = i % FACADE.cols;
   const fromBottom = Math.floor(i / FACADE.cols);
@@ -161,17 +161,17 @@ export function windowRect(m: Pick<FacadeModel, 'drawn'>, i: number): { x: numbe
   return { x: FACADE.winX + col * FACADE.winPitch, y: FACADE.roof + k * FACADE.floor + 2, w: FACADE.winW, h: FACADE.winH };
 }
 
-/** Onde fica a placa com o nome do dono (px, no sprite): o letreiro do térreo na frente; no telhado, nos fundos. */
+/** Where the owner's name sign goes (px, in sprite): ground floor sign in front; rooftop in back. */
 export function signRect(m: Pick<FacadeModel, 'side' | 'height'>): { x: number; y: number; w: number; h: number } {
   if (m.side === 'front') return { x: 34, y: m.height - FACADE.ground + 2, w: FACADE.w - 68, h: 8 };
   return { x: 50, y: 11, w: FACADE.w - 100, h: 8 };
 }
 
-// ====================================================================== desenho (navegador)
+// ====================================================================== rendering (browser)
 
 export interface FacadeSprites {
   canvas: HTMLCanvasElement;
-  /** O que brilha à noite (desenhado por cima depois de escurecer a cena). */
+  /** What glows at night (drawn on top after darkening the scene). */
   glow: HTMLCanvasElement;
   w: number;
   h: number;
@@ -180,7 +180,7 @@ export interface FacadeSprites {
 const cache = new Map<string, FacadeSprites>();
 const CACHE_LIMIT = 600;
 
-/** Sprite da fachada (base e camada emissiva), em cache pela chave do modelo. */
+/** Facade sprite (base and emissive layer), cached by model key. */
 export function facadeSprites(m: FacadeModel): FacadeSprites {
   const key = facadeKey(m);
   let s = cache.get(key);
@@ -191,7 +191,7 @@ export function facadeSprites(m: FacadeModel): FacadeSprites {
   return s;
 }
 
-/** O sprite desta fachada já está pronto (desenhar não custa nada)? */
+/** Is this facade sprite already ready (drawing costs nothing)? */
 export function facadeReady(m: FacadeModel): boolean {
   return cache.has(facadeKey(m));
 }
@@ -229,7 +229,7 @@ function seasonalCanvas(kind: SeasonalProp): HTMLCanvasElement {
   return c;
 }
 
-/** Desenha o enfeite sazonal com o ponto central inferior em (x, y), cortando o espaço vazio do sprite (40×64). */
+/** Draws the seasonal ornament with bottom center at (x, y), clipping empty sprite space (40×64). */
 function drawSeasonal(ctx: Ctx, kind: SeasonalProp, x: number, y: number): void {
   const c = seasonalCanvas(kind);
   ctx.drawImage(c, Math.round(x - 20), Math.round(y - 60));
@@ -252,15 +252,15 @@ function paintFacade(m: FacadeModel): FacadeSprites {
   const groundTop = H - FACADE.ground;
   const fw = FACADE.w;
 
-  // ---- sombra no beco (à direita) e contato na base
+  // ---- alley shadow (on the right) and ground contact
   ctx.fillStyle = 'rgba(28,36,52,0.22)';
   ctx.fillRect(fw, 6, FACADE.shadow, H - 6);
   ctx.fillStyle = 'rgba(28,36,52,0.12)';
   ctx.fillRect(fw, 10, 2, H - 10);
 
-  // ---- paredes dos andares e térreo
+  // ---- upper floor and ground floor walls
   paintWall(ctx, st, 0, faceTop, fw, H - faceTop, rng);
-  // lajes entre andares e pilares nas pontas
+  // slabs between floors and corner pillars
   for (let k = 0; k <= m.drawn; k++) {
     const y = faceTop + k * FACADE.floor;
     rect(ctx, 0, y - 1, fw, 1, st.pattern === 'glass' ? st.trim[0] : shade(st.wall[0], -0.08));
@@ -269,7 +269,7 @@ function paintFacade(m: FacadeModel): FacadeSprites {
   rect(ctx, fw - 3, faceTop, 3, H - faceTop, st.trim[0]);
   rect(ctx, 0, faceTop, 1, H - faceTop, st.trim[1]);
 
-  // ---- janelas
+  // ---- windows
   const litSet = new Set(m.lit);
   const count = m.drawn * FACADE.cols;
   for (let i = 0; i < count; i++) {
@@ -278,7 +278,7 @@ function paintFacade(m: FacadeModel): FacadeSprites {
     if (litSet.has(i)) paintWindowGlow(gctx, r.x, r.y);
   }
 
-  // ---- fundos: escada de incêndio e aparelhos de ar
+  // ---- back: fire escape and AC units
   if (m.side === 'back' && m.drawn > 0) {
     const left = m.variant % 2 === 0;
     const ex = left ? FACADE.winX + FACADE.winPitch - 3 : FACADE.winX + (FACADE.cols - 2) * FACADE.winPitch - 3;
@@ -292,20 +292,20 @@ function paintFacade(m: FacadeModel): FacadeSprites {
     }
   }
 
-  // ---- térreo
+  // ---- ground floor
   if (m.side === 'front') paintStorefront(ctx, gctx, st, m, groundTop, on, rng);
   else paintServiceGround(ctx, gctx, st, m, groundTop, on, rng);
 
-  // ---- telhado e beiral
+  // ---- roof and eaves
   paintRoof(ctx, gctx, st, m, rng);
 
-  // ---- tema
+  // ---- theme
   paintTheme(ctx, gctx, m, groundTop);
   if (m.side === 'back') paintEntranceFromAbove(ctx, gctx, st, m);
-  // fechado: tabuleta na porta (na frente) ou na marquise (nos fundos), por cima de tudo
+  // closed: sign on the door (front) or on the marquee (back), on top of everything
   if (!on) paintClosedSign(ctx, fw / 2, m.side === 'front' ? groundTop + 16 : 1);
 
-  // ---- placa "+N" no telhado
+  // ---- rooftop "+N" sign
   if (m.plus > 0) {
     const text = `+${Math.min(99, m.plus)}`;
     const tw = pixelTextWidth(text);
@@ -363,14 +363,14 @@ function paintWall(ctx: Ctx, st: FacadeStyle, x: number, y: number, w: number, h
       }
       break;
     case 'glass':
-      // cortina de vidro: o vidro é a parede; montantes claros a cada janela
+      // glass curtain wall: glass is the wall; light mullions at each window
       rect(ctx, x, y, w, h, st.wall[1]);
       for (let yy = y; yy < y + h; yy++) {
         const k = (yy - y) % 11;
         if (k < 3) rect(ctx, x, yy, w, 1, st.wall[2]);
       }
       for (let xx = x + 3; xx < x + w; xx += 16) rect(ctx, xx, y, 1, h, st.frame);
-      // reflexo diagonal do céu
+      // diagonal sky reflection
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
       for (let i = 0; i < h; i++) ctx.fillRect(x + ((i * 2 + 40) % (w + 40)) - 20, y + i, 10, 1);
       break;
@@ -381,7 +381,7 @@ function paintWindow(ctx: Ctx, st: FacadeStyle, x: number, y: number, lit: boole
   const w = FACADE.winW;
   const h = FACADE.winH;
   if (st.pattern !== 'glass') {
-    // caixilho e peitoril
+    // frame and sill
     rect(ctx, x - 1, y - 1, w + 2, h + 2, st.frame);
     rect(ctx, x - 1, y + h + 1, w + 2, 1, st.trim[1]);
     rect(ctx, x - 1, y + h + 2, w + 2, 1, shade(st.trim[0], -0.15));
@@ -390,7 +390,7 @@ function paintWindow(ctx: Ctx, st: FacadeStyle, x: number, y: number, lit: boole
     rect(ctx, x, y, w, h, WARM[2]);
     rect(ctx, x, y, w, 2, WARM[3]);
     rect(ctx, x, y + h - 2, w, 2, WARM[1]);
-    // monitor azulado na mesa e às vezes alguém de costas
+    // bluish desk monitor and sometimes someone with their back turned
     rect(ctx, x + 2 + (v % 4), y + h - 3, 3, 2, '#5fb8f0');
     rect(ctx, x + 2 + (v % 4), y + h - 3, 1, 1, '#c8ecff');
     if (v === 2 || v === 5) rect(ctx, x + 6 - (v % 3), y + h - 4, 2, 3, '#7a5a3a');
@@ -398,12 +398,12 @@ function paintWindow(ctx: Ctx, st: FacadeStyle, x: number, y: number, lit: boole
     rect(ctx, x, y, w, h, GLASS[1]);
     rect(ctx, x, y, w, 2, GLASS[0]);
     rect(ctx, x, y + h - 1, w, 1, GLASS[2]);
-    // reflexo
+    // reflection
     rect(ctx, x + 1 + (v % 3), y + 2, 1, 3, GLASS[3]);
     rect(ctx, x + 2 + (v % 3), y + 2, 1, 1, '#b8d2ea');
-    if (v === 4) rect(ctx, x + 1, y + 1, w - 2, 2, '#c9cfd9'); // persiana baixa
+    if (v === 4) rect(ctx, x + 1, y + 1, w - 2, 2, '#c9cfd9'); // lowered blind
   }
-  // divisória do caixilho
+  // frame divider
   rect(ctx, x + (w >> 1), y, 1, h, st.pattern === 'glass' ? st.frame : shade(st.frame, 0.1));
 }
 
@@ -416,7 +416,7 @@ function paintWindowGlow(g: Ctx, x: number, y: number): void {
   g.fillRect(x, y, w, 2);
   g.fillStyle = '#5fb8f0';
   g.fillRect(x + 3, y + h - 3, 3, 2);
-  // brilho escapando pelo vidro
+  // glow spilling through the glass
   g.fillStyle = 'rgba(255,214,140,0.35)';
   g.fillRect(x - 1, y - 1, w + 2, h + 2);
 }
@@ -426,12 +426,12 @@ function paintFireEscape(ctx: Ctx, x: number, faceTop: number, floors: number): 
   const hi = '#5b6475';
   for (let k = 0; k < floors; k++) {
     const y = faceTop + k * FACADE.floor + FACADE.floor - 2;
-    // plataforma com guarda-corpo
+    // platform with railing
     rect(ctx, x - 2, y, 18, 1, hi);
     rect(ctx, x - 2, y + 1, 18, 1, col);
     rect(ctx, x - 2, y - 4, 18, 1, col);
     for (let i = 0; i < 18; i += 3) rect(ctx, x - 2 + i, y - 4, 1, 4, col);
-    // escada em zigue-zague até a plataforma de baixo
+    // zigzag ladder to the platform below
     if (k < floors - 1) {
       const dir = k % 2 === 0 ? 1 : -1;
       for (let s = 0; s < FACADE.floor; s++) rect(ctx, x + 7 + dir * (s - 5), y + 2 + s, 2, 1, s % 2 ? col : hi);
@@ -446,16 +446,16 @@ function paintAcUnit(ctx: Ctx, x: number, y: number): void {
   rect(ctx, x + 2, y + 1, 3, 1, '#8b95a3');
 }
 
-/** Térreo da frente: letreiro, vitrines, porta dupla de vidro, luminárias e degrau. */
+/** Front ground floor: sign, storefront windows, double glass door, lamps, and step. */
 function paintStorefront(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top: number, on: boolean, rng: () => number): void {
   const fw = FACADE.w;
   const H = m.height;
   const base = H - 2;
-  // faixa de pedra do térreo
+  // ground floor stone band
   rect(ctx, 0, top, fw, FACADE.ground, st.trim[0]);
   rect(ctx, 0, top, fw, 1, st.trim[1]);
   rect(ctx, 0, top + 1, fw, 1, shade(st.trim[0], -0.2));
-  // letreiro (a placa com o nome é escrita por cima, na tela)
+  // sign (the name plate is drawn on top, in screen space)
   const sign = signRect(m);
   rect(ctx, sign.x - 2, sign.y - 1, sign.w + 4, sign.h + 2, OUTLINE);
   rect(ctx, sign.x - 1, sign.y, sign.w + 2, sign.h, on ? st.accent[0] : '#4a505c');
@@ -464,7 +464,7 @@ function paintStorefront(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top:
     g.fillStyle = 'rgba(255,240,200,0.55)';
     g.fillRect(sign.x - 1, sign.y, sign.w + 2, sign.h);
   }
-  // vitrines dos dois lados da porta
+  // display windows on both sides of the door
   const dx0 = fw / 2 - 16;
   const dx1 = fw / 2 + 16;
   const vy = top + 12;
@@ -478,7 +478,7 @@ function paintStorefront(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top:
       rect(ctx, x0, vy, x1 - x0, vh, WARM[2]);
       rect(ctx, x0, vy, x1 - x0, 2, WARM[3]);
       rect(ctx, x0, vy + vh - 3, x1 - x0, 3, WARM[1]);
-      // prateleiras/mesas e plantas dentro
+      // shelves/tables and plants inside
       for (let x = x0 + 4; x < x1 - 4; x += 9 + Math.floor(rng() * 5)) {
         rect(ctx, x, vy + vh - 6, 5, 3, '#8a6243');
         if (rng() < 0.5) rect(ctx, x + 1, vy + vh - 9, 3, 3, '#4b8a45');
@@ -494,12 +494,12 @@ function paintStorefront(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top:
       for (let x = x0 + 3; x < x1; x += 13) rect(ctx, x, vy + 2, 2, vh - 3, GLASS[2]);
     }
     for (let x = x0 + 16; x < x1 - 2; x += 16) rect(ctx, x, vy, 1, vh, st.frame === '#e8eef4' ? '#cdd8e2' : OUTLINE);
-    // toldo sobre a vitrine
+    // awning over the display window
     rect(ctx, x0 - 1, vy - 4, x1 - x0 + 2, 3, st.accent[0]);
     for (let x = x0; x < x1; x += 4) rect(ctx, x, vy - 4, 2, 3, st.accent[1]);
     rect(ctx, x0 - 1, vy - 1, x1 - x0 + 2, 1, shade(st.accent[0], -0.25));
   }
-  // porta dupla de vidro
+  // double glass door
   const dy = top + 9;
   rect(ctx, dx0 - 2, dy - 2, 36, base - dy + 2, OUTLINE);
   rect(ctx, dx0 - 1, dy - 1, 34, base - dy + 1, st.trim[1]);
@@ -514,11 +514,11 @@ function paintStorefront(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top:
       g.fillRect(x + 1, dy + 1, 13, base - dy - 1);
     }
   }
-  // degrau e base de pedra
+  // step and stone base
   rect(ctx, 0, base, fw, 2, shade(st.trim[0], -0.25));
   rect(ctx, dx0 - 4, base - 1, 40, 3, '#c9cdd3');
   rect(ctx, dx0 - 4, base - 1, 40, 1, '#e4e7eb');
-  // luminárias dos dois lados da porta
+  // lamps on both sides of the door
   for (const x of [dx0 - 6, dx1 + 4]) {
     rect(ctx, x, dy + 2, 3, 4, OUTLINE);
     rect(ctx, x + 1, dy + 3, 1, 2, on ? '#fff1b8' : '#8b95a3');
@@ -531,12 +531,12 @@ function paintStorefront(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top:
   }
 }
 
-/** Térreo dos fundos: parede com porta de serviço, janelinhas altas, lixeiras e bicicletário. */
+/** Back ground floor: wall with service door, high small windows, dumpsters, and bike rack. */
 function paintServiceGround(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, top: number, on: boolean, rng: () => number): void {
   const fw = FACADE.w;
   const base = m.height - 2;
   rect(ctx, 0, top, fw, 2, shade(st.wall[0], -0.1));
-  // janelinhas altas
+  // high small windows
   for (let x = 12; x < fw - 12; x += 22) {
     if (Math.abs(x + 5 - fw / 2) < 18) continue;
     rect(ctx, x - 1, top + 5, 12, 6, st.frame);
@@ -548,7 +548,7 @@ function paintServiceGround(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, t
       g.fillRect(x, top + 6, 10, 4);
     }
   }
-  // porta de serviço (metal) com luminária
+  // service door (metal) with lamp
   const dx = fw / 2 - 7;
   rect(ctx, dx - 1, top + 9, 16, base - top - 9, OUTLINE);
   rect(ctx, dx, top + 10, 14, base - top - 10, '#7d8794');
@@ -560,7 +560,7 @@ function paintServiceGround(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, t
     g.fillStyle = 'rgba(255,230,160,0.9)';
     g.fillRect(dx + 5, top + 6, 4, 2);
   }
-  // lixeiras e bicicletas encostadas
+  // dumpsters and parked bicycles
   for (const [x, c] of [
     [22, '#3f7f4f'],
     [32, '#2f5f9e'],
@@ -583,9 +583,9 @@ function paintServiceGround(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, t
   rect(ctx, 0, base, fw, 2, shade(st.trim[0], -0.25));
 }
 
-/** Tabuleta "Fechado" pendurada (texto no idioma de quem vê, em pixels). */
+/** Hanging "Closed" sign (text in viewer's language, in pixels). */
 function paintClosedSign(ctx: Ctx, cx: number, y: number): void {
-  const text = tr('Fechado');
+  const text = tr('Closed');
   const tw = Math.min(40, pixelTextWidth(text));
   const w = tw + 6;
   const x = Math.round(cx - w / 2);
@@ -602,42 +602,42 @@ function paintClosedSign(ctx: Ctx, cx: number, y: number): void {
   ctx.restore();
 }
 
-/** Telhado visto de cima: borda, laje, caixa d'água, ar-condicionado, claraboia; nos fundos, a marquise da entrada. */
+/** Roof viewed from above: edge, slab, water tank, air conditioner, skylight; in back, entrance marquee. */
 function paintRoof(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, rng: () => number): void {
   const fw = FACADE.w;
   const R = FACADE.roof;
   const on = m.state === 'online';
-  // laje
+  // slab
   rect(ctx, 0, 0, fw, R - 5, OUTLINE);
   rect(ctx, 1, 1, fw - 2, R - 6, st.roof[1]);
   rect(ctx, 3, 3, fw - 6, R - 10, st.roof[0]);
-  // textura de cascalho
+  // gravel texture
   for (let i = 0; i < 90; i++) rect(ctx, 3 + Math.floor(rng() * (fw - 6)), 3 + Math.floor(rng() * (R - 10)), 1, 1, rng() < 0.5 ? st.roof[1] : shade(st.roof[0], -0.12));
-  // beiral (a borda sul da laje, de frente para a câmera)
+  // eaves (south edge of the slab, facing the camera)
   rect(ctx, 0, R - 5, fw, 4, st.trim[0]);
   rect(ctx, 0, R - 5, fw, 1, st.trim[1]);
   rect(ctx, 0, R - 2, fw, 1, shade(st.trim[0], -0.3));
   rect(ctx, 0, R - 1, fw, 1, 'rgba(28,36,52,0.35)');
-  // equipamentos no telhado
+  // rooftop equipment
   const slots = m.side === 'back' ? [14, 150] : [14, 60, 120, 160];
   for (const sx of slots) {
     const r = rng();
     const x = sx + Math.floor(rng() * 10);
     if (r < 0.35) {
-      // caixa d'água
+      // water tank
       rect(ctx, x, 4, 12, 12, OUTLINE);
       rect(ctx, x + 1, 5, 10, 10, '#9aa6b4');
       rect(ctx, x + 1, 5, 10, 3, '#c3ccd6');
       rect(ctx, x + 3, 6, 6, 1, '#e3e8ee');
     } else if (r < 0.7) {
-      // ar-condicionado com ventilador
+      // air conditioner with fan
       rect(ctx, x, 6, 14, 9, OUTLINE);
       rect(ctx, x + 1, 7, 12, 7, '#d4dae1');
       rect(ctx, x + 1, 7, 12, 2, '#eef1f4');
       rect(ctx, x + 4, 9, 6, 4, '#8b95a3');
       rect(ctx, x + 6, 10, 2, 2, '#5f6875');
     } else {
-      // claraboia
+      // skylight
       rect(ctx, x, 6, 16, 9, OUTLINE);
       rect(ctx, x + 1, 7, 14, 7, on ? '#9cc6e4' : '#3c5f84');
       rect(ctx, x + 1, 7, 14, 2, '#c8e2f4');
@@ -645,7 +645,7 @@ function paintRoof(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, rng: () =>
     }
   }
   if (rng() < 0.5) {
-    // antena
+    // antenna
     const ax = m.side === 'back' ? 176 : 100 + Math.floor(rng() * 40);
     rect(ctx, ax, 1, 1, 9, '#4a5468');
     rect(ctx, ax - 2, 3, 5, 1, '#4a5468');
@@ -657,7 +657,7 @@ function paintRoof(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel, rng: () =>
   }
 }
 
-/** Fundos: a entrada fica ao norte, então a marquise listrada sai da borda do telhado, com o letreiro logo atrás. */
+/** Back: entrance is on the north, so the striped marquee extends from the roof edge, with the sign right behind it. */
 function paintEntranceFromAbove(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeModel): void {
   const fw = FACADE.w;
   const on = m.state === 'online';
@@ -678,7 +678,7 @@ function paintEntranceFromAbove(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeMode
     }
     rect(ctx, ax0, 0, 44, 2, 'rgba(255,255,255,0.35)');
     rect(ctx, ax0, 7, 44, 2, 'rgba(28,36,52,0.25)');
-    // lâmpadas da entrada
+    // entrance lamps
     for (const x of [ax0 + 3, ax0 + 39]) {
       rect(ctx, x, 1, 2, 2, on ? '#fff1b8' : '#8b95a3');
       if (on) {
@@ -689,11 +689,11 @@ function paintEntranceFromAbove(ctx: Ctx, g: Ctx, st: FacadeStyle, m: FacadeMode
   }
 }
 
-/** Enfeites do tema do dono: Halloween (abóboras, teias, morcegos, luz roxa) e Natal (neve, luzes, guirlanda, árvore). */
+/** Owner's theme ornaments: Halloween (pumpkins, webs, bats, purple light) and Christmas (snow, lights, garland, tree). */
 function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
   if (m.theme === 'none') {
     if (m.side === 'front') {
-      // vasos de planta e capacho na entrada
+      // planters and doormat at entrance
       const fw = FACADE.w;
       const base = m.height - 2;
       for (const x of [fw / 2 - 26, fw / 2 + 20]) {
@@ -710,7 +710,7 @@ function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
   const on = m.state === 'online';
   const xmas = m.theme === 'christmas';
   if (xmas) {
-    // neve no telhado e no beiral
+    // snow on roof and eaves
     ctx.fillStyle = '#f4f8fb';
     for (let x = 2; x < fw - 2; x += 1) {
       const k = Math.sin(x * 0.35) + Math.sin(x * 0.11);
@@ -721,7 +721,7 @@ function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
     ctx.fillRect(0, R - 4, fw, 1);
     for (let x = 6; x < fw - 6; x += 23) ctx.fillRect(x, 6 + (x % 7), 6, 2);
   }
-  // fio de luzes sob o beiral (emissivo)
+  // string lights under the eaves (emissive)
   const colors = xmas ? ['#ff5a5a', '#ffd76a', '#6ad1ff', '#7be07b'] : ['#b06ae6', '#ff9a3c'];
   for (let x = 4, i = 0; x < fw - 2; x += 6, i++) {
     const y = R + (i % 2);
@@ -736,7 +736,7 @@ function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
     }
   }
   if (!xmas) {
-    // teias nos cantos de cima e morcegos no beiral
+    // webs on top corners and bats on the eaves
     ctx.strokeStyle = 'rgba(230,220,240,0.8)';
     ctx.lineWidth = 1;
     for (const side of [1, -1]) {
@@ -763,7 +763,7 @@ function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
   const base = m.height - 2;
   if (m.side === 'front') {
     if (xmas) {
-      // festão sobre a porta e árvore ao lado da entrada
+      // garland above the door and tree next to the entrance
       paintGarland(ctx, g, fw / 2 - 19, groundTop + 6, 38, on);
       drawSeasonal(ctx, 'tree', fw - 30, base + 2);
       drawSeasonal(ctx, 'gift', fw - 52, base + 2);
@@ -773,7 +773,7 @@ function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
       if (m.drawn > 0) drawSeasonal(ctx, 'ghost', 30, groundTop + 6);
     }
   } else {
-    // nos fundos, o enfeite fica junto à porta de serviço
+    // in back, the ornament stays next to the service door
     if (xmas) {
       paintGarland(ctx, g, fw / 2 - 10, groundTop + 6, 20, on);
       drawSeasonal(ctx, 'tree', fw / 2 + 30, base + 2);
@@ -784,7 +784,7 @@ function paintTheme(ctx: Ctx, g: Ctx, m: FacadeModel, groundTop: number): void {
   }
 }
 
-/** Festão de Natal (verde com laços vermelhos e luzinhas) sobre a porta. */
+/** Christmas garland (green with red bows and lights) over the door. */
 function paintGarland(ctx: Ctx, g: Ctx, x: number, y: number, w: number, on: boolean): void {
   for (let i = 0; i < w; i++) {
     const sag = Math.round(Math.sin((i / w) * Math.PI) * 3);
@@ -804,7 +804,7 @@ function paintGarland(ctx: Ctx, g: Ctx, x: number, y: number, w: number, on: boo
   }
 }
 
-// ------------------------------------------------------------------ cores
+// ------------------------------------------------------------------ colors
 
 function hexRgb(c: string): [number, number, number] {
   const n = parseInt(c.slice(1, 7), 16);
@@ -816,7 +816,7 @@ function toHex(r: number, g: number, b: number): string {
   return `#${v(r)}${v(g)}${v(b)}`;
 }
 
-/** Escurece (k < 0) ou clareia (k > 0) uma cor hex. */
+/** Darkens (k < 0) or lightens (k > 0) a hex color. */
 function shade(c: string, k: number): string {
   const [r, g, b] = hexRgb(c);
   if (k < 0) return toHex(r * (1 + k), g * (1 + k), b * (1 + k));

@@ -1,4 +1,4 @@
-// Estado de uma sala de projeto no mundo: ciclo de vida (construção/desmontagem) e luz.
+// Project room state in the world: lifecycle (construction/dismantling) and lighting.
 import type { RoomInfo } from '../../../../shared/types';
 import type { RoomTheme } from '../../art/api';
 import { BUILD_MS, DISMANTLE_MS } from '../constants';
@@ -6,19 +6,24 @@ import type { AreaLayout } from '../layout/types';
 import { lightLevel } from './behavior';
 
 /**
- * - building: animação de construção;
- * - ready: sala pronta;
- * - dismantling: animação de desmontagem;
- * - gone: desmontada (será removida).
+ * - building: construction animation;
+ * - ready: room ready;
+ * - dismantling: dismantling animation;
+ * - gone: dismantled (will be removed).
  */
 export type RoomPhase = 'building' | 'ready' | 'dismantling' | 'gone';
 
 export class RoomState {
   info: RoomInfo;
-  /** Semente com que o tema e o layout foram gerados (fixa desde a criação, mesmo se info.seed mudar). */
+  /** Seed used to generate the theme and layout (fixed since creation, even if info.seed changes). */
   readonly seed: number;
-  /** Vaga no prédio escolhida pelo cliente (sem buracos; ver Sim.compact). Pode diferir de info.slot. */
+  /** Building slot chosen by the client (no gaps; see Sim.compact). May differ from info.slot. Absolute: with several
+   * buildings, the slot of the street's column (geometry.slotColumn); `local` is the slot inside its own building. */
   slot: number;
+  /** The office whose building holds the room (RoomInfo.office; '' = the first building). */
+  office = '';
+  /** Slot inside its building (= slot for the first building). */
+  local: number;
   theme: RoomTheme;
   layout: AreaLayout;
   phase: RoomPhase;
@@ -27,19 +32,19 @@ export class RoomState {
   unlistedAt = 0;
   lightOn: boolean;
   lightAt = -1e9;
-  /** Personagem que se encarregou do interruptor (acender ao chegar / apagar ao sair). */
+  /** Character that took charge of the light switch (turn on on arrival / turn off on exit). */
   switchClaim: string | null = null;
-  /** Quando todas as condições de desmontagem ficaram verdadeiras (0 = não estão). */
+  /** When all dismantling conditions became true (0 = they are not). */
   readyToDismantleAt = 0;
-  /** Contas presentes (para as bolinhas da placa), atualizadas pelo mundo. */
+  /** Present accounts (for the plaque dots), updated by the world. */
   accounts: string[] = [];
-  /** Itens do quadro kanban. */
+  /** Kanban board items. */
   board: { status: 'pending' | 'in_progress' | 'completed' }[] = [];
-  /** Incrementa quando algo do cache estático muda (nome, tema). */
+  /** Increments when static cache contents change (name, theme). */
   version = 0;
   /**
-   * Endereço antigo de uma sala que se mudou: fica no lugar só até quem estava nela sair, apagar
-   * e ser desmontado. Ninguém pertence a ela e ela não aparece no snapshot.
+   * Old address of a moved room: stays in place only until its occupants leave, turn off lights,
+   * and it is dismantled. No one belongs to it and it does not appear in the snapshot.
    */
   ghost = false;
 
@@ -47,6 +52,7 @@ export class RoomState {
     this.info = info;
     this.seed = info.seed;
     this.slot = slot;
+    this.local = slot;
     this.theme = theme;
     this.layout = layout;
     this.phase = phase;
@@ -59,7 +65,7 @@ export class RoomState {
     return this.info.id;
   }
 
-  /** Progresso da animação da fase atual (0..1). */
+  /** Progress of the current phase animation (0..1). */
   progress(now: number): number {
     if (this.phase === 'building') return Math.min(1, (now - this.phaseAt) / BUILD_MS);
     if (this.phase === 'dismantling') return Math.min(1, (now - this.phaseAt) / DISMANTLE_MS);
@@ -67,7 +73,7 @@ export class RoomState {
     return 0;
   }
 
-  /** Ocupa a grade (caminhável) e é desenhada. */
+  /** Occupies the grid (walkable) and is rendered. */
   get present(): boolean {
     return this.phase === 'building' || this.phase === 'ready' || this.phase === 'dismantling';
   }
@@ -77,7 +83,7 @@ export class RoomState {
     this.phaseAt = now;
   }
 
-  /** Reverte uma desmontagem em andamento para construção, continuando do ponto visual equivalente. */
+  /** Reverts an ongoing dismantling to construction, continuing from the equivalent visual point. */
   rebuild(now: number): void {
     if (this.phase === 'dismantling') {
       const p = this.progress(now);

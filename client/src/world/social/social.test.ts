@@ -1,5 +1,5 @@
-// Integração da vida social com a simulação (sem DOM): rodas que se formam sozinhas, quem é chamado
-// de volta ao trabalho, apostas, moedinhas pelo trabalho e quem espera shell.
+// Social life integration with simulation (DOM-less): self-forming groups, returning to
+// work, bets, task coins, and shell waiting.
 import { describe, expect, it } from 'vitest';
 import type { AgentInfo, OfficeSnapshot, RoomInfo } from '../../../../shared/types';
 import type { Appearance, ArtModule, RoomTheme } from '../../art/api';
@@ -51,7 +51,7 @@ function agent(id: string, roomId: string, status: AgentInfo['status'], extra: P
     roomId,
     name: id[0].toUpperCase() + id.slice(1),
     look: 'f',
-    role: 'Agente principal',
+    role: 'Main agent',
     sessionId: `s-${id}`,
     account: '.claude',
     status,
@@ -72,7 +72,7 @@ function snap(rooms: RoomInfo[], agents: AgentInfo[], rev = 1): OfficeSnapshot {
     serverTime: T0,
     rooms,
     agents,
-    accounts: [{ id: '.claude', short: 'C', name: 'Conta C', color: '#f08a3c', configDir: '~/.claude', sessions: 1, usageStatus: 'ok' }],
+    accounts: [{ id: '.claude', short: 'C', name: 'Account C', color: '#f08a3c', configDir: '~/.claude', sessions: 1, usageStatus: 'ok' }],
     meta: { demo: true, sources: [], startedAt: T0, version: 't' },
   };
 }
@@ -92,8 +92,8 @@ function newSim(): Sim {
 
 const ROOMS = [room('/a', 0), room('/b', 1)];
 
-describe('vida social', () => {
-  it('dois ociosos se juntam numa roda sozinhos, sem ninguém forçar', () => {
+describe('social life', () => {
+  it('two idle agents gather on their own without forcing', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle')]), clock.now);
@@ -104,7 +104,7 @@ describe('vida social', () => {
     for (const m of active(g)) expect(sim.chars.get(m.id)!.gathering).toBe(g);
   });
 
-  it('sozinho no escritório, ninguém começa uma roda de grupo (só o espelho, que vale sozinho)', () => {
+  it('alone in the office, nobody starts a group gathering (only mirror is allowed solo)', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'working')]), clock.now);
@@ -117,7 +117,7 @@ describe('vida social', () => {
     }
   });
 
-  it('chamado para trabalhar no meio da TV: avisa a turma, sai correndo e os outros continuam', () => {
+  it('called to work while watching TV: notifies the group, rushes back, and others continue', () => {
     const sim = newSim();
     const clock = { now: T0 };
     const ids = ['ana', 'caio', 'davi'];
@@ -139,7 +139,7 @@ describe('vida social', () => {
     expect(sim.chars.get('ana')!.gathering).toBe(g);
   });
 
-  it('jokenpô valendo: o dinheiro só muda de mãos (soma igual) e o placar fecha', () => {
+  it('rock-paper-scissors with bets: money only changes hands (constant sum) and scoreboard closes', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle')]), clock.now);
@@ -157,14 +157,14 @@ describe('vida social', () => {
     expect(a.wins).toBe(c.losses);
     if (a.wins + a.losses > 0) {
       expect(w.coins('ana')).not.toBe(START_COINS.main);
-      expect(sim.social.events.at(-1)?.text).toMatch(/jokenpô/);
-      expect(['Recepção', 'Copa', 'Lounge']).toContain(sim.social.events.at(-1)?.place);
+      expect(sim.social.events.at(-1)?.text).toMatch(/rock-paper-scissors/);
+      expect(['Reception', 'Kitchen', 'Lounge']).toContain(sim.social.events.at(-1)?.place);
     }
-    // a roda acabou: nenhum lugar fica preso a ela
+    // gathering ended: no spot remains bound to it
     for (const s of sim.spots.all()) expect(sim.spots.ownerOf(s.id)?.startsWith('g:') ?? false).toBe(false);
   });
 
-  it('ping-pong até 5: um vence, o placar e o feed registram', () => {
+  it('ping-pong to 5: one wins, scoreboard and feed record it', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle')]), clock.now);
@@ -176,28 +176,28 @@ describe('vida social', () => {
     expect(Math.max(...g.score)).toBe(5);
     expect(g.winner).toBeTruthy();
     expect(sim.social.wallets.get(g.winner!)!.wins).toBe(1);
-    expect(sim.social.events.some((e) => e.agentId === g.winner && /pingue-pongue \(5 a \d\)/.test(e.text))).toBe(true);
+    expect(sim.social.events.some((e) => e.agentId === g.winner && /ping-pong \(5-\d\)/.test(e.text))).toBe(true);
   });
 
-  it('moedinhas pelo trabalho: tarefa concluída (+10) e pedido atendido (+5), com "+🪙" sobre a cabeça', () => {
+  it('task coins: completed task (+10) and prompt answered (+5), with "+🪙" overhead', () => {
     const sim = newSim();
     const clock = { now: T0 };
     const tasks = [{ id: '1', title: 'Login', status: 'in_progress' as const }];
-    sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'working', { tasks, activity: { id: 'a1', kind: 'edit', icon: '✏️', text: 'Editando', at: T0 } })]), clock.now);
+    sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'working', { tasks, activity: { id: 'a1', kind: 'edit', icon: '✏️', text: 'Editing', at: T0 } })]), clock.now);
     expect(sim.social.wallets.coins('ana')).toBe(START_COINS.main);
     run(sim, clock, 1);
     sim.applySnapshot(
-      snap(ROOMS, [agent('ana', '/a', 'idle', { tasks: [{ ...tasks[0], status: 'completed' }], activity: { id: 'a2', kind: 'done', icon: '✅', text: 'Concluiu', at: clock.now } })], 2),
+      snap(ROOMS, [agent('ana', '/a', 'idle', { tasks: [{ ...tasks[0], status: 'completed' }], activity: { id: 'a2', kind: 'done', icon: '✅', text: 'Done', at: clock.now } })], 2),
       clock.now,
     );
     expect(sim.social.wallets.coins('ana')).toBe(START_COINS.main + TASK_REWARD + TURN_REWARD);
     expect(sim.social.floaters.filter((f) => f.charId === 'ana').map((f) => f.text).sort()).toEqual([`+🪙${TASK_REWARD}`, `+🪙${TURN_REWARD}`].sort());
   });
 
-  it(`quem espera shell só entra numa roda depois de ${SHELL_SOCIAL_MIN_MS / 1000} s (antes, pipoca na mesa)`, () => {
+  it(`agents waiting on shell only join a gathering after ${SHELL_SOCIAL_MIN_MS / 1000} s (before that, popcorn at desk)`, () => {
     const sim = newSim();
     const clock = { now: T0 };
-    const shells = [{ id: 'b1', label: 'Testes', startedAt: T0, background: true, kind: 'shell' as const }];
+    const shells = [{ id: 'b1', label: 'Tests', startedAt: T0, background: true, kind: 'shell' as const }];
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'shell', { shells }), agent('caio', '/b', 'idle')]), clock.now);
     run(sim, clock, 0.3);
     const ana = sim.chars.get('ana')!;
@@ -208,7 +208,7 @@ describe('vida social', () => {
     if (!ana.step && !ana.queue.length) expect(sim.social.canJoin(ana, clock.now)).toBe(true);
   });
 
-  it('aba volta do segundo plano: rodas encerradas e lugares devolvidos', () => {
+  it('tab returns from background: gatherings ended and spots returned', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle'), agent('davi', '/b', 'idle')]), clock.now);
@@ -224,7 +224,7 @@ describe('vida social', () => {
     for (const s of sim.spots.all()) expect(sim.spots.ownerOf(s.id)?.startsWith('g:') ?? false).toBe(false);
   });
 
-  it('a interface recebe personalidade, carteira, vínculos e o que está fazendo', () => {
+  it('interface receives personality, wallet, bonds, and current activity', () => {
     const sim = newSim();
     const clock = { now: T0 };
     sim.applySnapshot(snap(ROOMS, [agent('ana', '/a', 'idle'), agent('caio', '/b', 'idle')]), clock.now);
@@ -233,7 +233,7 @@ describe('vida social', () => {
     const info = sim.social.info('ana')!;
     expect(info.coins).toBe(START_COINS.main);
     expect(info.traits.length).toBeGreaterThanOrEqual(2);
-    expect(info.doing).toMatch(new RegExp(`^${KINDS.talk.emoji} ${KINDS.talk.label} com Caio`));
-    expect(sim.social.info('ninguem')).toBeNull();
+    expect(info.doing).toMatch(new RegExp(`^${KINDS.talk.emoji} ${KINDS.talk.label} with Caio`));
+    expect(sim.social.info('nobody')).toBeNull();
   });
 });

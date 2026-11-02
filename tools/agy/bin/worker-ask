@@ -1,0 +1,784 @@
+#!/usr/bin/env python3
+"""agy-ask <accN> "<prompt>" [--mode plan|accept-edits|auto|default] [--effort low|medium|high] [--role NAME] [--cwd DIR] [--max N] [--timeout SEC] [agy flags]
+claude-ask <account> "<prompt>" [--mode default|plan|accept-edits|auto] [--effort low|medium|high|xhigh|max] [--model M] [--full] [--role NAME] [--cwd DIR] [--max N] [--timeout SEC]
+agy-ask team                                       print the offices: folder, boss, workers
+agy-ask rules [--office X] [--who boss|workers]    print an office's rules as its agents read them
+agy-ask rules check <path> [--write] | --cmd "..." [--office X]   would the rules allow it (exit 0) or not (exit 2)
+agy-ask rules propose "<rule>" --why "<reason>" [--for workers|boss|all] [--office X]   suggest a rule (the user decides)
+
+Gives one job to a worker and prints ONLY its final answer (capped at --max chars, default 2000). One source, two
+commands: installed as agy-ask (Antigravity workers, "acc2") and as the symlink claude-ask (Claude Code workers: the
+account id ".claude-work", "claude:.claude-work" or just "work"). The worker id is "acc2" / "claude:.claude-work".
+
+Through the office (Habblaud at $HABBLAUD_URL, default http://127.0.0.1:4747): the job goes into the worker's own
+terminal (POST /api/workers/ask) as a fresh conversation, and this call waits on GET /api/workers/jobs/<id>?wait=60,
+spending nothing while it waits; the server sends back the final answer only. If the office is not running or has no
+worker terminals (no answer, 404, 503), the job runs headless as before: agy -p (stream-json; stops at the result
+event, kills the process group, deletes that call's conversation files) or claude -p --output-format json (no session
+saved). Headless calls log "start"/"end" lines to ~/.agy_profiles/agy-ask.log.jsonl (via "headless"); the office logs
+the jobs it runs.
+
+Team rule (~/.agy_profiles/team.json v3, edited in Habblaud; no file = no rule): the file lists offices, each one team
+for one project folder ({"offices": [{"id", "name", "folder", "boss", "workers"}]}; a v2 file {boss, workers} is
+one office "main"). The boss of an office (a Claude boss: its PID is an ancestor of this call; an Antigravity boss:
+an ancestor `agy` runs with HOME=~/.agy_profiles/<boss acc>) gives jobs only to that office's workers, never to its
+own account, and the job carries the office id. A caller that is no office's boss is refused while any office has a
+boss; with no boss anywhere it may give jobs to any office's worker. Jobs sent from the office (AGY_ASK_FROM_OFFICE=1,
+with AGY_OFFICE=<id>; also usable by hand) skip the rule.
+
+Claude Code workers start lean unless --full: no MCP servers, no skills or slash commands, only the tools in LEAN_TOOLS
+(the default set costs ~24k tokens of context per job before any work, mostly the Workflow and Agent tools; lean ~8k),
+plus a short worker rule (answer only, compact, under --max chars). Through the office the job says "lean" and the
+office adds the same. Giving a job to the account you run on saves your context, not your quota (a note says so).
+
+Office rules (the office's `rules` in team.json, edited in Habblaud; absent = the defaults; bin/office_rules.py): every
+job starts with the rules for the workers, and a job is refused (exit 2, one line in rules-log.jsonl) when --cwd is
+outside the office's write scope ("cwd"), when the office already runs limits.maxJobs jobs ("jobs"), or when the
+worker's 5-hour or weekly use is at limits.quotaStop % or more ("quota"; unknown use = allowed). Claude Code workers
+also run bin/rules-hook (PreToolUse, given with --settings), which blocks an edit, read or command against the scope.
+
+Exit codes: 0 done; 1 failed, timeout or other error; 2 refused by the team rule; 3 BUSY: the worker is on another
+job (ask again when it is over, or pick another worker); 4 the job was cancelled (from the office).
+
+Antigravity workers only run Gemini 3.8 Flash: --model accepts only gemini-3.8-flash[-low|-medium|-high], --effort only
+low, medium, high. Without --mode / --effort a call uses the worker's defaults in ~/.agy_profiles/defaults.json
+({"acc2": {"mode": "plan", "effort": "low"}}, set from Habblaud), else mode plan (agy) or default (Claude).
+"""
+import glob, json, os, signal, subprocess, sys, threading, time, urllib.error, urllib.parse, urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import office_rules as R  # noqa: E402  (installed next to this script)
+
+HOME = R.HOME  # the real home, also when called from an Antigravity boss (HOME = its profile)
+ROOT = os.environ.get("HABBLAUD_AGY_PROFILES") or f"{HOME}/.agy_profiles"
+LOG = f"{ROOT}/agy-ask.log.jsonl"
+USAGE_DIR = (os.environ.get("HABBLAUD_USAGE_DIR") or "~/.habblaud/usage").replace("~", HOME, 1)
+RULES_HOOK = os.path.join(os.path.dirname(os.path.realpath(__file__)), "rules-hook")
+JOB_MAX_S = 30 * 60  # a job still "running" in the log after this long is not counted (the office stops it by then)
+DEFAULTS = f"{ROOT}/defaults.json"
+TEAM = f"{ROOT}/team.json"
+URL = (os.environ.get("HABBLAUD_URL") or "http://127.0.0.1:4747").rstrip("/")
+TOOL = "claude" if os.path.basename(sys.argv[0]).startswith("claude") else "agy"
+CMD = f"{TOOL}-ask"
+USAGE = __doc__.splitlines()[0 if TOOL == "agy" else 1]
+
+OK, FAIL, REFUSED, BUSY, CANCELLED = 0, 1, 2, 3, 4
+MODES = ("plan", "accept-edits", "auto", "default")
+AGY_EFFORTS = ("low", "medium", "high")  # Gemini 3.8 Flash thinking levels
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+AGY_MODEL = "gemini-3.8-flash"  # the only model Antigravity workers use
+CLAUDE_MODES = {"plan": "plan", "accept-edits": "acceptEdits", "auto": "auto", "default": ""}
+LEAN_TOOLS = "Bash,Read,Edit,Write,WebFetch,WebSearch"
+WORKER_RULE = ("You are a worker: another agent gave you this one job and reads only your final message. Do the job, "
+               "then reply with just the result, compact (no preamble, no recap of your steps), under {max} characters. "
+               "If you could not do it, say so plainly and why.")
+# Claude Code puts these into the environment of its tools: a claude started with them thinks it is a child session.
+CLAUDE_SESSION_VARS = ("CLAUDECODE", "AI_AGENT", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_CHILD_SESSION",
+                       "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT",
+                       "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+                       "CLAUDE_CODE_SSE_PORT")
+# Set for an Antigravity boss (its terminal loads the boss rules): a worker started from the boss's shell must not get them.
+BOSS_VARS = ("AGY_BOSS", "AGY_OFFICE")
+
+
+def die(msg, code=FAIL):
+    print(f"{CMD}: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# ------------------------------------------------------------------ arguments
+
+def worker_id(name):
+    """The worker id for the account named on the command line ("acc2", "claude:.claude-work")."""
+    if TOOL == "agy":
+        acc = name[4:] if name.startswith("agy:") else name
+        if acc.startswith("claude:") or acc.startswith(".claude"):
+            die(f"{name} is a Claude Code account: use claude-ask")
+        return acc
+    acc = name[7:] if name.startswith("claude:") else name
+    if acc.startswith("acc") or acc.startswith("agy:"):
+        die(f"{name} is an Antigravity account: use agy-ask")
+    return "claude:" + (acc if acc.startswith(".") else f".claude-{acc}")
+
+
+def flag(extra, name):
+    """Value of a flag passed through (e.g. --model X), or ""."""
+    return extra[extra.index(name) + 1] if name in extra[:-1] else ""
+
+
+def parse(argv):
+    if len(argv) < 2:
+        die(f"usage: {USAGE}")
+    a = {"worker": worker_id(argv[0]), "prompt": argv[1], "task": argv[1], "mode": "", "role": "", "effort": "", "model": "",
+         "max": 2000, "cwd": os.getcwd(), "timeout": 900, "full": False, "extra": []}
+    rest = argv[2:]
+    while rest:
+        k = rest.pop(0)
+        if k in ("--mode", "--role", "--max", "--cwd", "--timeout", "--effort", "--model"):
+            if not rest:
+                die(f"{k} needs a value")
+            v = rest.pop(0)
+            try:
+                a[k[2:]] = int(v) if k in ("--max", "--timeout") else v
+            except ValueError:
+                die(f"{k} needs a number")
+        elif k == "--full" and TOOL == "claude":
+            a["full"] = True
+        else:
+            a["extra"].append(k)  # passed to agy / claude as is
+    efforts = AGY_EFFORTS if TOOL == "agy" else CLAUDE_EFFORTS
+    if a["effort"] and a["effort"] not in efforts:
+        die(f"--effort must be one of {', '.join(efforts)}")
+    if TOOL == "agy" and a["model"] and a["model"] not in [AGY_MODEL] + [f"{AGY_MODEL}-{e}" for e in AGY_EFFORTS]:
+        die(f"workers only use {AGY_MODEL} (got --model {a['model']!r}); choose the thinking level with --effort")
+    if a["mode"] and a["mode"] not in MODES and not (TOOL == "claude" and a["mode"] in CLAUDE_MODES.values()):
+        die(f"--mode must be one of {', '.join(MODES)}")
+    d = defaults(a["worker"])
+    a["mode"] = a["mode"] or d.get("mode") or ("plan" if TOOL == "agy" else "default")
+    if not a["effort"] and d.get("effort") in efforts:
+        a["effort"] = d["effort"]
+    a["cwd"] = os.path.abspath(a["cwd"])
+    return a
+
+
+def defaults(worker):
+    """The worker's defaults for calls that do not say (defaults.json), or {}."""
+    try:
+        with open(DEFAULTS) as f:
+            d = json.load(f).get(worker)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+# ------------------------------------------------------------------ who is asking, and the team rule
+
+def parent(pid):
+    with open(f"/proc/{pid}/stat") as f:
+        return int(f.read().rsplit(")", 1)[1].split()[1])
+
+
+def env_of(pid, name):
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            for kv in f.read().split(b"\0"):
+                if kv.startswith(name.encode() + b"="):
+                    return kv.split(b"=", 1)[1].decode(errors="replace")
+    except OSError:
+        pass
+    return None
+
+
+def caller():
+    """The nearest `claude` ancestor ({claude_pid}), the nearest `agy` one with its HOME ({agy_pid, agy_home}), and
+    the nearest of the two ({pid}: the agent that asked)."""
+    found = {"claude_pid": None, "agy_pid": None, "agy_home": None, "pid": None}
+    pid = os.getppid()
+    for _ in range(32):
+        if pid <= 1:
+            break
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                comm = f.read().strip()
+            if comm == "claude" and not found["claude_pid"]:
+                found["claude_pid"] = pid
+                found["pid"] = found["pid"] or pid
+            elif comm == "agy" and not found["agy_pid"]:
+                found["agy_pid"], found["agy_home"] = pid, env_of(pid, "HOME")
+                found["pid"] = found["pid"] or pid
+            pid = parent(pid)
+        except (OSError, ValueError, IndexError):
+            break
+    return found
+
+
+def team():
+    """The team file, or None (no file: no rule). v3: {"offices": [{id, name, folder, boss, workers}]}; a v2 file
+    ({boss, workers}) reads as one office "main"."""
+    try:
+        with open(TEAM) as f:
+            t = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(t, dict):
+        return None
+    if not isinstance(t.get("offices"), list):
+        boss = t.get("boss") if isinstance(t.get("boss"), dict) else None
+        t = {"offices": [{"id": "main", "name": "Office", "folder": (boss or {}).get("cwd") or "",
+                          "boss": boss, "workers": t.get("workers")}]}
+    t["offices"] = [o for o in t["offices"] if isinstance(o, dict)]
+    return t
+
+
+def norm_worker(w):
+    return w[4:] if isinstance(w, str) and w.startswith("agy:") else w
+
+
+def boss_of(office):
+    b = office.get("boss")
+    return b if isinstance(b, dict) else None
+
+
+def workers_of(office):
+    """The office's workers, or None (no list: any worker)."""
+    w = office.get("workers")
+    return [norm_worker(x) for x in w] if isinstance(w, list) else None
+
+
+def boss_worker(boss):
+    """The worker id of the boss's own account."""
+    if boss.get("kind") == "agy":
+        return norm_worker(boss.get("acc") or boss.get("account") or "")
+    return f"claude:{boss.get('account')}"
+
+
+def is_boss(boss, who):
+    if boss.get("kind") == "agy":
+        home = who["agy_home"]
+        return bool(home) and os.path.realpath(home) == os.path.realpath(f"{ROOT}/{boss_worker(boss)}")
+    return bool(who["claude_pid"]) and who["claude_pid"] == boss.get("pid")
+
+
+def office_of_caller(t, who):
+    """The office whose boss made this call, or None."""
+    mine = [o for o in t["offices"] if boss_of(o) and is_boss(boss_of(o), who)]
+    hint = os.environ.get("AGY_OFFICE")  # set for an Antigravity boss opened from the office
+    return next((o for o in mine if o.get("id") == hint), mine[0] if mine else None)
+
+
+def same_account(worker, claude_pid):
+    """The Claude worker is the account of the calling claude (its CLAUDE_CONFIG_DIR, else ~/.claude)."""
+    conf = env_of(claude_pid, "CLAUDE_CONFIG_DIR") or f"{HOME}/.claude"
+    return os.path.realpath(conf) == os.path.realpath(f"{HOME}/{worker[len('claude:'):]}")
+
+
+def office_label(o):
+    return f"{o.get('name') or o.get('id')} ({o.get('id')})"
+
+
+def check_team(worker, who):
+    """(by, office id or None): by = 'you' (office), 'boss' or 'script'; refuses (exit 2) a job the team rule does
+    not allow. The boss of an office gives jobs to that office's workers only."""
+    if os.environ.get("AGY_ASK_FROM_OFFICE") == "1":
+        return "you", os.environ.get("AGY_OFFICE") or None
+    t = team()
+    if t is None:
+        return ("boss" if who["pid"] else "script"), None
+    office = office_of_caller(t, who)
+    if office:
+        boss = boss_of(office)
+        if worker == boss_worker(boss):
+            die(f"{worker} is the boss's own account", REFUSED)
+        workers = workers_of(office)
+        if workers is not None and worker not in workers:
+            die(f"{worker} is not a worker of your office {office_label(office)} (workers: {', '.join(workers) or 'none'}; add it in Habblaud)", REFUSED)
+        return "boss", office.get("id")
+    bosses = [boss_of(o) for o in t["offices"] if boss_of(o)]
+    if bosses:
+        names = ", ".join(b.get("name") or b.get("id") or "?" for b in bosses)
+        die(f"only a boss may give jobs (bosses: {names}, appointed in Habblaud); this call is not from one", REFUSED)
+    offices = [o for o in t["offices"] if workers_of(o) is None or worker in workers_of(o)]
+    if not offices:
+        listed = ", ".join(sorted({w for o in t["offices"] for w in workers_of(o) or []})) or "none"
+        die(f"{worker} is not a registered worker (workers: {listed}; add it in Habblaud)", REFUSED)
+    return ("boss" if who["pid"] else "script"), offices[0].get("id")
+
+
+def print_team():
+    t = team()
+    if t is None:
+        print("no team file: any caller may give jobs to any account")
+        return
+    mine = office_of_caller(t, caller())
+    for o in t["offices"]:
+        you = "  <- you are its boss" if mine is o else ""
+        print(f"office {office_label(o)}: {o.get('folder') or 'no folder yet'}{you}")
+        boss = boss_of(o)
+        if boss:
+            kind = "Antigravity" if boss.get("kind") == "agy" else "Claude Code"
+            print(f"  boss: {boss.get('name') or boss.get('id')} ({kind}, account {boss_worker(boss)})")
+        else:
+            print("  boss: none")
+        w = workers_of(o)
+        print(f"  workers: {'any' if w is None else ', '.join(w) or 'none'}")
+    if not t["offices"]:
+        print("no offices")
+    elif not mine:
+        anyone = not any(boss_of(o) for o in t["offices"])
+        print("you: not a boss" + (" (no office has a boss: anyone may give jobs to the offices' workers)" if anyone else ""))
+
+
+# ------------------------------------------------------------------ office rules
+
+def pick_office(oid, who):
+    """The office named by --office, else the one the caller is the boss of, else $AGY_OFFICE, else the only one."""
+    offs = R.offices()
+    names = ", ".join(str(o.get("id")) for o in offs) or "none"
+    if oid:
+        o = next((o for o in offs if o.get("id") == oid), None)
+        if not o:
+            die(f"no office {oid!r} (offices: {names})")
+        return o
+    t = team()
+    o = (office_of_caller(t, who) if t else None) or R.office_by_id(os.environ.get("AGY_OFFICE") or "") \
+        or (offs[0] if len(offs) == 1 else None)
+    if not o:
+        die(f"which office? pass --office <id> (offices: {names})")
+    return o
+
+
+def rules_cmd(argv):
+    """agy-ask rules [check|propose] ...: print, check or propose office rules."""
+    opts, pos = {"--office": "", "--who": "", "--cmd": None, "--why": "", "--for": "workers"}, []
+    write = False
+    while argv:
+        k = argv.pop(0)
+        if k == "--write":
+            write = True
+        elif k in opts:
+            if not argv:
+                die(f"{k} needs a value")
+            opts[k] = argv.pop(0)
+        else:
+            pos.append(k)
+    who = caller()
+    o = pick_office(opts["--office"], who)
+    rules, folder = R.office_rules(o), o.get("folder") or ""
+    boss = boss_of(o)
+    is_boss_call = bool(boss and is_boss(boss, who))
+    sub = pos.pop(0) if pos else ""
+    if sub == "":
+        side = opts["--who"] or ("boss" if is_boss_call else "workers")
+        if side not in ("boss", "workers"):
+            die("--who must be boss or workers")
+        print(R.rules_text(o, rules, side))
+        return
+    if sub == "check":
+        if opts["--cmd"] is not None:
+            hit = R.check_command(rules, opts["--cmd"])
+            print(f"refused: command (rule: {hit})" if hit else "allowed")
+            sys.exit(REFUSED if hit else OK)
+        if not pos:
+            die('usage: agy-ask rules check <path> [--write] | --cmd "..."')
+        c = R.check_path(rules, folder, HOME, pos[0], "write" if write else "read", cwd=os.getcwd())
+        print("allowed" if c["ok"] else f"refused: {c['kind']} (rule: {c['rule']})")
+        sys.exit(OK if c["ok"] else REFUSED)
+    if sub == "propose":
+        if not pos or not pos[0].strip():
+            die('usage: agy-ask rules propose "<rule>" --why "<reason>"')
+        if opts["--for"] not in R.FOR:
+            die("--for must be workers, boss or all")
+        # Who really proposes: the boss by name; you (from the office, or a shell with no agent above it); else a script.
+        if is_boss_call:
+            by = (boss or {}).get("name") or "boss"
+        elif os.environ.get("AGY_ASK_FROM_OFFICE") == "1" or not who["pid"]:
+            by = "you"
+        else:
+            by = "script"
+        prop = {"text": pos[0], "for": opts["--for"], "by": by}
+        if opts["--why"]:
+            prop["why"] = opts["--why"]
+        try:
+            status, r = http("POST", "/api/team", {"office": o.get("id"), "propose": prop})
+        except NoOffice:
+            die("the office is not running: a proposal goes through Habblaud (only it writes team.json); start it and try again")
+        if status != 200:
+            die(r.get("error") or f"the office answered {status} (an older Habblaud without office rules?)")
+        print(f"proposed to the user in office {office_label(o)}: {R._line(prop['text'])} (they accept or reject it in Habblaud)")
+        return
+    die(f"unknown: rules {sub} (rules | rules check | rules propose)")
+
+
+def running_jobs(oid):
+    """Jobs of the office still running according to the log: start lines without their end (office jobs by job id,
+    headless ones by PID, alive), started less than JOB_MAX_S ago."""
+    try:
+        with open(LOG, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 512 * 1024))
+            lines = f.read().decode(errors="replace").splitlines()
+    except OSError:
+        return 0
+    live, now = {}, time.time()
+    for ln in lines:
+        try:
+            j = json.loads(ln)
+        except ValueError:
+            continue
+        if not isinstance(j, dict):
+            continue
+        key = ("job", j["job"]) if j.get("via") == "terminal" and j.get("job") else ("pid", j.get("pid"))
+        if j.get("event") == "start" and j.get("office") == oid:
+            live[key] = j
+        elif j.get("event") == "end":
+            live.pop(key, None)
+
+    def running(j):
+        if now - (j.get("ts") or 0) > JOB_MAX_S:
+            return False
+        if j.get("via") == "terminal":
+            return True
+        try:
+            os.kill(int(j.get("pid") or 0), 0)
+            return True
+        except (OSError, ValueError):
+            return False
+    return sum(1 for j in live.values() if running(j))
+
+
+def usage_of(worker):
+    """The worker's highest use (5-hour or weekly, %) as Habblaud knows it, or None (unknown)."""
+    account = worker if worker.startswith("claude:") else f"agy:{worker}"
+    account = account[len("claude:"):] if account.startswith("claude:") else account
+    try:
+        status, snap = http("GET", "/api/snapshot", timeout=3)
+        if status == 200:
+            for acc in snap.get("accounts") or []:
+                if isinstance(acc, dict) and acc.get("id") == account:
+                    u = acc.get("usage") or {}
+                    vals = [w.get("utilization") for w in (u.get("fiveHour"), u.get("sevenDay")) if isinstance(w, dict)]
+                    vals = [v for v in vals if isinstance(v, (int, float))]
+                    return max(vals) if vals else None
+            return None
+    except NoOffice:
+        pass
+    if not worker.startswith("claude:"):
+        return None
+    try:  # no office: the usage file the Habblaud mod writes for a Claude account
+        with open(f"{USAGE_DIR}/{account}.json") as f:
+            u = json.load(f)
+        if time.time() * 1000 - (u.get("fetchedAt") or 0) > 6 * 3600 * 1000:
+            return None
+        vals = [w.get("utilization") for w in (u.get("five_hour"), u.get("seven_day")) if isinstance(w, dict)]
+        vals = [v for v in vals if isinstance(v, (int, float))]
+        return max(vals) if vals else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def refuse(o, a, kind, detail, msg):
+    R.violation(o.get("id"), a["worker"], kind, detail, "ask")
+    die(f"office rules of {office_label(o)}: {msg}", REFUSED)
+
+
+def apply_rules(a, oid):
+    """Refuses a job the office's rules do not allow; puts the rules for the workers on top of the prompt."""
+    o = R.office_by_id(oid) if oid else None
+    if not o:
+        return
+    rules, folder = R.office_rules(o), o.get("folder") or ""
+    c = R.check_path(rules, folder, HOME, a["cwd"], "write")
+    if not c["ok"]:
+        why = f"it is in {c['rule']}, which may not be read or edited" if c["kind"] == "deny" else f"edits are allowed only inside {', '.join([folder, *rules['scope']['write']])}"
+        refuse(o, a, "cwd", a["cwd"], f"--cwd {a['cwd']} is refused: {why}")
+    most = rules["limits"].get("maxJobs")
+    if most:
+        n = running_jobs(o.get("id"))
+        if n >= most:
+            refuse(o, a, "jobs", f"{n} jobs running", f"the office already runs {n} job(s) (limit {most}): ask again when one is over")
+    stop = rules["limits"].get("quotaStop")
+    if stop:
+        used = usage_of(a["worker"])
+        if used is not None and used >= stop:
+            refuse(o, a, "quota", f"{a['worker']} at {used}%", f"{a['worker']} has used {used}% of its quota (limit {stop}%): give the job to another worker")
+    a["prompt"] = R.rules_text(o, rules, "workers") + "\n\n" + a["prompt"]
+    a["rules_office"] = o.get("id")
+
+
+def hook_settings():
+    """--settings for a Claude Code worker: bin/rules-hook on the tools it checks."""
+    return json.dumps({"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|Bash",
+                                                 "hooks": [{"type": "command", "command": RULES_HOOK, "timeout": 10}]}]}})
+
+
+# ------------------------------------------------------------------ the office (Habblaud)
+
+class NoOffice(Exception):
+    """The office is not running or has no worker terminals: run headless."""
+
+
+def http(method, path, body=None, timeout=10):
+    """(status, json) from the office; NoOffice when it does not answer."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(URL + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"} if data is not None else {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            payload = json.loads(e.read() or b"{}")
+        except ValueError:
+            payload = {}
+        return e.code, payload if isinstance(payload, dict) else {}
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise NoOffice(str(e))
+
+
+def busy_help(worker, message):
+    print(f"{CMD}: {worker} is busy: {message}", file=sys.stderr)
+    print(f"{CMD}: it is on another job: ask again when that one is over, or give the job to another worker", file=sys.stderr)
+    sys.exit(BUSY)
+
+
+def via_office(a, by, office, who):
+    """Runs the job in the worker's terminal and waits for its answer; NoOffice to fall back to headless."""
+    # The office takes the agy mode names (plan, accept-edits, auto, default), also for Claude Code workers.
+    mode = {v: k for k, v in CLAUDE_MODES.items() if v}.get(a["mode"], a["mode"])
+    body = {"worker": a["worker"], "prompt": a["prompt"], "cwd": a["cwd"], "max": a["max"], "by": by,
+            "mode": mode, "callerPid": who["pid"]}
+    if office:
+        body["office"] = office
+    for k in ("role", "effort", "model"):
+        if a[k]:
+            body[k] = a[k]
+    if TOOL == "claude" and not a["full"]:
+        body["lean"] = True
+    status, r = http("POST", "/api/workers/ask", body)
+    if status in (404, 503):
+        raise NoOffice(r.get("error") or str(status))
+    if status == 409:
+        busy_help(a["worker"], r.get("message") or r.get("error") or "BUSY")
+    if status == 403:
+        die(r.get("error") or "refused by the office", REFUSED)
+    if status >= 300 or not isinstance(r.get("job"), dict):
+        die(r.get("error") or f"the office answered {status}")
+    job = r["job"]
+    t0, deadline = time.time(), time.time() + a["timeout"]
+
+    def cancel(*_):
+        try:
+            http("POST", "/api/workers/cancel", {"job": job["id"]}, timeout=5)
+        except NoOffice:
+            pass
+
+    def on_signal(sig, _):  # the caller gave up (Bash timeout, Ctrl-C): cancel the job in the office too
+        cancel()
+        sys.exit(128 + sig)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    misses = 0
+    while job.get("status") in ("queued", "working"):
+        left = deadline - time.time()
+        if left <= 0:
+            cancel()
+            die(f"{a['worker']} TIMEOUT after {round(time.time() - t0)}s (job cancelled)")
+        try:
+            status, r = http("GET", f"/api/workers/jobs/{urllib.parse.quote(job['id'])}?wait={max(1, min(60, int(left)))}",
+                             timeout=min(60, left) + 15)
+            misses = 0
+        except NoOffice as e:  # the office went away mid-job: the job may still be running there
+            misses += 1
+            if misses >= 3:
+                die(f"lost the office while waiting for job {job['id']}: {e}")
+            time.sleep(2)
+            continue
+        if status != 200 or not isinstance(r.get("job"), dict):
+            die(r.get("error") or f"the office answered {status} for job {job['id']}")
+        job = r["job"]
+    st = job.get("status")
+    if st == "done":
+        out = (job.get("answer") or "").rstrip("\n")
+        print(out if len(out) <= a["max"] else f"{out[:a['max']]}\n[... cut at {a['max']} chars]")
+        sys.exit(OK)
+    if st == "cancelled":
+        die(f"job {job['id']} on {a['worker']} was cancelled from the office", CANCELLED)
+    die(f"{a['worker']} {st or 'ERROR'} after {round(time.time() - t0)}s: {job.get('error') or ''}".rstrip(": "))
+
+
+# ------------------------------------------------------------------ headless (no office)
+
+def log(entry):
+    try:
+        with open(LOG, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def log_start(a, who, t0):
+    acc = a["worker"]
+    log({"event": "start", "ts": t0, "acc": acc, "worker": acc, "via": "headless", "pid": os.getpid(), "mode": a["mode"],
+         "role": a["role"], "model": a["model"], "effort": a["effort"], "claude_pid": who["claude_pid"],
+         "cwd": a["cwd"], "prompt": a["task"][:200], **({"office": a["office"]} if a.get("office") else {})})
+
+
+def log_end(a, t0, **fields):
+    log({"event": "end", "ts": time.time(), "acc": a["worker"], "worker": a["worker"], "via": "headless",
+         "pid": os.getpid(), "sec": round(time.time() - t0), **fields})
+
+
+def finish(a, t0, status, answer, other, fields):
+    """Logs the end, prints the answer (or the error) and exits."""
+    end = {"status": status, **fields}
+    if status != "SUCCESS":  # last error lines (e.g. 429 "Individual quota reached"): Habblaud shows quota hits
+        end["error"] = ("\n".join(other[-5:]) or answer or "")[-300:]
+    log_end(a, t0, **end)
+    if status != "SUCCESS":
+        print(f"{CMD}: {a['worker']} {status} after {round(time.time() - t0)}s:", file=sys.stderr)
+        print("\n".join(other[-5:]) or answer, file=sys.stderr)
+        sys.exit(FAIL)
+    out = (answer or "").rstrip("\n")
+    print(out if len(out) <= a["max"] else f"{out[:a['max']]}\n[... cut at {a['max']} chars]")
+    sys.exit(OK)
+
+
+def headless_agy(a, who):
+    acc = a["worker"]
+    cmd = ["agy-as", acc, "-p", a["prompt"], "--output-format", "stream-json"]
+    if a["mode"] != "default":
+        cmd += ["--mode", a["mode"]]
+    if a["effort"]:
+        cmd += ["--effort", a["effort"]]
+    if a["model"]:
+        cmd += ["--model", a["model"]]
+    cmd += a["extra"]
+    env = {k: v for k, v in os.environ.items() if k not in BOSS_VARS}
+    env["PATH"] = f"{HOME}/.local/bin:" + env.get("PATH", "")
+    if a.get("rules_office"):  # for agy-plugin/office-rules (rules-hook), when it is installed in the profile
+        env.update(AGY_OFFICE=a["rules_office"], AGY_WORKER=acc)
+    t0 = time.time()
+    log_start(a, who, t0)
+    p = subprocess.Popen(cmd, cwd=a["cwd"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    st = {"cid": None, "result": None, "other": []}
+
+    def cleanup(*_):
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if st["cid"]:  # a killed call leaves a ~32 MB .db-wal behind
+            conv = f"{HOME}/.agy_profiles/{acc}/.gemini/antigravity-cli/conversations/{st['cid']}.db"
+            for f in glob.glob(conv + "*"):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+
+    def on_signal(sig, _):  # caller gave up (Bash timeout, Ctrl-C): take the worker down with us
+        cleanup()
+        log_end(a, t0, cid=st["cid"], status="KILLED")
+        sys.exit(128 + sig)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+
+    def reader():
+        for ln in p.stdout:
+            if ln.startswith('{"event":"init"'):
+                st["cid"] = json.loads(ln).get("conversation_id")
+            elif ln.startswith('{"event":"result"'):
+                st["result"] = json.loads(ln).get("result", {})
+                return
+            elif not ln.startswith('{"event":'):
+                st["other"].append(ln.rstrip())  # errors, quota messages
+
+    th = threading.Thread(target=reader, daemon=True)
+    th.start()
+    th.join(a["timeout"])
+    cleanup()
+    r = st["result"] or {}
+    status = r.get("status") or ("TIMEOUT" if th.is_alive() else "NO_RESULT")
+    finish(a, t0, status, r.get("response", ""), st["other"],
+           {"cid": st["cid"], "turns": r.get("num_turns"), "usage": r.get("usage")})
+
+
+def headless_claude(a, who):
+    account = a["worker"][len("claude:"):]
+    conf = f"{HOME}/{account}"
+    if not os.path.isdir(conf):
+        die(f"no Claude Code account folder {conf}")
+    cmd = ["claude", "-p", a["prompt"], "--output-format", "json", "--no-session-persistence"]
+    mode = CLAUDE_MODES.get(a["mode"], a["mode"])
+    if mode:
+        cmd += ["--permission-mode", mode]
+    if a["effort"]:
+        cmd += ["--effort", a["effort"]]
+    if a["model"]:
+        cmd += ["--model", a["model"]]
+    if a.get("rules_office") and os.path.exists(RULES_HOOK):
+        cmd += ["--settings", hook_settings()]
+    if not a["full"]:
+        cmd += ["--strict-mcp-config", "--disable-slash-commands",
+                "--append-system-prompt", WORKER_RULE.format(max=a["max"])]
+        if "--tools" not in a["extra"]:
+            cmd += ["--tools", LEAN_TOOLS]
+    cmd += a["extra"]
+    env = {k: v for k, v in os.environ.items() if k not in CLAUDE_SESSION_VARS + BOSS_VARS}
+    env["PATH"] = f"{HOME}/.local/bin:" + env.get("PATH", "")
+    if a.get("rules_office"):  # rules-hook finds the office and who it is from these
+        env.update(AGY_OFFICE=a["rules_office"], AGY_WORKER=a["worker"])
+    if account == ".claude":
+        env.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        env["CLAUDE_CONFIG_DIR"] = conf
+    t0 = time.time()
+    log_start(a, who, t0)
+    p = subprocess.Popen(cmd, cwd=a["cwd"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, start_new_session=True)
+
+    def kill():
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def on_signal(sig, _):
+        kill()
+        log_end(a, t0, status="KILLED")
+        sys.exit(128 + sig)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    try:
+        out, err = p.communicate(timeout=a["timeout"])
+    except subprocess.TimeoutExpired:
+        kill()
+        finish(a, t0, "TIMEOUT", "", [], {})
+    try:
+        r = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+    except ValueError:
+        r = {}
+    ok = r.get("subtype") == "success" and not r.get("is_error")
+    u = r.get("usage") or {}
+    usage = None
+    if u:
+        usage = {"input_tokens": u.get("input_tokens", 0), "output_tokens": u.get("output_tokens", 0),
+                 "cache_read_tokens": u.get("cache_read_input_tokens", 0),
+                 "cache_creation_tokens": u.get("cache_creation_input_tokens", 0)}
+        usage["total_tokens"] = sum(usage.values())
+        if r.get("total_cost_usd") is not None:
+            usage["cost_usd"] = r["total_cost_usd"]
+    other = [ln for ln in (err or "").splitlines() if ln.strip()] or ([] if ok else [ln for ln in out.splitlines() if ln.strip()][-5:])
+    finish(a, t0, "SUCCESS" if ok else (r.get("subtype") or "ERROR").upper(), r.get("result", ""), other,
+           {"cid": r.get("session_id"), "turns": r.get("num_turns"), "usage": usage})
+
+
+# ------------------------------------------------------------------ main
+
+def main():
+    argv = sys.argv[1:]
+    if argv == ["team"]:
+        return print_team()
+    if argv[:1] == ["rules"]:
+        return rules_cmd(argv[1:])
+    a = parse(argv)
+    if not os.path.isdir(a["cwd"]):
+        die(f"no such directory {a['cwd']}")
+    who = caller()
+    by, office = check_team(a["worker"], who)
+    a["office"] = office
+    apply_rules(a, office)
+    if TOOL == "claude" and who["claude_pid"] and same_account(a["worker"], who["claude_pid"]):
+        print(f"{CMD}: note: {a['worker']} is the account you run on: this saves your context, not your quota", file=sys.stderr)
+    try:
+        via_office(a, by, office, who)
+    except NoOffice:
+        pass
+    (headless_agy if TOOL == "agy" else headless_claude)(a, who)
+
+
+if __name__ == "__main__":
+    main()

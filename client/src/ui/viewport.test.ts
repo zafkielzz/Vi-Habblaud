@@ -16,7 +16,7 @@ const desktop: PanelGeometry = {
 const g = INSET_GAP;
 
 describe('computeInsets', () => {
-  it('desktop: barra superior, barra lateral aberta e feed aberto', () => {
+  it('desktop: top bar, open sidebar, and open feed', () => {
     expect(computeInsets(desktop, { sidebar: true, feed: true, drawer: false, narrow: false })).toEqual({
       top: 64 + g,
       left: 314 + g,
@@ -25,7 +25,7 @@ describe('computeInsets', () => {
     });
   });
 
-  it('gaveta aberta conta à direita; feed recolhido ainda ocupa a faixa do cabeçalho', () => {
+  it('open drawer counts on the right; collapsed feed still occupies header height', () => {
     expect(computeInsets(desktop, { sidebar: false, feed: false, drawer: true, narrow: false })).toEqual({
       top: 64 + g,
       left: 0,
@@ -34,19 +34,19 @@ describe('computeInsets', () => {
     });
   });
 
-  it('tela estreita: a barra lateral é sobreposta (com fundo escuro) e não conta', () => {
+  it('narrow screen: sidebar is an overlay (with backdrop) and does not count', () => {
     expect(computeInsets(desktop, { sidebar: true, feed: false, drawer: false, narrow: true }).left).toBe(0);
   });
 
-  it('celular: a gaveta é uma folha inferior e conta embaixo, não à direita', () => {
+  it('mobile: drawer is a bottom sheet and counts at bottom, not right', () => {
     const phone: PanelGeometry = { ...desktop, vw: 390, vh: 844, topBottom: 108, drawerLeft: 8, drawerTop: 346, drawerSheet: true, feedOpenH: 371, feedMargin: 8 };
     const ins = computeInsets(phone, { sidebar: false, feed: false, drawer: true, narrow: true });
     expect(ins).toEqual({ top: 108 + g, left: 0, right: 0, bottom: 844 - 346 + g });
-    // A faixa livre acima da folha continua utilizável.
+    // Free area above sheet remains usable.
     expect(844 - ins.top - ins.bottom).toBeGreaterThanOrEqual(MIN_FREE);
   });
 
-  it('janela pequena demais: os painéis cedem para sobrar uma área mínima', () => {
+  it('window too small: panels yield to keep a minimum usable area', () => {
     const tiny: PanelGeometry = { ...desktop, vw: 700, vh: 360 };
     const ins = computeInsets(tiny, { sidebar: true, feed: true, drawer: true, narrow: false });
     expect(700 - ins.left - ins.right).toBeGreaterThanOrEqual(MIN_FREE - 1);
@@ -56,8 +56,8 @@ describe('computeInsets', () => {
   });
 });
 
-describe('comparações', () => {
-  it('sameInsets ignora diferenças abaixo de 1 px', () => {
+describe('comparisons', () => {
+  it('sameInsets ignores differences below 1 px', () => {
     const a = { top: 72, right: 0, bottom: 218, left: 322 };
     expect(sameInsets(a, { ...a, left: 322.4 })).toBe(true);
     expect(sameInsets(a, { ...a, right: 398 })).toBe(false);

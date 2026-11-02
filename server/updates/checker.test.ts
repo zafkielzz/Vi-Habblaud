@@ -19,13 +19,13 @@ interface Call {
   headers: Record<string, string>;
 }
 
-/** fetch falso: responde a fila `replies` em ordem e guarda as chamadas. */
+/** Fake fetch: returns items from `replies` queue in order and records calls. */
 function fakeFetch(replies: (Response | Error)[]): { fetch: typeof fetch; calls: Call[] } {
   const calls: Call[] = [];
   const fn = (async (url: string | URL, init?: RequestInit) => {
     calls.push({ url: String(url), headers: { ...(init?.headers as Record<string, string>) } });
     const next = replies.shift();
-    if (!next) throw new Error('sem resposta preparada');
+    if (!next) throw new Error('no prepared response');
     if (next instanceof Error) throw next;
     return next;
   }) as typeof fetch;
@@ -45,26 +45,26 @@ afterEach(() => {
   for (const c of checkers.splice(0)) c.stop();
 });
 
-describe('versões', () => {
-  it('lê x.y.z com ou sem "v" e com pré-lançamento', () => {
+describe('versions', () => {
+  it('parses x.y.z with or without "v" and with prerelease', () => {
     expect(parseVersion('v1.2.3')).toEqual({ nums: [1, 2, 3], pre: undefined });
     expect(parseVersion('0.10.0-beta.1')).toEqual({ nums: [0, 10, 0], pre: 'beta.1' });
     expect(parseVersion('release-2026')).toBeNull();
     expect(parseVersion('1.2')).toBeNull();
   });
 
-  it('compara como o semver', () => {
+  it('compares like semver', () => {
     expect(compareVersions('0.10.0', '0.2.0')).toBeGreaterThan(0);
     expect(compareVersions('v1.0.0', '1.0.0')).toBe(0);
     expect(compareVersions('1.0.0-beta', '1.0.0')).toBeLessThan(0);
     expect(compareVersions('1.0.0', '1.0.0-rc.1')).toBeGreaterThan(0);
     expect(compareVersions('1.0.0-alpha', '1.0.0-beta')).toBeLessThan(0);
-    expect(compareVersions('lixo', '1.0.0')).toBe(0);
+    expect(compareVersions('garbage', '1.0.0')).toBe(0);
   });
 });
 
 describe('parseGithubRepo', () => {
-  it('aceita as formas do campo repository', () => {
+  it('accepts repository field formats', () => {
     expect(parseGithubRepo('marmottajr/habblaud')).toBe(REPO);
     expect(parseGithubRepo('github:marmottajr/habblaud')).toBe(REPO);
     expect(parseGithubRepo('https://github.com/marmottajr/habblaud')).toBe(REPO);
@@ -73,7 +73,7 @@ describe('parseGithubRepo', () => {
     expect(parseGithubRepo('git+ssh://git@github.com/marmottajr/habblaud.git')).toBe(REPO);
   });
 
-  it('recusa o que não é um repositório do GitHub', () => {
+  it('rejects non-GitHub repositories', () => {
     expect(parseGithubRepo('https://gitlab.com/a/b')).toBeUndefined();
     expect(parseGithubRepo('a/..')).toBeUndefined();
     expect(parseGithubRepo('a/b/c')).toBeUndefined();
@@ -83,7 +83,7 @@ describe('parseGithubRepo', () => {
 });
 
 describe('UpdateChecker', () => {
-  it('release mais nova: available, link e data; avisa a mudança', async () => {
+  it('newer release: available, link, and date; notifies change', async () => {
     const f = fakeFetch([json(RELEASE, { headers: { ETag: 'W/"abc"' } })]);
     let changes = 0;
     const c = make({ fetch: f.fetch, now: () => 1_000, onChange: () => changes++ });
@@ -104,7 +104,7 @@ describe('UpdateChecker', () => {
     expect(changes).toBe(1);
   });
 
-  it('304 com ETag mantém a release conhecida e só renova a data', async () => {
+  it('304 with ETag keeps known release and only refreshes date', async () => {
     const f = fakeFetch([json(RELEASE, { headers: { ETag: 'W/"abc"' } }), new Response(null, { status: 304 })]);
     let t = 1_000;
     const c = make({ fetch: f.fetch, now: () => t });
@@ -115,40 +115,40 @@ describe('UpdateChecker', () => {
     expect(s).toMatchObject({ state: 'ok', latest: '0.3.0', checkedAt: 2_000, available: true });
   });
 
-  it('mesma versão (ou mais velha) não é novidade', async () => {
+  it('same (or older) version is not an update', async () => {
     const c = make({ fetch: fakeFetch([json({ ...RELEASE, tag_name: 'v0.2.0' })]).fetch });
     expect(await c.check()).toMatchObject({ state: 'ok', latest: '0.2.0', available: false });
   });
 
-  it('404: nenhuma release publicada', async () => {
+  it('404: no releases published', async () => {
     const c = make({ fetch: fakeFetch([new Response('{}', { status: 404 })]).fetch, now: () => 5 });
     expect(await c.check()).toMatchObject({ state: 'ok', checkedAt: 5, latest: undefined, available: false });
   });
 
-  it('tag fora do padrão é ignorada', async () => {
+  it('non-standard tag is ignored', async () => {
     const c = make({ fetch: fakeFetch([json({ ...RELEASE, tag_name: 'nightly' })]).fetch });
     expect(await c.check()).toMatchObject({ state: 'ok', latest: undefined, url: undefined, available: false });
   });
 
-  it('link que não é do repositório vira a página de releases', async () => {
+  it('link outside repository falls back to releases page', async () => {
     const c = make({ fetch: fakeFetch([json({ ...RELEASE, html_url: 'javascript:alert(1)' })]).fetch });
     expect((await c.check()).url).toBe(`https://github.com/${REPO}/releases/latest`);
   });
 
-  it('falhas: limite do GitHub, sem rede e tempo esgotado (a última release conhecida continua valendo)', async () => {
+  it('failures: GitHub rate limit, offline, and timeout (last known release remains valid)', async () => {
     const timeout = Object.assign(new Error('timeout'), { name: 'TimeoutError' });
     const f = fakeFetch([json(RELEASE), new Response('{}', { status: 403 }), new TypeError('fetch failed'), timeout, new Response('', { status: 502 })]);
     const c = make({ fetch: f.fetch });
     await c.check();
     const limits = await c.check();
     expect(limits).toMatchObject({ state: 'error', latest: '0.3.0', available: true });
-    expect(limits.error).toMatch(/limite de consultas/);
-    expect((await c.check()).error).toBe('sem conexão com o GitHub');
-    expect((await c.check()).error).toBe('o GitHub não respondeu a tempo');
-    expect((await c.check()).error).toBe('o GitHub respondeu 502');
+    expect(limits.error).toBe('GitHub rate limit reached; will retry later');
+    expect((await c.check()).error).toBe('no connection to GitHub');
+    expect((await c.check()).error).toBe("GitHub didn't respond in time");
+    expect((await c.check()).error).toBe('GitHub responded 502');
   });
 
-  it('desligado: não consulta nada', async () => {
+  it('disabled: does not query anything', async () => {
     const f = fakeFetch([json(RELEASE)]);
     const off = make({ fetch: f.fetch, enabled: false });
     expect(await off.check()).toEqual({ state: 'off', repo: REPO, available: false });
@@ -157,7 +157,7 @@ describe('UpdateChecker', () => {
     expect(f.calls).toHaveLength(0);
   });
 
-  it('"Verificar agora" seguidos: no máximo uma consulta a cada 30 s', async () => {
+  it('"Check now" consecutively: at most one query every 30 s', async () => {
     const f = fakeFetch([json(RELEASE), json(RELEASE)]);
     let t = 10_000;
     const c = make({ fetch: f.fetch, now: () => t });
@@ -170,7 +170,7 @@ describe('UpdateChecker', () => {
     expect(f.calls).toHaveLength(2);
   });
 
-  it('consultas simultâneas viram uma só', async () => {
+  it('concurrent queries are coalesced into one', async () => {
     const f = fakeFetch([json(RELEASE)]);
     const c = make({ fetch: f.fetch });
     const [a, b] = await Promise.all([c.check(), c.check()]);
@@ -178,7 +178,7 @@ describe('UpdateChecker', () => {
     expect(f.calls).toHaveLength(1);
   });
 
-  it('guarda o resultado e o recarrega ao subir (de outro repositório, ignora)', async () => {
+  it('persists result and reloads on startup (ignores if from another repo)', async () => {
     const tmp = tempDir();
     try {
       const file = join(tmp.dir, 'sub', 'updates.json');
@@ -190,7 +190,7 @@ describe('UpdateChecker', () => {
       again.load();
       expect(again.status()).toMatchObject({ state: 'ok', checkedAt: 42, latest: '0.3.0', available: true });
 
-      const fork = make({ fetch: fakeFetch([]).fetch, file, repo: 'outra/pessoa' });
+      const fork = make({ fetch: fakeFetch([]).fetch, file, repo: 'other/person' });
       fork.load();
       expect(fork.status()).toMatchObject({ state: 'pending', latest: undefined });
     } finally {

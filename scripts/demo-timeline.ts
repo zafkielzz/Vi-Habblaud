@@ -1,14 +1,14 @@
-// Gera uma linha do tempo SÓ com dados fictícios para o timelapse (ex.: gravar o GIF do README).
-// Roda o simulador do modo demonstração (shared/demo/simulator.ts) offline, com relógio próprio, por
-// N horas simuladas, e grava com o mesmo gravador do servidor (server/history/timeline.ts) em
-// <pasta>/timeline/AAAA-MM-DD.jsonl. Nenhum dado real entra no arquivo.
+// Generates a timeline ONLY with mock data for timelapse (e.g. recording the README GIF).
+// Runs demo mode simulator (shared/demo/simulator.ts) offline, with its own clock, for
+// N simulated hours, and writes with the server recorder (server/history/timeline.ts) to
+// <folder>/timeline/YYYY-MM-DD.jsonl. No real data enters the file.
 //
-//   npm run demo:timeline                                   # ontem, das 9h às 19h, em <tmp>/habblaud-demo
+//   npm run demo:timeline                                   # yesterday, 9am to 7pm, in <tmp>/habblaud-demo
 //   npm run demo:timeline -- --date 2026-10-07 --start 8:30 --hours 11 --sessions 7
 //
-// Para assistir: HABBLAUD_DATA_DIR=<pasta> HABBLAUD_TIMELINE=0 npm start (ou npm run dev) e o botão
-// Timelapse da barra superior. Ao longo do dia o número de sessões sobe de manhã, cai no almoço, volta
-// a subir à tarde e zera no fim (sessionsAt), para o timelapse ter cara de dia de trabalho.
+// To watch: HABBLAUD_DATA_DIR=<folder> HABBLAUD_TIMELINE=0 npm start (or npm run dev) and click the
+// Timelapse button in top bar. Throughout the day sessions ramp in morning, dip at lunch,
+// rise again in afternoon, and zero out at the end (sessionsAt), giving timelapse a workday feel.
 import { existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,27 +19,27 @@ import { TIMELINE_DIR, TimelineRecorder } from '../server/history/timeline';
 
 const HOUR = 3_600_000;
 
-const USAGE = `Uso: npm run demo:timeline [-- opções]
+const USAGE = `Usage: npm run demo:timeline [-- options]
 
-Gera uma linha do tempo com dados fictícios (simulador do modo demonstração) para o timelapse.
+Generates a mock timeline (demo mode simulator) for the timelapse.
 
-Opções:
-  --date AAAA-MM-DD   dia gravado (padrão: ontem, para não se misturar à gravação de hoje)
-  --start H[:MM]      hora de início (padrão: 9)
-  --hours N           horas simuladas (padrão: 10; máximo 24)
-  --sessions N        sessões abertas no pico do dia (padrão: 6)
-  --pace X            ritmo do simulador: 1 = o do modo demonstração ao vivo (turnos de 40 s a 4 min);
-                      0.25 = 4× mais lento, o de um dia de trabalho (padrão: 0.25)
-  --seed N            semente (padrão: 1; a mesma semente gera o mesmo dia)
-  --data-dir PASTA    pasta de dados do Habblaud (padrão: <tmp>/habblaud-demo); o arquivo vai em PASTA/timeline/
-  --force             sobrescreve o arquivo do dia, se existir
-  -h, --help          mostra esta ajuda
+Options:
+  --date YYYY-MM-DD   day to record (default: yesterday, to avoid mixing with today's recording)
+  --start H[:MM]      start hour (default: 9)
+  --hours N           simulated hours (default: 10; max 24)
+  --sessions N        open sessions at peak of day (default: 6)
+  --pace X            simulator pace: 1 = live demo mode (turns of 40 s to 4 min);
+                      0.25 = 4× slower, like a real workday (default: 0.25)
+  --seed N            seed (default: 1; same seed generates same day)
+  --data-dir FOLDER   Habblaud data directory (default: <tmp>/habblaud-demo); file saved to FOLDER/timeline/
+  --force             overwrites day file if it exists
+  -h, --help          shows this help
 
-Para assistir: HABBLAUD_DATA_DIR=PASTA HABBLAUD_TIMELINE=0 npm start e abra o Timelapse.`;
+To watch: HABBLAUD_DATA_DIR=FOLDER HABBLAUD_TIMELINE=0 npm start and open Timelapse.`;
 
 export interface DemoTimelineOptions {
   date: string;
-  /** Minutos depois da meia-noite. */
+  /** Minutes after midnight. */
   startMin: number;
   hours: number;
   sessions: number;
@@ -51,7 +51,7 @@ export interface DemoTimelineOptions {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Funções puras (testadas em server/test/demo-timeline.test.ts)
+// Pure functions (tested in server/test/demo-timeline.test.ts)
 // ---------------------------------------------------------------------------------------------
 
 export function parseArgs(argv: string[], now = Date.now()): DemoTimelineOptions {
@@ -68,7 +68,9 @@ export function parseArgs(argv: string[], now = Date.now()): DemoTimelineOptions
   };
   const num = (flag: string, v: string | undefined, min: number, max: number): number => {
     const n = Number(v);
-    if (v === undefined || v.trim() === '' || !Number.isFinite(n) || n < min || n > max) throw new Error(`${flag}: esperado um número entre ${min} e ${max}`);
+    if (v === undefined || v.trim() === '' || !Number.isFinite(n) || n < min || n > max) {
+      throw new Error(`${flag}: expected a number between ${min} and ${max}`);
+    }
     return n;
   };
   for (let i = 0; i < argv.length; i++) {
@@ -83,7 +85,7 @@ export function parseArgs(argv: string[], now = Date.now()): DemoTimelineOptions
       }
       case '--start': {
         const m = /^(\d{1,2})(?::(\d{2}))?$/.exec(next() ?? '');
-        if (!m || Number(m[1]) > 23 || Number(m[2] ?? 0) > 59) throw new Error('--start: use H ou H:MM (0 a 23:59)');
+        if (!m || Number(m[1]) > 23 || Number(m[2] ?? 0) > 59) throw new Error('--start: use H or H:MM (0 to 23:59)');
         o.startMin = Number(m[1]) * 60 + Number(m[2] ?? 0);
         break;
       }
@@ -101,7 +103,7 @@ export function parseArgs(argv: string[], now = Date.now()): DemoTimelineOptions
         break;
       case '--data-dir': {
         const v = next();
-        if (!v) throw new Error('--data-dir: informe a pasta');
+        if (!v) throw new Error('--data-dir: specify the folder');
         o.dataDir = resolve(v);
         break;
       }
@@ -119,7 +121,7 @@ export function parseArgs(argv: string[], now = Date.now()): DemoTimelineOptions
   return o;
 }
 
-/** Fração do pico de sessões ao longo do dia (0 = início, 1 = fim): manhã, almoço, tarde e saída. */
+/** Fraction of peak sessions throughout the day (0 = start, 1 = end): morning, lunch, afternoon, evening. */
 const DAY_CURVE: readonly [number, number][] = [
   [0, 0.2],
   [0.08, 0.6],
@@ -133,7 +135,7 @@ const DAY_CURVE: readonly [number, number][] = [
   [1, 0],
 ];
 
-/** Sessões a manter abertas na fração `p` do dia simulado, com pico `peak`. */
+/** Sessions to keep open at fraction `p` of simulated day, with peak `peak`. */
 export function sessionsAt(p: number, peak: number): number {
   const x = Math.min(1, Math.max(0, p));
   for (let i = 1; i < DAY_CURVE.length; i++) {
@@ -147,20 +149,20 @@ export function sessionsAt(p: number, peak: number): number {
 }
 
 export interface DemoTimelineResult {
-  /** Arquivos gravados (mais de um se o período atravessar a meia-noite). */
+  /** Written files (more than one if time span crosses midnight). */
   files: string[];
   from: number;
   to: number;
 }
 
-/** Arquivos que um período ocupa (um por dia local). */
+/** Files occupied by a time span (one per local day). */
 function filesFor(dir: string, from: number, to: number): string[] {
   const out: string[] = [];
   for (let day = dayKey(from); day <= dayKey(to); day = shiftDay(day, 1)) out.push(join(dir, `${day}.jsonl`));
   return out;
 }
 
-/** Simula e grava. `stepMs` = passo do relógio simulado (o servidor avança o demo a cada 250 ms). */
+/** Simulates and records. `stepMs` = simulated clock step (server advances demo every 250 ms). */
 export function generateDemoTimeline(o: Omit<DemoTimelineOptions, 'help'>, stepMs = 500): DemoTimelineResult {
   const [y, mo, d] = o.date.split('-').map(Number);
   const from = new Date(y, mo - 1, d, Math.floor(o.startMin / 60), o.startMin % 60).getTime();
@@ -173,9 +175,9 @@ export function generateDemoTimeline(o: Omit<DemoTimelineOptions, 'help'>, stepM
     unlinkSync(f);
   }
   let now = from;
-  // Começa com uma sessão no máximo (o escritório vai enchendo pelo elevador ao longo da manhã).
+  // Starts with at most one session (office fills via elevator throughout the morning).
   const sim = new DemoSimulator({ seed: o.seed, speed: o.pace, sessions: 1 }, from);
-  // Tudo aqui é fictício: todos os agentes saem marcados como demonstração.
+  // Everything here is mock data: all agents are marked as demo.
   const rec = new TimelineRecorder({ dir, now: () => now, isDemo: () => true, retentionDays: 0 });
   rec.ingest(sim.snapshot(now));
   for (; now <= to; now += stepMs) {
@@ -203,10 +205,13 @@ async function main(): Promise<void> {
   }
   const t0 = Date.now();
   const r = generateDemoTimeline(opts);
-  const hhmm = (at: number) => new Date(at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  console.log(`Linha do tempo fictícia de ${opts.date}, ${hhmm(r.from)}–${hhmm(r.to)}, gerada em ${((Date.now() - t0) / 1000).toFixed(1)} s:`);
+  const hhmm = (at: number) => new Date(at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const sec = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`Mock timeline for ${opts.date}, ${hhmm(r.from)}–${hhmm(r.to)}, generated in ${sec} s:`);
   for (const f of r.files) console.log(`  ${f}`);
-  console.log(`\nPara assistir:\n  HABBLAUD_DATA_DIR=${opts.dataDir} HABBLAUD_TIMELINE=0 npm start\ne abra o Timelapse na barra superior.`);
+  console.log(
+    `\nTo watch:\n  HABBLAUD_DATA_DIR=${opts.dataDir} HABBLAUD_TIMELINE=0 npm start\nand open Timelapse in top bar.`,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

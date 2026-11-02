@@ -2,7 +2,7 @@
   "name": "habblaud",
   "displayName": "Habblaud",
   "version": "1.0.3",
-  "description": "Liga a sessão ao Habblaud: grava o uso do plano (5h e semanal) para o escritório, avisa embaixo do prompt quando outra sessão precisa de você e adiciona o comando /habblaud.",
+  "description": "Connects the session to Habblaud: records plan usage (5h and weekly) for the office, notifies below the prompt when another session needs you, and adds the /habblaud command.",
   "author": { "name": "Márcio Junior", "url": "https://github.com/marmottajr" },
   "homepage": "https://github.com/marmottajr/habblaud#readme",
   "repository": "https://github.com/marmottajr/habblaud",

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Camera } from './camera';
 import { attachInput, type InputHandlers } from './input';
 
-/** `window` mínimo: o listener de teclado da câmera registra em `keydown`. */
+/** Minimal `window`: camera keyboard listener registers on `keydown`. */
 function installWindow(): { dispatch(ev: { key: string; target: unknown }): void; restore(): void } {
   const prev = globalThis.window;
   const listeners = new Set<(ev: KeyboardEvent) => void>();
@@ -48,7 +48,7 @@ function handlers(): InputHandlers {
   return { pick: () => null, click() {}, doubleClick() {}, hover() {}, interact() {}, overview() {}, zoomStep() {} };
 }
 
-describe('teclado da câmera', () => {
+describe('camera keyboard controls', () => {
   let win: ReturnType<typeof installWindow>;
   let off: (() => void) | null = null;
 
@@ -58,7 +58,7 @@ describe('teclado da câmera', () => {
     win?.restore();
   });
 
-  it('ArrowRight com foco num rádio não move a câmera', () => {
+  it('ArrowRight when radio is focused does not move camera', () => {
     win = installWindow();
     const pans: [number, number][] = [];
     const camera = { zoom: 1, panBy: (dx: number, dy: number) => pans.push([dx, dy]), zoomAt() {}, settle() {} } as unknown as Camera;
@@ -71,21 +71,21 @@ describe('teclado da câmera', () => {
         getAttribute: (name: string) => (name === 'role' ? 'radio' : null),
       },
     });
-    // O bug: a seta do grupo de velocidade chegava aqui como panBy(-90, 0).
+    // The bug: speed group arrow arrived here as panBy(-90, 0).
     expect(pans).toEqual([]);
   });
 
-  it('ArrowRight com foco num botão comum continua movendo a câmera', () => {
+  it('ArrowRight when standard button is focused still moves camera', () => {
     win = installWindow();
     const pans: [number, number][] = [];
     const camera = { zoom: 1, panBy: (dx: number, dy: number) => pans.push([dx, dy]), zoomAt() {}, settle() {} } as unknown as Camera;
     off = attachInput(canvas(), camera, handlers());
-    // Depois de clicar num botão da barra, o foco fica nele: as setas ainda são da câmera.
+    // After clicking a toolbar button, it retains focus: arrow keys still control camera.
     win.dispatch({ key: 'ArrowRight', target: { tagName: 'BUTTON', isContentEditable: false, getAttribute: () => null } });
     expect(pans).toEqual([[-90, 0]]);
   });
 
-  it('ArrowRight com foco no mundo continua movendo a câmera', () => {
+  it('ArrowRight when world is focused still moves camera', () => {
     win = installWindow();
     const pans: [number, number][] = [];
     const camera = { zoom: 1, panBy: (dx: number, dy: number) => pans.push([dx, dy]), zoomAt() {}, settle() {} } as unknown as Camera;
@@ -99,7 +99,7 @@ describe('teclado da câmera', () => {
 });
 
 describe('modalOpen', () => {
-  /** `document` mínimo: alguns elementos e o `querySelector` dos dois seletores que a função usa. */
+  /** Minimal `document`: select elements and `querySelector` for selectors used by function. */
   function installDocument(els: { tag: string; open?: boolean; ariaModal?: boolean }[]): () => void {
     const prev = globalThis.document;
     const matches = (sel: string, e: (typeof els)[number]): boolean => {
@@ -107,7 +107,7 @@ describe('modalOpen', () => {
       if (sel === ':not(dialog)[aria-modal="true"]') return e.tag !== 'dialog' && !!e.ariaModal;
       if (sel === '[aria-modal="true"]') return !!e.ariaModal;
       if (sel === ':popover-open') return false;
-      throw new Error(`seletor inesperado no teste: ${sel}`);
+      throw new Error(`unexpected selector in test: ${sel}`);
     };
     globalThis.document = {
       querySelector: (sel: string) => els.find((e) => sel.split(', ').some((s) => matches(s, e))) ?? null,
@@ -117,7 +117,7 @@ describe('modalOpen', () => {
     };
   }
 
-  it('um <dialog> fechado (mesmo com aria-modal) não bloqueia o teclado da cidade', async () => {
+  it('a closed <dialog> (even with aria-modal) does not block city keyboard', async () => {
     const { modalOpen } = await import('./input');
     const restore = installDocument([{ tag: 'dialog', open: false, ariaModal: true }]);
     try {
@@ -127,7 +127,7 @@ describe('modalOpen', () => {
     }
   });
 
-  it('um <dialog> aberto, ou outro elemento com aria-modal, bloqueia', async () => {
+  it('an open <dialog>, or another element with aria-modal, blocks input', async () => {
     const { modalOpen } = await import('./input');
     for (const els of [[{ tag: 'dialog', open: true }], [{ tag: 'div', ariaModal: true }]]) {
       const restore = installDocument(els);

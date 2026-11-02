@@ -1,23 +1,23 @@
-// Linha do tempo do escritório (timelapse): formato dos arquivos gravados pelo servidor
-// (server/history/timeline.ts) e reconstrução do estado, usada pelo player do cliente.
-// Código puro: sem APIs de Node nem de DOM.
+// Office timeline (timelapse): format of files saved by server
+// (server/history/timeline.ts) and state reconstruction used by client player.
+// Pure code: no Node or DOM APIs.
 //
-// Arquivo: <dataDir>/timeline/AAAA-MM-DD.jsonl (dia local do servidor), um registro JSON por linha:
-//   {"t":"k",...}    keyframe: o estado completo (salas, agentes e contas);
-//   {"t":"d",...}    delta: só o que mudou desde o registro anterior;
-//   {"t":"end",...}  o servidor parou (ou o dia chegou ao limite de tamanho).
-// Todo arquivo começa com um keyframe e os keyframes se repetem a cada `every` ms; sem nenhum registro
-// por bem mais que isso, o servidor estava desligado. Cada registro começa com `t` e `at` (nessa ordem),
-// o que permite ler o horário da primeira e da última linha sem interpretar o arquivo inteiro.
+// File: <dataDir>/timeline/YYYY-MM-DD.jsonl (server local day), one JSON record per line:
+//   {"t":"k",...}    keyframe: complete state (rooms, agents, and accounts);
+//   {"t":"d",...}    delta: only what changed since previous record;
+//   {"t":"end",...}  server stopped (or day reached file size limit).
+// Every file starts with a keyframe and keyframes repeat every `every` ms; without any records
+// for much longer than that, server was off. Each record begins with `t` and `at` (in that order),
+// allowing fast reading of first and last timestamps without parsing whole file.
 //
-// Só entram os campos que o mundo e a interface usam para desenhar, com os resumos de atividade já
-// mascarados (a mesma exposição do /api/snapshot): nada de detalhe de comando, tarefa ou transcript.
+// Only includes fields used by world and UI to render, with activity summaries already
+// masked (same exposure as /api/snapshot): no command details, tasks, or transcripts.
 import type { AppearanceParts } from './appearance';
 import type { AccountInfo, AccountUsage, Activity, ActivityKind, AgentInfo, AgentKind, AgentStatus, OfficeSnapshot, Provider, RoomInfo, ShellJob } from './types';
 
 export const TIMELINE_VERSION = 1;
 
-/** Títulos e textos longos são cortados (o arquivo do dia tem limite de tamanho). */
+/** Long titles and texts are truncated (day file has a size limit). */
 const MAX_TITLE = 160;
 const MAX_TEXT = 120;
 
@@ -30,7 +30,7 @@ export interface TimelineActivity {
   error?: true;
 }
 
-/** Shell resumido (sem o comando completo). */
+/** Summarized shell (without full command). */
 export interface TimelineShell {
   id: string;
   label: string;
@@ -42,7 +42,7 @@ export interface TimelineShell {
 export interface TimelineAgent {
   id: string;
   kind: AgentKind;
-  /** Ausente = 'claude' (AgentInfo.provider). */
+  /** Absent = 'claude' (AgentInfo.provider). */
   provider?: Provider;
   parentId?: string;
   roomId: string;
@@ -56,12 +56,12 @@ export interface TimelineAgent {
   waitingFor?: string;
   activity?: TimelineActivity;
   seed: number;
-  /** Peças do personagem editado (ver AgentInfo.parts). */
+  /** Edited character parts (see AgentInfo.parts). */
   parts?: AppearanceParts;
   background?: true;
   title?: string;
   shells?: TimelineShell[];
-  /** Agente do modo demonstração (id com prefixo "demo:"): o player pode escondê-lo. */
+  /** Demo mode agent (id with "demo:" prefix): player can hide it. */
   demo?: true;
 }
 
@@ -75,17 +75,20 @@ export interface TimelineRoom {
   demo?: true;
 }
 
-/** Conta resumida: sem e-mail, organização nem pasta; uso sem o horário da coleta (mudaria a cada resposta). */
+/**
+ * Summarized account: no email, organization, or directory; usage without
+ * fetch time (would change on each response).
+ */
 export interface TimelineAccount {
   id: string;
-  /** Ausente = 'claude' (AccountInfo.provider). */
+  /** Absent = 'claude' (AccountInfo.provider). */
   provider?: Provider;
   short: string;
   name: string;
   color: string;
   plan?: string;
   sessions: number;
-  usage?: Pick<AccountUsage, 'fiveHour' | 'sevenDay' | 'source' | 'noQuota'>;
+  usage?: Pick<AccountUsage, 'fiveHour' | 'sevenDay' | 'source' | 'noQuota' | 'noFiveHour'>;
   usageStatus: AccountInfo['usageStatus'];
   demo?: true;
 }
@@ -94,19 +97,19 @@ export interface TimelineKeyframe {
   t: 'k';
   at: number;
   v: number;
-  /** Intervalo entre keyframes em vigor (ms). */
+  /** Active keyframe interval (ms). */
   every: number;
-  /** Primeiro registro depois de o servidor subir. */
+  /** First record after server startup. */
   boot?: true;
   rooms: TimelineRoom[];
   agents: TimelineAgent[];
   accounts: TimelineAccount[];
 }
 
-/** Campos que mudaram; `null` = o campo deixou de existir. */
+/** Changed fields; `null` = field no longer exists. */
 export type TimelinePatch<T> = { [K in keyof T]?: T[K] | null };
 
-/** O que mudou entre dois estados. Agente novo vem completo; `null` = saiu. */
+/** Changes between two states. New agent is sent in full; `null` = departed. */
 export interface TimelineChanges {
   rooms?: [string, TimelineRoom | null][];
   agents?: [string, TimelinePatch<TimelineAgent> | null][];
@@ -121,30 +124,30 @@ export interface TimelineDelta extends TimelineChanges {
 export interface TimelineEnd {
   t: 'end';
   at: number;
-  /** 'limit' = o dia chegou ao limite de tamanho e a gravação parou até a virada. */
+  /** 'limit' = day reached size limit and recording stopped until midnight rollover. */
   reason?: 'stop' | 'limit';
 }
 
 export type TimelineRecord = TimelineKeyframe | TimelineDelta | TimelineEnd;
 
-/** Estado completo num instante (o que um keyframe descreve). */
+/** Full state at a moment (what a keyframe describes). */
 export interface TimelineFrame {
   rooms: Map<string, TimelineRoom>;
   agents: Map<string, TimelineAgent>;
   accounts: Map<string, TimelineAccount>;
 }
 
-// ------------------------------------------------------------------ dias
+// ------------------------------------------------------------------ days
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
-/** Dia local de um instante, no formato do nome do arquivo (AAAA-MM-DD). */
+/** Local day of a timestamp, in filename format (YYYY-MM-DD). */
 export function dayKey(at: number): string {
   const d = new Date(at);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-/** AAAA-MM-DD de uma data que existe no calendário (é o único formato aceito como nome de arquivo). */
+/** YYYY-MM-DD of a date that exists in the calendar (the only format accepted as filename). */
 export function isDayKey(s: unknown): s is string {
   if (typeof s !== 'string') return false;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -155,19 +158,19 @@ export function isDayKey(s: unknown): s is string {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
-/** Meia-noite local do dia `key` (epoch ms). */
+/** Local midnight of day `key` (epoch ms). */
 export function dayStart(key: string): number {
   const [y, mo, d] = key.split('-').map(Number);
   return new Date(y, mo - 1, d).getTime();
 }
 
-/** O dia `offset` dias antes/depois de `key` (aritmética de calendário: imune ao horário de verão). */
+/** Day `offset` days before/after `key` (calendar arithmetic: unaffected by DST). */
 export function shiftDay(key: string, offset: number): string {
   const [y, mo, d] = key.split('-').map(Number);
   return dayKey(new Date(y, mo - 1, d + offset, 12).getTime());
 }
 
-// ------------------------------------------------------------------ snapshot -> registro
+// ------------------------------------------------------------------ snapshot -> record
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
@@ -223,13 +226,14 @@ export function compactAccount(a: AccountInfo, demo = false): TimelineAccount {
     if (a.usage.fiveHour) u.fiveHour = { ...a.usage.fiveHour };
     if (a.usage.sevenDay) u.sevenDay = { ...a.usage.sevenDay };
     if (a.usage.noQuota) u.noQuota = true;
+    if (a.usage.noFiveHour) u.noFiveHour = true;
     out.usage = u;
   }
   if (demo) out.demo = true;
   return out;
 }
 
-/** Agentes, salas e contas do modo demonstração usam o prefixo "demo:" (ver Office.setDemo). */
+/** Demo mode agents, rooms, and accounts use prefix "demo:" (see Office.setDemo). */
 export const isDemoId = (id: string): boolean => id.startsWith('demo:');
 
 export function compactSnapshot(snap: OfficeSnapshot, isDemo: (id: string) => boolean = isDemoId): TimelineFrame {
@@ -266,7 +270,7 @@ export function emptyFrame(): TimelineFrame {
   return { rooms: new Map(), agents: new Map(), accounts: new Map() };
 }
 
-// ------------------------------------------------------------------ diferenças
+// ------------------------------------------------------------------ diffs
 
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -290,7 +294,7 @@ function diffWhole<T>(prev: Map<string, T>, next: Map<string, T>): [string, T | 
   return out;
 }
 
-/** O que mudou de `prev` para `next` (null = nada que o player desenhe). */
+/** What changed from `prev` to `next` (null = nothing drawn by player). */
 export function diffFrames(prev: TimelineFrame, next: TimelineFrame): TimelineChanges | null {
   const out: TimelineChanges = {};
   const rooms = diffWhole(prev.rooms, next.rooms);
@@ -315,9 +319,9 @@ const isFullAgent = (p: TimelinePatch<TimelineAgent>): p is TimelineAgent =>
   typeof p.id === 'string' && typeof p.roomId === 'string' && typeof p.name === 'string' && typeof p.status === 'string' && typeof p.seed === 'number';
 
 /**
- * Aplica as mudanças (sem alterar os objetos antigos: agentes alterados viram objetos novos, então
- * snapshots já entregues à interface continuam valendo). Patch de um agente desconhecido que não vem
- * completo (linha perdida no arquivo) é ignorado: o próximo keyframe corrige.
+ * Applies changes (without mutating old objects: updated agents become new objects, preserving
+ * snapshots already handed to UI). Patch for an unknown agent that is not full (dropped line in file)
+ * is ignored: next keyframe corrects it.
  */
 export function applyChanges(frame: TimelineFrame, d: TimelineChanges): void {
   for (const [id, r] of d.rooms ?? []) {
@@ -353,11 +357,11 @@ function withoutNulls<T extends object>(o: T): T {
   return out as T;
 }
 
-// ------------------------------------------------------------------ leitura
+// ------------------------------------------------------------------ reading
 
 /**
- * Interpreta o conteúdo de um arquivo do dia. Linhas inválidas (cortadas, corrompidas) são ignoradas;
- * um relógio que voltou no tempo não desordena os registros (o horário é segurado no anterior).
+ * Parses day file content. Invalid lines (truncated, corrupted) are skipped;
+ * backward clock jumps do not disorder records (time is clamped to previous record).
  */
 export function parseTimeline(text: string): TimelineRecord[] {
   const out: TimelineRecord[] = [];
@@ -387,11 +391,11 @@ function isRecord(r: unknown): r is TimelineRecord {
   return o.t === 'end';
 }
 
-// ------------------------------------------------------------------ registro -> snapshot
+// ------------------------------------------------------------------ record -> snapshot
 
 const ZERO_STATS = { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 };
 
-/** Id estável de uma atividade reconstruída (o arquivo não guarda o id original). */
+/** Stable id for reconstructed activity (file does not store original id). */
 export function activityId(agentId: string, a: Pick<TimelineActivity, 'at' | 'kind'>): string {
   return `tl:${agentId}:${a.at}:${a.kind}`;
 }
@@ -403,7 +407,7 @@ export function toActivity(agentId: string, a: TimelineActivity): Activity {
   return out;
 }
 
-/** AgentInfo completo a partir do resumo gravado (campos que o arquivo não guarda ficam vazios). */
+/** Full AgentInfo from recorded summary (fields not stored in file remain empty). */
 export function toAgentInfo(t: TimelineAgent, recent: Activity[] = []): AgentInfo {
   const activity = t.activity ? toActivity(t.id, t.activity) : undefined;
   const a: AgentInfo = {
@@ -448,6 +452,7 @@ export function toAccountInfo(a: TimelineAccount, at: number): AccountInfo {
     if (a.usage.fiveHour) u.fiveHour = { ...a.usage.fiveHour };
     if (a.usage.sevenDay) u.sevenDay = { ...a.usage.sevenDay };
     if (a.usage.noQuota) u.noQuota = true;
+    if (a.usage.noFiveHour) u.noFiveHour = true;
     out.usage = u;
   }
   return out;

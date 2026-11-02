@@ -1,9 +1,9 @@
-// Sprites pequenos da espera de shell desenhados pelo próprio mundo: o selo "×N" da ampulheta e
-// versões de reserva dos ícones novos (ampulheta, teia, chuva) — usadas só se o módulo de arte
-// ainda não os tiver. Gerados uma vez (canvas em cache), nunca por frame.
+// Small shell waiting sprites drawn by the world itself: the hourglass "×N" badge and
+// fallback versions of new icons (hourglass, cobweb, storm) — used only if the art module
+// does not yet have them. Generated once (cached canvas), never per frame.
 import type { IconName, Sprite } from '../../art/api';
 
-/** Glifos 3x5 (linhas de 3 bits) para o selo. */
+/** 3x5 glyphs (3-bit rows) for the badge. */
 const GLYPHS: Readonly<Record<string, readonly string[]>> = {
   '×': ['000', '101', '010', '101', '000'],
   '+': ['000', '010', '111', '010', '000'],
@@ -34,14 +34,14 @@ function canvas(w: number, h: number): { c: HTMLCanvasElement; ctx: CanvasRender
   return { c, ctx };
 }
 
-/** Texto do selo: "×2" … "×9", "×9+" acima disso. */
+/** Badge text: "×2" … "×9", "×9+" above that. */
 export function badgeText(n: number): string {
   return n > 9 ? '×9+' : `×${Math.max(0, Math.floor(n))}`;
 }
 
 /**
- * Selo "×N" (pílula escura com dígitos claros) para quando há mais de um shell. Ancoragem no canto
- * inferior esquerdo (ax = 0, ay = altura).
+ * "×N" badge (dark pill with light digits) for when there is more than one shell. Anchored at the
+ * bottom-left corner (ax = 0, ay = height).
  */
 export function countBadge(n: number): Sprite {
   const key = Math.min(10, Math.max(2, Math.floor(n)));
@@ -70,12 +70,12 @@ export function countBadge(n: number): Sprite {
   return s;
 }
 
-// ------------------------------------------------------------------ ícones de reserva
+// ------------------------------------------------------------------ fallback icons
 
 interface Template {
   rows: readonly string[];
   pal: Readonly<Record<string, string>>;
-  /** Contorno escuro de 1 px (a teia fica sem: fios finos). */
+  /** Dark 1 px outline (cobweb has none: thin strands). */
   outline?: boolean;
 }
 
@@ -145,7 +145,7 @@ const TEMPLATES: Partial<Record<IconName, Template>> = {
 
 const fallbacks = new Map<IconName, Sprite | null>();
 
-/** Ícone de reserva (com contorno de 1 px) ou null se não houver um para este nome. */
+/** Fallback icon (with 1 px outline) or null if none exists for this name. */
 export function fallbackIcon(name: IconName): Sprite | null {
   if (fallbacks.has(name)) return fallbacks.get(name)!;
   const t = TEMPLATES[name];
@@ -154,7 +154,7 @@ export function fallbackIcon(name: IconName): Sprite | null {
     const w = Math.max(...t.rows.map((r) => r.length));
     const h = t.rows.length;
     const { c, ctx } = canvas(w + 2, h + 2);
-    // contorno: pinta os vizinhos de cada pixel e depois o pixel
+    // outline: paints neighbors of each pixel and then the pixel
     ctx.fillStyle = OUT;
     if (t.outline !== false) for (let y = 0; y < h; y++) for (let x = 0; x < t.rows[y].length; x++) if (t.pal[t.rows[y][x]]) ctx.fillRect(x, y, 3, 3);
     for (let y = 0; y < h; y++) {

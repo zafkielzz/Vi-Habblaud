@@ -2,42 +2,42 @@ import { describe, expect, it } from 'vitest';
 import { tokenizeBlocks, tokenizeInline, type MdBlock } from './markdown';
 
 describe('tokenizeBlocks', () => {
-  it('separa parágrafos por linha em branco e preserva as quebras de linha dentro deles', () => {
-    expect(tokenizeBlocks('Primeira linha\nsegunda linha\n\nOutro parágrafo')).toEqual<MdBlock[]>([
-      { type: 'paragraph', text: 'Primeira linha\nsegunda linha' },
-      { type: 'paragraph', text: 'Outro parágrafo' },
+  it('separates paragraphs by blank lines and preserves line breaks within them', () => {
+    expect(tokenizeBlocks('First line\nsecond line\n\nAnother paragraph')).toEqual<MdBlock[]>([
+      { type: 'paragraph', text: 'First line\nsecond line' },
+      { type: 'paragraph', text: 'Another paragraph' },
     ]);
   });
 
-  it('reconhece blocos de código com linguagem, sem interpretar markdown dentro', () => {
-    const src = 'Veja:\n\n```ts\nconst a = **b**;\n# não é título\n```\nfim';
+  it('recognizes code blocks with language, without parsing markdown inside', () => {
+    const src = 'See:\n\n```ts\nconst a = **b**;\n# not a heading\n```\nend';
     expect(tokenizeBlocks(src)).toEqual<MdBlock[]>([
-      { type: 'paragraph', text: 'Veja:' },
-      { type: 'code', lang: 'ts', text: 'const a = **b**;\n# não é título' },
-      { type: 'paragraph', text: 'fim' },
+      { type: 'paragraph', text: 'See:' },
+      { type: 'code', lang: 'ts', text: 'const a = **b**;\n# not a heading' },
+      { type: 'paragraph', text: 'end' },
     ]);
   });
 
-  it('bloco de código sem fechamento vai até o fim (resposta cortada)', () => {
-    expect(tokenizeBlocks('```\nlinha 1\nlinha 2')).toEqual<MdBlock[]>([{ type: 'code', lang: '', text: 'linha 1\nlinha 2' }]);
+  it('unclosed code block extends to the end (truncated response)', () => {
+    expect(tokenizeBlocks('```\nline 1\nline 2')).toEqual<MdBlock[]>([{ type: 'code', lang: '', text: 'line 1\nline 2' }]);
   });
 
-  it('fecha só com a mesma cerca (``` não fecha ~~~)', () => {
+  it('closes only with the matching fence (``` does not close ~~~)', () => {
     expect(tokenizeBlocks('~~~\na\n```\nb\n~~~')).toEqual<MdBlock[]>([{ type: 'code', lang: '', text: 'a\n```\nb' }]);
   });
 
-  it('títulos de 1 a 6 níveis (e # sem espaço não é título)', () => {
-    expect(tokenizeBlocks('# Um\n### Três ###\n#hashtag')).toEqual<MdBlock[]>([
-      { type: 'heading', level: 1, text: 'Um' },
-      { type: 'heading', level: 3, text: 'Três' },
+  it('headings from 1 to 6 levels (and # without space is not a heading)', () => {
+    expect(tokenizeBlocks('# One\n### Three ###\n#hashtag')).toEqual<MdBlock[]>([
+      { type: 'heading', level: 1, text: 'One' },
+      { type: 'heading', level: 3, text: 'Three' },
       { type: 'paragraph', text: '#hashtag' },
     ]);
   });
 
-  it('listas com marcador, numeradas e aninhadas', () => {
-    const blocks = tokenizeBlocks('Arquivos:\n- a.ts\n  - b.ts\n- c.ts\n\n1. um\n2. dois');
+  it('bulleted, numbered, and nested lists', () => {
+    const blocks = tokenizeBlocks('Files:\n- a.ts\n  - b.ts\n- c.ts\n\n1. one\n2. two');
     expect(blocks).toEqual<MdBlock[]>([
-      { type: 'paragraph', text: 'Arquivos:' },
+      { type: 'paragraph', text: 'Files:' },
       {
         type: 'list',
         ordered: false,
@@ -51,52 +51,52 @@ describe('tokenizeBlocks', () => {
         type: 'list',
         ordered: true,
         items: [
-          { depth: 0, marker: '1.', ordered: true, text: 'um' },
-          { depth: 0, marker: '2.', ordered: true, text: 'dois' },
+          { depth: 0, marker: '1.', ordered: true, text: 'one' },
+          { depth: 0, marker: '2.', ordered: true, text: 'two' },
         ],
       },
     ]);
   });
 
-  it('lista solta (linhas em branco entre itens) continua a mesma lista; linha recuada continua o item', () => {
-    const blocks = tokenizeBlocks('- um\n\n- dois\n  continuação\n\nfim');
+  it('loose list (blank lines between items) stays the same list; indented line continues the item', () => {
+    const blocks = tokenizeBlocks('- one\n\n- two\n  continuation\n\nend');
     expect(blocks[0]).toEqual({
       type: 'list',
       ordered: false,
       items: [
-        { depth: 0, marker: '-', ordered: false, text: 'um' },
-        { depth: 0, marker: '-', ordered: false, text: 'dois\ncontinuação' },
+        { depth: 0, marker: '-', ordered: false, text: 'one' },
+        { depth: 0, marker: '-', ordered: false, text: 'two\ncontinuation' },
       ],
     });
-    expect(blocks[1]).toEqual({ type: 'paragraph', text: 'fim' });
+    expect(blocks[1]).toEqual({ type: 'paragraph', text: 'end' });
   });
 
-  it('número no meio de um parágrafo não vira lista (só "1." interrompe)', () => {
-    expect(tokenizeBlocks('Em\n2024. foi assim')).toEqual<MdBlock[]>([{ type: 'paragraph', text: 'Em\n2024. foi assim' }]);
+  it('number in the middle of a paragraph does not become a list (only "1." interrupts)', () => {
+    expect(tokenizeBlocks('In\n2024. it was like this')).toEqual<MdBlock[]>([{ type: 'paragraph', text: 'In\n2024. it was like this' }]);
   });
 
-  it('citação e linha horizontal', () => {
-    expect(tokenizeBlocks('> dica\n> continua\n\n---\n\ntexto')).toEqual<MdBlock[]>([
-      { type: 'quote', text: 'dica\ncontinua' },
+  it('blockquotes and horizontal rules', () => {
+    expect(tokenizeBlocks('> tip\n> continues\n\n---\n\ntext')).toEqual<MdBlock[]>([
+      { type: 'quote', text: 'tip\ncontinues' },
       { type: 'rule' },
-      { type: 'paragraph', text: 'texto' },
+      { type: 'paragraph', text: 'text' },
     ]);
   });
 
-  it('tabelas ficam como texto pré-formatado (linhas originais)', () => {
-    const table = '| Arquivo | Linhas |\n|---|---:|\n| a.ts | 10 |';
-    expect(tokenizeBlocks(`Resumo:\n${table}\n\nfim`)).toEqual<MdBlock[]>([
-      { type: 'paragraph', text: 'Resumo:' },
+  it('tables stay as preformatted text (original lines)', () => {
+    const table = '| File | Lines |\n|---|---:|\n| a.ts | 10 |';
+    expect(tokenizeBlocks(`Summary:\n${table}\n\nend`)).toEqual<MdBlock[]>([
+      { type: 'paragraph', text: 'Summary:' },
       { type: 'table', text: table },
-      { type: 'paragraph', text: 'fim' },
+      { type: 'paragraph', text: 'end' },
     ]);
   });
 
-  it('barra solta num parágrafo não vira tabela', () => {
-    expect(tokenizeBlocks('use a | b para filtrar')).toEqual<MdBlock[]>([{ type: 'paragraph', text: 'use a | b para filtrar' }]);
+  it('stray pipe in a paragraph does not become a table', () => {
+    expect(tokenizeBlocks('use a | b to filter')).toEqual<MdBlock[]>([{ type: 'paragraph', text: 'use a | b to filter' }]);
   });
 
-  it('normaliza \\r\\n', () => {
+  it('normalizes \\r\\n', () => {
     expect(tokenizeBlocks('a\r\nb\r\n\r\nc')).toEqual<MdBlock[]>([
       { type: 'paragraph', text: 'a\nb' },
       { type: 'paragraph', text: 'c' },
@@ -105,31 +105,31 @@ describe('tokenizeBlocks', () => {
 });
 
 describe('tokenizeInline', () => {
-  it('texto simples vira um único trecho', () => {
-    expect(tokenizeInline('olá mundo')).toEqual([{ type: 'text', text: 'olá mundo' }]);
+  it('plain text becomes a single token', () => {
+    expect(tokenizeInline('hello world')).toEqual([{ type: 'text', text: 'hello world' }]);
   });
 
-  it('código inline (sem interpretar o que tem dentro)', () => {
-    expect(tokenizeInline('rode `npm **test**` agora')).toEqual([
-      { type: 'text', text: 'rode ' },
+  it('inline code (without parsing contents)', () => {
+    expect(tokenizeInline('run `npm **test**` now')).toEqual([
+      { type: 'text', text: 'run ' },
       { type: 'code', text: 'npm **test**' },
-      { type: 'text', text: ' agora' },
+      { type: 'text', text: ' now' },
     ]);
   });
 
-  it('código com crases duplas pode conter crase', () => {
+  it('double-backtick code can contain a backtick', () => {
     expect(tokenizeInline('``a ` b``')).toEqual([{ type: 'code', text: 'a ` b' }]);
   });
 
-  it('crase sem par fica como texto', () => {
-    expect(tokenizeInline('um ` solto')).toEqual([{ type: 'text', text: 'um ` solto' }]);
+  it('unpaired backtick remains as text', () => {
+    expect(tokenizeInline('a lone ` backtick')).toEqual([{ type: 'text', text: 'a lone ` backtick' }]);
   });
 
-  it('negrito e itálico, inclusive aninhados', () => {
-    expect(tokenizeInline('**forte** e *leve*')).toEqual([
-      { type: 'strong', children: [{ type: 'text', text: 'forte' }] },
-      { type: 'text', text: ' e ' },
-      { type: 'em', children: [{ type: 'text', text: 'leve' }] },
+  it('bold and italic, including nested', () => {
+    expect(tokenizeInline('**bold** and *italic*')).toEqual([
+      { type: 'strong', children: [{ type: 'text', text: 'bold' }] },
+      { type: 'text', text: ' and ' },
+      { type: 'em', children: [{ type: 'text', text: 'italic' }] },
     ]);
     expect(tokenizeInline('**a *b* c**')).toEqual([
       {
@@ -139,26 +139,26 @@ describe('tokenizeInline', () => {
     ]);
   });
 
-  it('asterisco com espaço (conta) e sublinhado dentro de palavra não formatam', () => {
+  it('asterisk with space (math) and underscore inside a word do not format', () => {
     expect(tokenizeInline('2 * 3 * 4')).toEqual([{ type: 'text', text: '2 * 3 * 4' }]);
     expect(tokenizeInline('snake_case_name')).toEqual([{ type: 'text', text: 'snake_case_name' }]);
-    expect(tokenizeInline('_ênfase_')).toEqual([{ type: 'em', children: [{ type: 'text', text: 'ênfase' }] }]);
+    expect(tokenizeInline('_emphasis_')).toEqual([{ type: 'em', children: [{ type: 'text', text: 'emphasis' }] }]);
   });
 
-  it('links viram texto com o endereço à parte', () => {
-    expect(tokenizeInline('veja [a doc](https://exemplo.com/x "título") aqui')).toEqual([
-      { type: 'text', text: 'veja ' },
-      { type: 'link', text: 'a doc', href: 'https://exemplo.com/x' },
-      { type: 'text', text: ' aqui' },
+  it('links become text with separate href', () => {
+    expect(tokenizeInline('see [the doc](https://exemplo.com/x "title") here')).toEqual([
+      { type: 'text', text: 'see ' },
+      { type: 'link', text: 'the doc', href: 'https://exemplo.com/x' },
+      { type: 'text', text: ' here' },
     ]);
-    expect(tokenizeInline('[sem link] e [x](com espaço)')).toEqual([{ type: 'text', text: '[sem link] e [x](com espaço)' }]);
+    expect(tokenizeInline('[no link] and [x](with space)')).toEqual([{ type: 'text', text: '[no link] and [x](with space)' }]);
   });
 
-  it('escapes com barra invertida', () => {
-    expect(tokenizeInline('\\*não\\* itálico')).toEqual([{ type: 'text', text: '*não* itálico' }]);
+  it('backslash escapes', () => {
+    expect(tokenizeInline('\\*not\\* italic')).toEqual([{ type: 'text', text: '*not* italic' }]);
   });
 
-  it('HTML do transcript é só texto (quem monta usa textContent)', () => {
+  it('HTML in transcript is plain text (renderer uses textContent)', () => {
     expect(tokenizeInline('<img src=x onerror=alert(1)>')).toEqual([{ type: 'text', text: '<img src=x onerror=alert(1)>' }]);
   });
 });

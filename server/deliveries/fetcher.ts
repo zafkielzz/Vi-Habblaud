@@ -1,7 +1,7 @@
-// Lê os arquivos das entregas para o escritório. No modo Node o próprio servidor lê; no Docker, o que está numa pasta
-// montada (as pastas das contas, ex.: capturas em projects/) é lido aqui, e o resto o auxiliar do host busca:
-// POST /api/host/files/poll entrega os caminhos pedidos e /api/host/files/ack devolve o conteúdo (base64). Toda leitura
-// passa por checkFile (deliveries/files.ts), aqui e no auxiliar. Os arquivos lidos ficam num cache pequeno em memória.
+// Reads delivery files for the office. In Node mode the server reads directly; in Docker, what is in a mounted
+// folder (account folders, e.g. captures in projects/) is read here, and the rest the host helper fetches:
+// POST /api/host/files/poll returns requested paths and /api/host/files/ack returns content (base64). All reads
+// pass through checkFile (deliveries/files.ts), here and in helper. Read files are kept in a small in-memory cache.
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { tr } from '../../shared/i18n';
@@ -24,9 +24,9 @@ interface Pending {
 }
 
 export interface FileFetcherOptions {
-  /** Modo Node: lê direto do disco. */
+  /** Node mode: reads directly from disk. */
   direct?: boolean;
-  /** Docker: o caminho do host dentro do container, quando a pasta está montada (undefined = não está). */
+  /** Docker: host path inside container, when folder is mounted (undefined = not mounted). */
   mapHostPath?: (path: string) => string | undefined;
   read?: (path: string) => Buffer;
   check?: typeof checkFile;
@@ -61,22 +61,22 @@ export class FileFetcher {
       const r = this.readLocal(local);
       if ('data' in r || this.opts.direct) return r;
     }
-    if (this.opts.direct) return { error: tr('arquivo não encontrado'), status: 404 };
-    if (!this.hostAvailable()) return { error: tr('o auxiliar do computador (npm run codex:bridge) não está rodando'), status: 503 };
-    if (this.pending.size >= MAX_PENDING) return { error: tr('arquivos demais sendo buscados: tente de novo'), status: 429 };
+    if (this.opts.direct) return { error: tr('file not found'), status: 404 };
+    if (!this.hostAvailable()) return { error: tr("the computer's helper (npm run codex:bridge) isn't running"), status: 503 };
+    if (this.pending.size >= MAX_PENDING) return { error: tr('too many files being fetched: try again'), status: 429 };
     const r = await new Promise<FetchResult>((done) => {
       const p: Pending = { id: randomUUID(), path, sent: false, at: this.now(), done };
       this.pending.set(p.id, p);
       this.host.wake();
       setTimeout(() => {
-        if (this.pending.delete(p.id)) done({ error: tr('o computador não respondeu a tempo'), status: 504 });
+        if (this.pending.delete(p.id)) done({ error: tr("the computer didn't respond in time"), status: 504 });
       }, WAIT_MS).unref?.();
     });
     if ('data' in r) this.remember(path, r.data);
     return r;
   }
 
-  /** Rodada do auxiliar: marca presença e entrega os caminhos pedidos. */
+  /** Helper poll round: marks presence and returns requested paths. */
   poll(): Array<{ id: string; path: string }> {
     this.host.seen();
     const out: Array<{ id: string; path: string }> = [];
@@ -88,7 +88,7 @@ export class FileFetcher {
     return out;
   }
 
-  /** Rodada com espera (?wait=1): sem nada pedido, fica parada até chegar um pedido ou passar `ms`. */
+  /** Poll round with wait (?wait=1): when nothing requested, waits until a request arrives or `ms` passes. */
   pollWait(ms: number, signal?: AbortSignal): Promise<Array<{ id: string; path: string }>> {
     return pollWithWait(this.host, () => this.poll(), ms, signal);
   }
@@ -108,19 +108,19 @@ export class FileFetcher {
           continue;
         }
       }
-      p.done({ error: typeof x.error === 'string' && x.error ? x.error.slice(0, 200) : tr('o computador não leu o arquivo'), status: 404 });
+      p.done({ error: typeof x.error === 'string' && x.error ? x.error.slice(0, 200) : tr("the computer couldn't read the file"), status: 404 });
     }
   }
 
   private readLocal(path: string): FetchResult {
     const c = (this.opts.check ?? checkFile)(path);
-    if ('error' in c) return { error: c.error, status: c.error === tr('arquivo não encontrado') ? 404 : 403 };
+    if ('error' in c) return { error: c.error, status: c.error === tr('file not found') ? 404 : 403 };
     try {
       const data = (this.opts.read ?? readFileSync)(c.path);
       this.remember(path, data);
       return { data };
     } catch {
-      return { error: tr('arquivo ilegível'), status: 404 };
+      return { error: tr('unreadable file'), status: 404 };
     }
   }
 

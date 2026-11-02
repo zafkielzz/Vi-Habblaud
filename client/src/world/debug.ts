@@ -1,6 +1,6 @@
-// API de depuração do mundo (console: `habblaud.world.debug`), usada em testes visuais para
-// forçar cenários: sessões simuladas chegando/saindo, salas fechando, hora do dia, câmera e a
-// espera de shell (shells rodando, envelhecer a espera, terminar com sucesso/falha).
+// World debug API (console: `habblaud.world.debug`), used in visual tests to
+// force scenarios: simulated sessions joining/leaving, closing rooms, time of day, camera, and
+// shell wait (running shells, aging wait time, finishing with success/failure).
 import type { Activity, AgentInfo, AgentStatus, RoomInfo, ShellJob } from '../../../shared/types';
 import { SPECIAL, type ShellOutcome } from '../../../shared/activity';
 import { hash32 } from '../../../shared/hash';
@@ -11,80 +11,82 @@ import { oldestShell } from './sim/shell';
 import type { Sim } from './sim/sim';
 import type { GatherKind } from './social/gathering';
 
-/** Um shell para os cenários de depuração: campos de ShellJob opcionais + idade relativa. */
+/** A shell for debug scenarios: optional ShellJob fields + relative age. */
 export interface ShellJobInput extends Partial<ShellJob> {
-  /** Há quantos minutos o comando começou (ignorado se `startedAt` vier). */
+  /** How many minutes ago the command started (ignored if `startedAt` is provided). */
   ageMinutes?: number;
   ageSeconds?: number;
 }
 
 export interface SpawnOptions {
-  /** Nome do projeto (sala). Padrão: um nome novo; se a sala existir, reaproveita. */
+  /** Project name (room). Default: a new name; if room exists, reuses it. */
   project?: string;
   name?: string;
-  /** Id da conta (AccountInfo.id). */
+  /** Account ID (AccountInfo.id). */
   account?: string;
   status?: AgentStatus;
-  /** Quantos subagentes (trabalhando) disparar junto. */
+  /** How many subagents (working) to spawn alongside. */
   subs?: number;
   /**
-   * Já começa esperando shell(s): status 'shell' (ou 'working' com `background: false`, um comando
-   * longo em primeiro plano). `count` > 1 cria vários (o "×N" da ampulheta).
+   * Starts waiting for shell(s): status 'shell' (or 'working' with `background: false`, a long
+   * foreground command). `count` > 1 creates multiple (the "×N" on the hourglass).
    */
   shell?: { label?: string; command?: string; ageMinutes?: number; count?: number; background?: boolean; kind?: 'shell' | 'monitor' };
+  /** Session load ("Boss overloaded"): context in use and compactions; `boss` puts the crown on. */
+  load?: { contextTokens?: number; compacts?: number; boss?: boolean };
 }
 
 export interface WorldDebug {
-  /** Resumo do estado: salas (fase, luz) e personagens (modo, passo, posição). */
+  /** State summary: rooms (phase, light) and characters (mode, step, position). */
   state(): unknown;
-  /** Abre uma sessão simulada (sala nova se preciso). Retorna o id do agente principal. */
+  /** Spawns a simulated session (new room if needed). Returns the main agent id. */
   spawnSession(opts?: SpawnOptions): string;
-  /** Muda o status de uma sessão simulada (ex.: 'waiting', 'idle') ou de um subagente simulado. */
+  /** Changes status of a simulated session (e.g. 'waiting', 'idle') or simulated subagent. */
   setStatus(agentId: string, status: AgentStatus, waitingFor?: string): void;
-  /** Encerra uma sessão simulada (o agente some do snapshot; os subagentes também). */
+  /** Ends a simulated session (agent disappears from snapshot; subagents as well). */
   endSession(agentId: string): void;
-  /** Simula o encerramento de uma sessão real (vai embora; se for o último, apaga a luz). */
+  /** Simulates closing a real session (leaves; if last one, turns off the light). */
   closeSession(agentId: string): void;
-  /** Simula o fim de todas as sessões de uma sala: todos saem e a sala some do "snapshot". */
+  /** Simulates ending all sessions in a room: everyone leaves and room drops from "snapshot". */
   closeRoom(roomId: string): void;
-  /** Desfaz os encerramentos simulados e remove as sessões simuladas. */
+  /** Reverts simulated closures and removes simulated sessions. */
   reset(): void;
-  /** Força a hora do dia (0–24) para o ciclo dia/noite; null volta à hora local. */
+  /** Overrides hour of day (0–24) for day/night cycle; null resets to local time. */
   setHour(hour: number | null): void;
-  /** Centraliza a câmera num ponto (tiles) com zoom opcional, sem animação. */
+  /** Centers camera at a point (tiles) with optional zoom, without animation. */
   lookAt(tx: number, ty: number, zoom?: number): void;
-  /** Centraliza a câmera numa sala (id ou nome). */
+  /** Centers camera on a room (id or name). */
   lookAtRoom(idOrName: string, zoom?: number): void;
-  /** Avança todos os comportamentos até o destino (como ao voltar de uma aba oculta). */
+  /** Fast-forwards all behaviors to destination (as when returning from a hidden tab). */
   fastForward(): void;
-  /** Faz todos os ociosos saírem para passear agora. */
+  /** Makes all idle characters go for a wander now. */
   wanderNow(): void;
   /**
-   * Começa uma roda agora com quem estiver ocioso/esperando shell (ou com `ids`): todos voltam à mesa
-   * na hora e saem juntos. Retorna os nomes dos participantes ou null.
+   * Starts a gathering now with anyone idle/waiting for shell (or with `ids`): everyone returns to
+   * their desk right away and leaves together. Returns participant names or null.
    */
   socialize(kind: GatherKind, ids?: string[]): string[] | null;
-  /** Rodas em andamento: tipo, fase, participantes, placar e aposta. */
+  /** Active gatherings: kind, phase, members, score, and bet. */
   gatherings(): unknown;
-  /** Soma (ou tira) moedinhas da carteira de um agente. Retorna o saldo. */
+  /** Adds (or deducts) coins from an agent's wallet. Returns balance. */
   coins(agentId: string, delta: number): number;
   /**
-   * Define os shells que um agente espera (sessão simulada ou agente real; o real fica sobreposto
-   * até reset()). Algum em segundo plano -> status 'shell'; só em primeiro plano -> 'working';
-   * lista vazia -> 'idle' (se estava em 'shell').
+   * Sets shells an agent is waiting for (simulated session or real agent; real agent is overlaid
+   * until reset()). Any in background -> status 'shell'; foreground only -> 'working';
+   * empty list -> 'idle' (if previously 'shell').
    */
   setShells(agentId: string, jobs: ShellJobInput[]): void;
-  /** Envelhece os shells (todas as sessões com shells, ou só um agente) em `minutes` — para ver os estágios. */
+  /** Ages shells (all sessions with shells, or single agent) by `minutes` — to test stages. */
   ageShells(minutes: number, agentId?: string): void;
   /**
-   * Termina o shell mais antigo (ou todos, `opts.all`) de um agente: registra a Activity 'ShellDone'
-   * (error em 'failed'/'killed'), o que dispara o confete ou a chuva. Sem shells em segundo plano
-   * restantes, o status vira `opts.then` (padrão 'working': o agente acorda com a notificação).
+   * Finishes oldest shell (or all, `opts.all`) for an agent: records 'ShellDone' Activity
+   * (error on 'failed'/'killed'), triggering confetti or rain. With no background shells
+   * remaining, status becomes `opts.then` (default 'working': agent wakes with notification).
    */
   finishShell(agentId: string, result?: 'completed' | 'failed' | 'killed', opts?: { all?: boolean; then?: AgentStatus }): void;
   /**
-   * Liga a festa (~12 s) ou o alarme (até desligar com `null`) de uma sala (id ou nome), como um evento
-   * do GitHub; `agentId` = o responsável (estrela na festa, balão "!" no alarme).
+   * Triggers party (~12s) or alarm (until cleared with `null`) for a room (id or name), like a GitHub
+   * event; `agentId` = responsible agent (star in party, "!" balloon in alarm).
    */
   roomEffect(idOrName: string, kind: 'party' | 'alarm' | null, opts?: { text?: string; agentId?: string }): void;
   readonly sim: Sim;
@@ -110,16 +112,22 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
     const t = now();
     return {
       look: seq % 2 ? 'f' : 'm',
-      role: base.kind === 'main' ? 'Agente principal' : 'Explore',
+      role: base.kind === 'main' ? 'Main agent' : 'Explore',
       status: 'working',
       recent: [],
-      tasks: base.kind === 'main' ? [{ id: '1', title: 'Testar o mundo', status: 'in_progress' }, { id: '2', title: 'Revisar', status: 'pending' }] : [],
+      tasks:
+        base.kind === 'main'
+          ? [
+              { id: '1', title: 'Test the world', status: 'in_progress' },
+              { id: '2', title: 'Review', status: 'pending' },
+            ]
+          : [],
       startedAt: t,
       lastEventAt: t,
       statusSince: t,
       stats: { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 },
       seed: hash32(base.id),
-      activity: { id: `dbg-act-${++seq}`, kind: 'edit', icon: '✏️', text: 'Editando world.ts', at: t },
+      activity: { id: `dbg-act-${++seq}`, kind: 'edit', icon: '✏️', text: 'Editing world.ts', at: t },
       ...base,
     };
   };
@@ -127,14 +135,14 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
   const makeJobs = (jobs: readonly ShellJobInput[]): ShellJob[] =>
     jobs.map((j) => ({
       id: j.id ?? `bdbg${(++seq).toString(36)}`,
-      label: j.label ?? 'Rodar a suíte de testes',
+      label: j.label ?? 'Run the test suite',
       command: j.command ?? 'npm test',
       startedAt: j.startedAt ?? now() - (j.ageMinutes ?? 0) * 60_000 - (j.ageSeconds ?? 0) * 1000,
       background: j.background ?? true,
       kind: j.kind ?? 'shell',
     }));
 
-  /** Status coerente com os shells: segundo plano -> 'shell'; só primeiro plano -> 'working'. */
+  /** Status consistent with shells: background -> 'shell'; foreground only -> 'working'. */
   const statusFor = (cur: AgentStatus, shells: readonly ShellJob[]): AgentStatus => {
     if (cur === 'waiting' || cur === 'offline' || cur === 'done') return cur;
     if (shells.some((j) => j.background)) return 'shell';
@@ -143,8 +151,8 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
   };
 
   /**
-   * Edita um agente como um snapshot novo faria (cópia alterada): sessões simuladas diretamente;
-   * agentes reais por sobreposição (sim.agentPatches) até reset().
+   * Edits an agent as a new snapshot would (modified copy): simulated sessions directly;
+   * real agents via overlay (sim.agentPatches) until reset().
    */
   const editAgent = (id: string, fn: (a: AgentInfo) => void): boolean => {
     const i = sim.injected.agents.findIndex((x) => x.id === id);
@@ -169,7 +177,7 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
     if (status !== a.status) a.statusSince = now();
     a.status = status;
     a.shells = shells;
-    // como o servidor: o status 'shell' vale desde o início da espera
+    // like the server: 'shell' status is effective from start of wait
     const oldest = oldestShell(shells, false);
     if (status === 'shell' && oldest) a.statusSince = Math.min(a.statusSince, oldest.startedAt);
   };
@@ -227,30 +235,51 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
         account,
         sessionId,
         status: opts.status ?? 'working',
-        title: `Sessão de teste ${n}`,
+        title: `Test session ${n}`,
       });
+      if (opts.load) {
+        const { boss, ...load } = opts.load;
+        main.stats = { ...main.stats, ...load };
+        if (boss) main.boss = true;
+      }
       if (opts.shell) {
         const sh = opts.shell;
         const n = Math.max(1, Math.floor(sh.count ?? 1));
         const jobs: ShellJobInput[] = [];
         for (let i = 0; i < n; i++) {
           jobs.push({
-            label: i === 0 ? sh.label : `${sh.label ?? 'Rodar a suíte de testes'} (${i + 1})`,
+            label: i === 0 ? sh.label : `${sh.label ?? 'Run the test suite'} (${i + 1})`,
             command: sh.command,
-            // os demais começaram depois do primeiro
+            // remaining jobs started after the first
             ageMinutes: Math.max(0, (sh.ageMinutes ?? 0) - i * 0.5),
             background: sh.background ?? true,
             kind: sh.kind,
           });
         }
         applyShells(main, makeJobs(jobs));
-        main.activity = { id: `dbg-act-${++seq}`, kind: 'run', icon: '💻', text: 'Rodando em segundo plano', tool: 'Bash', at: now() };
+        main.activity = {
+          id: `dbg-act-${++seq}`,
+          kind: 'run',
+          icon: '💻',
+          text: 'Running in the background',
+          tool: 'Bash',
+          at: now(),
+        };
       }
       sim.injected.agents.push(main);
       for (let i = 0; i < (opts.subs ?? 0); i++) {
         const k = ++seq;
         sim.injected.agents.push(
-          makeAgent({ id: `${sessionId}:sub${k}`, kind: 'sub', parentId: main.id, name: NAMES[k % NAMES.length], roomId: room.id, account, sessionId, title: 'Investigar o bug' }),
+          makeAgent({
+            id: `${sessionId}:sub${k}`,
+            kind: 'sub',
+            parentId: main.id,
+            name: NAMES[k % NAMES.length],
+            roomId: room.id,
+            account,
+            sessionId,
+            title: 'Investigate bug',
+          }),
         );
       }
       reapply();
@@ -260,17 +289,17 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
     setStatus: (id, status, waitingFor) => {
       const i = sim.injected.agents.findIndex((x) => x.id === id);
       if (i < 0) return;
-      // cópia nova (como um snapshot de verdade), para o mundo perceber a mudança
+      // fresh copy (like a real snapshot), so the world detects the change
       const a: AgentInfo = { ...sim.injected.agents[i] };
       sim.injected.agents[i] = a;
       a.status = status;
       a.statusSince = now();
-      a.waitingFor = status === 'waiting' ? (waitingFor ?? 'aprovar uma permissão') : undefined;
+      a.waitingFor = status === 'waiting' ? (waitingFor ?? 'approve a permission') : undefined;
       a.activity = {
         id: `dbg-act-${++seq}`,
         kind: status === 'idle' || status === 'done' ? 'done' : status === 'waiting' ? 'wait' : 'run',
         icon: status === 'idle' || status === 'done' ? '✅' : status === 'waiting' ? '✋' : '💻',
-        text: status === 'idle' || status === 'done' ? 'Concluiu' : status === 'waiting' ? 'Precisa de você' : 'Rodando testes',
+        text: status === 'idle' || status === 'done' ? 'Done' : status === 'waiting' ? 'Needs you' : 'Running tests',
         at: now(),
       };
       reapply();
@@ -355,7 +384,7 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
     coins: (id, delta) => {
       const w = sim.social.wallets.get(id);
       if (!w) return 0;
-      if (delta > 0) sim.social.wallets.credit(id, delta, '🛠️', 'Ajuste (depuração)', now());
+      if (delta > 0) sim.social.wallets.credit(id, delta, '🛠️', 'Adjustment (debug)', now());
       else w.coins = Math.max(0, w.coins + delta);
       return w.coins;
     },
@@ -386,7 +415,7 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
         const rest = opts.all ? [] : shells.slice(1);
         const t = now();
         const ms = ended[0] ? t - ended[0].startedAt : undefined;
-        // mesmos textos do servidor ("Shell terminou: <rótulo> (<duração>)", "Shell falhou: …")
+        // same texts as server ("Shell finished: <label> (<duration>)", "Shell failed: …")
         const outcome: ShellOutcome = ok ? 'ok' : result === 'killed' ? 'killed' : 'failed';
         const detail = ended.map((j) => j.command ?? j.label).join(' | ') || undefined;
         const activity: Activity = { id: `dbg-act-${++seq}`, at: t, ...SPECIAL.shellDone(ended[0]?.label, outcome, ms, detail) };
@@ -411,7 +440,7 @@ export function createDebug(sim: Sim, renderer: Renderer, camera: Camera, onCame
         return;
       }
       const t = now();
-      const text = opts.text ?? (kind === 'party' ? 'PR #12 mergeado!' : 'CI falhou (main)');
+      const text = opts.text ?? (kind === 'party' ? 'PR #12 merged!' : 'CI failed (main)');
       const agentId = opts.agentId ?? [...sim.chars.values()].find((c) => c.roomId === room.id && !c.leaving)?.id;
       const end = t + (kind === 'party' ? 12_000 : 3_600_000);
       sim.roomFx.active.set(room.id, { roomId: room.id, kind, text, agentId, key: t, start: t, end, cheered: new Set(), sticky: true });

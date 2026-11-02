@@ -2,7 +2,7 @@
   "name": "habblaud",
   "version": "1.0.3",
   "private": true,
-  "description": "Escritório virtual animado que mostra, em tempo real, o que seus agentes do Claude Code estão fazendo.",
+  "description": "Animated virtual office showing, in real time, what your Claude Code agents are doing.",
   "license": "MIT",
   "repository": {
     "type": "git",

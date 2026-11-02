@@ -1,6 +1,6 @@
-// O social leve do dono no servidor local (server/world/social.ts): likes do dia, batidas, o resumo "enquanto você
-// estava fora" (com a sobra de um resumo já visto), o /v1/me, a troca de sessão, desbloquear e as rotas locais pela
-// conexão do prédio, contra o servidor do mundo de mentira.
+// Owner's lightweight social features on local server (server/world/social.ts): likes today, knocks, "while you
+// were away" summary (with grace period for seen summary), /v1/me, session switching, unblocking, and local routes
+// over the building connection against fake world server.
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -48,22 +48,22 @@ const me = (extra: Partial<MeResponse> = {}): MeResponse => ({
 const building = (extra: Record<string, unknown> = {}) =>
   parseMeBuilding({ state: 'online', paused: false, lot: { district: 'centro', x: 3, y: 1 }, floors: 4, agents: { total: 3, working: 1, waiting: 1, idle: 1 }, likes: 40, firstOnlineMonth: '2026-10', ...extra })!;
 
-describe('OwnerSocial: o que chega pela conexão do prédio', () => {
-  it('likes do dia e batidas vão para o meta (só números); repetido não republica', () => {
+describe('OwnerSocial: what arrives through building connection', () => {
+  it('likes today and knocks go to meta (numbers only); repeated does not republish', () => {
     const { social, changes } = unit();
     social.message({ t: 'likes.today', count: 3 });
     social.message({ t: 'likes.today', count: 3 });
     social.message({ t: 'likes.today', count: -1 });
     expect(changes.n).toBe(1);
     social.message({ t: 'knock' });
-    social.message({ t: 'knock', fromName: 'quem' });
+    social.message({ t: 'knock', fromName: 'someone' });
     expect(social.meta()).toEqual({ likesToday: 3, knocks: 2 });
-    expect(JSON.stringify(social.meta())).not.toContain('quem');
-    social.message({ t: 'outra' });
+    expect(JSON.stringify(social.meta())).not.toContain('someone');
+    social.message({ t: 'other' });
     expect(changes.n).toBe(3);
   });
 
-  it('resumo com novidade: o meta diz só que há um; o status leva as contagens; sem novidade, nada', () => {
+  it('summary with updates: meta only indicates presence; status carries counts; without updates, nothing', () => {
     const { social } = unit();
     social.message({ t: 'away.summary', since: '2026-10-14', visits: 0, likes: 0, stamps: [] });
     expect(social.meta()).toEqual({});
@@ -72,33 +72,33 @@ describe('OwnerSocial: o que chega pela conexão do prédio', () => {
     expect(social.status()).toEqual({ summary: SUMMARY });
   });
 
-  it('visto com a conexão: summary.seen sai na hora, o resumo some e uma sobra dele não volta (com novidade volta)', () => {
+  it('seen while connected: summary.seen sent immediately, summary disappears and leftover does not return (returns on new updates)', () => {
     const { social, sent, clock } = unit();
     social.message({ t: 'away.summary', ...SUMMARY });
     expect(social.summarySeen()).toEqual({ ok: true });
     expect(sent).toEqual([{ t: 'summary.seen' }]);
     expect(social.status().summary).toBeUndefined();
-    // o mundo leu antes do summary.seen: o mesmo resumo chega de novo
+    // world read before summary.seen: same summary arrives again
     social.message({ t: 'away.summary', ...SUMMARY });
     expect(social.status().summary).toBeUndefined();
-    // mais um like de lá para cá: é novidade
+    // one more like since then: new update
     social.message({ t: 'away.summary', ...SUMMARY, likes: 13 });
     expect(social.status().summary?.likes).toBe(13);
     social.summarySeen();
-    // passado o prazo, um resumo igual é de verdade (o dono dispensou hoje e voltou a receber)
+    // after grace period, identical summary is genuine (owner dismissed today and receives again)
     clock.t += SUMMARY_SEEN_GRACE_MS + 1;
     social.message({ t: 'away.summary', ...SUMMARY });
     expect(social.status().summary).toEqual(SUMMARY);
   });
 
-  it('visto sem a conexão: o resumo some daqui na hora e o summary.seen sai quando ela abrir', () => {
+  it('seen without connection: summary disappears locally immediately and summary.seen is sent when connection opens', () => {
     const { social, sent, link } = unit({ connected: false });
     social.message({ t: 'away.summary', ...SUMMARY });
     expect(social.summarySeen()).toEqual({ ok: true });
     expect(sent).toEqual([]);
     expect(social.meta()).toEqual({});
     link.connected = true;
-    // o mundo manda o resumo ao conectar, antes de saber que foi visto: não volta
+    // world sends summary on connect before knowing it was seen: does not return
     social.message({ t: 'away.summary', ...SUMMARY });
     social.opened();
     expect(sent).toEqual([{ t: 'summary.seen' }]);
@@ -107,7 +107,7 @@ describe('OwnerSocial: o que chega pela conexão do prédio', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('/v1/me: likes do dia, código, resumo e bloqueados; um /v1/me de antes do "visto" não traz o resumo de volta', () => {
+  it('/v1/me: likes today, code, summary and blocked list; a /v1/me from before "seen" does not bring summary back', () => {
     const { social, clock } = unit();
     social.fromMe(me({ building: building({ likesToday: 7, code: 'HB-4F2K', summary: SUMMARY }), blocked: [{ id: 'p_2', name: 'Bia' }] }), clock.t);
     expect(social.status()).toEqual({ likesToday: 7, code: 'HB-4F2K', summary: SUMMARY });
@@ -117,13 +117,13 @@ describe('OwnerSocial: o que chega pela conexão do prédio', () => {
     social.summarySeen();
     social.fromMe(me({ building: building({ likesToday: 7, summary: SUMMARY }) }), before);
     expect(social.status().summary).toBeUndefined();
-    // sem resumo no /v1/me: não há o que mostrar
+    // without summary in /v1/me: nothing to display
     clock.t += SUMMARY_SEEN_GRACE_MS + 1;
     social.fromMe(me({ building: building({ likesToday: 8 }) }), clock.t);
     expect(social.status()).toEqual({ likesToday: 8, code: 'HB-4F2K' });
   });
 
-  it('outra sessão (outra conta neste computador) começa do zero; sem sessão, nada', () => {
+  it('another session (another account on this computer) starts from scratch; without session, nothing', () => {
     const { social, session } = unit();
     social.message({ t: 'likes.today', count: 3 });
     social.message({ t: 'knock' });
@@ -135,7 +135,7 @@ describe('OwnerSocial: o que chega pela conexão do prédio', () => {
     expect(social.summarySeen()).toMatchObject({ ok: false, status: 401 });
   });
 
-  it('desbloquear: sem a conexão, 409; com ela, o unblock sai e o jogador some da lista, mesmo num /v1/me velho', () => {
+  it('unblock: without connection, 409; with connection, unblock is sent and player disappears from list even in stale /v1/me', () => {
     const { social, sent, link, clock } = unit({ connected: false });
     social.fromMe(me({ blocked: [{ id: 'p_2', name: 'Bia' }, { id: 'p_3', name: 'Caio' }] }), clock.t);
     expect(social.unblock('p_2')).toEqual({ ok: false, status: 409, code: 'not_connected' });
@@ -147,26 +147,26 @@ describe('OwnerSocial: o que chega pela conexão do prédio', () => {
     expect(social.blocked()).toEqual([{ id: 'p_3', name: 'Caio' }]);
     social.fromMe(me({ blocked: [{ id: 'p_2', name: 'Bia' }, { id: 'p_3', name: 'Caio' }] }), before);
     expect(social.blocked()?.map((p) => p.id)).toEqual(['p_3']);
-    // bloqueado de novo depois (pela cena), o /v1/me novo traz de volta
+    // blocked again later (via scene), new /v1/me brings player back
     clock.t += UNBLOCK_GRACE_MS + 10;
     social.fromMe(me({ blocked: [{ id: 'p_2', name: 'Bia' }, { id: 'p_3', name: 'Caio' }] }), clock.t);
     expect(social.blocked()?.map((p) => p.id)).toEqual(['p_2', 'p_3']);
   });
 });
 
-describe('leitura do /v1/me e da visibilidade', () => {
-  it('parseMeBuilding: só os campos do protocolo; código fora do formato e resumo torto ficam de fora', () => {
+describe('reading /v1/me and visibility', () => {
+  it('parseMeBuilding: only protocol fields; malformed code and crooked summary are excluded', () => {
     const b = building({ likesToday: 3, code: 'HB-4F2K', summary: SUMMARY, tokens: { day: 2, week: 9 }, secret: 'x' });
     expect(b).toMatchObject({ state: 'online', likesToday: 3, code: 'HB-4F2K', summary: SUMMARY });
     expect(b).not.toHaveProperty('tokens');
     expect(b).not.toHaveProperty('secret');
     expect(building({ code: 'HB-0O1I' })).not.toHaveProperty('code');
     expect(building({ summary: { since: 'x' } })).not.toHaveProperty('summary');
-    expect(parseMeBuilding({ state: 'voando', lot: { district: 'centro', x: 0, y: 0 } })).toBeUndefined();
+    expect(parseMeBuilding({ state: 'flying', lot: { district: 'centro', x: 0, y: 0 } })).toBeUndefined();
     expect(parseMeBuilding({ state: 'online' })).toBeUndefined();
   });
 
-  it('parseBlocked e parseMe: lista de {id, name}, sem repetir nem campos a mais', () => {
+  it('parseBlocked and parseMe: list of {id, name}, without duplicates or extra fields', () => {
     expect(parseBlocked([{ id: 'p_1', name: 'Ana', email: 'x' }, { id: 'p_1', name: 'Ana' }, { id: '', name: 'x' }, { id: 'p_2' }, 7])).toEqual([{ id: 'p_1', name: 'Ana' }]);
     expect(parseBlocked('x')).toBeUndefined();
     const m = parseMe({ account: { emailMasked: 'a***@x.com', access: 'approved' }, devices: [], blocked: [{ id: 'p_1', name: 'Ana' }], building: { state: 'away', paused: true, lot: { district: 'centro', x: 1, y: 0 }, likesToday: 2 } });
@@ -174,15 +174,15 @@ describe('leitura do /v1/me e da visibilidade', () => {
     expect(m?.building).toMatchObject({ state: 'away', paused: true, likesToday: 2 });
   });
 
-  it('parseVisibility: knocks opcional (ausente não muda), mas só booleano', () => {
+  it('parseVisibility: optional knocks (missing does not change), boolean only', () => {
     const base = { ...VISIBILITY_DEFAULTS };
     delete (base as { knocks?: boolean }).knocks;
     expect(parseVisibility(base)).not.toHaveProperty('knocks');
     expect(parseVisibility({ ...base, knocks: true })).toMatchObject({ knocks: true });
-    expect(parseVisibility({ ...base, knocks: 'sim' })).toBeUndefined();
+    expect(parseVisibility({ ...base, knocks: 'yes' })).toBeUndefined();
   });
 
-  it('summaryWithin: nada além do que já tinha (mesmo dia, nenhuma contagem maior)', () => {
+  it('summaryWithin: nothing beyond what was already present (same day, no count higher)', () => {
     expect(summaryWithin(SUMMARY, SUMMARY)).toBe(true);
     expect(summaryWithin({ ...SUMMARY, visits: 4 }, SUMMARY)).toBe(true);
     expect(summaryWithin({ ...SUMMARY, since: '2026-10-15' }, SUMMARY)).toBe(false);
@@ -190,7 +190,7 @@ describe('leitura do /v1/me e da visibilidade', () => {
   });
 });
 
-describe('pela conexão do prédio e pelas rotas locais', () => {
+describe('over building connection and local routes', () => {
   async function approved() {
     const world = await startFakeWorld();
     closers.push(world.close);
@@ -233,7 +233,7 @@ describe('pela conexão do prédio e pelas rotas locais', () => {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const until = Date.now() + 3_000;
     while (!uplink.connected) {
-      if (Date.now() > until) throw new Error('sem conexão');
+      if (Date.now() > until) throw new Error('no connection');
       await new Promise((ok) => setTimeout(ok, 5));
     }
     const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -243,12 +243,12 @@ describe('pela conexão do prédio e pelas rotas locais', () => {
   const wait = async (cond: () => boolean) => {
     const until = Date.now() + 3_000;
     while (!cond()) {
-      if (Date.now() > until) throw new Error('esperando');
+      if (Date.now() > until) throw new Error('waiting');
       await new Promise((ok) => setTimeout(ok, 5));
     }
   };
 
-  it('likes do dia, batidas e resumo chegam com a cena fechada e vão ao meta e ao status (com /v1/me)', async () => {
+  it('likes today, knocks and summary arrive with closed scene and go to meta and status (with /v1/me)', async () => {
     const { service, conn } = await approved();
     conn().send({ t: 'likes.today', count: 3 });
     conn().send({ t: 'knock' });
@@ -261,7 +261,7 @@ describe('pela conexão do prédio e pelas rotas locais', () => {
     expect(st.blocked).toEqual([{ id: 'p_9', name: 'Zeca' }]);
   });
 
-  it('POST /api/world/summary/seen e /api/world/unblock: saem pela conexão; corpo torto, 400', async () => {
+  it('POST /api/world/summary/seen and /api/world/unblock: sent over connection; malformed body, 400', async () => {
     const { post, conn, social } = await approved();
     conn().send({ t: 'away.summary', ...SUMMARY });
     await wait(() => !!social.meta().awaySummary);
@@ -276,7 +276,7 @@ describe('pela conexão do prédio e pelas rotas locais', () => {
     expect(conn().messages.find((m) => m.t === 'unblock')).toEqual({ t: 'unblock', playerId: 'p_9' });
   });
 
-  it('sem a conexão (pausado, cena fechada): desbloquear responde 409 not_connected', async () => {
+  it('without connection (paused, closed scene): unblock responds 409 not_connected', async () => {
     const { post, service, uplink } = await approved();
     await service.pause();
     await wait(() => !uplink.connected);

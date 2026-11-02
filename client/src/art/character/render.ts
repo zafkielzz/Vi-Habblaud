@@ -1,6 +1,6 @@
-// Renderização procedural dos personagens chibi (puro: desenha num PixelBuf).
-// Folha de 24x34 px com âncora (12, 31) no centro dos pés. Em pé: cabelo a partir de y≈5,
-// cabeça y 7–17, tronco 18–23, calça 24–28, sapatos 29–30. Sentado: tronco/cabeça 4px abaixo.
+// Procedural rendering of chibi characters (pure: draws into a PixelBuf).
+// 24x34 px sheet with anchor (12, 31) at the center of feet. Standing: hair from y≈5,
+// head y 7–17, torso 18–23, pants 24–28, shoes 29–30. Seated: torso/head 4px lower.
 import type { Appearance, CharacterFrameRequest, HeldItem, Pose } from '../api';
 import { luminance, mix, ramp, shade, type Ramp } from '../core/color';
 import { PixelBuf, type Palette } from '../core/pixbuf';
@@ -11,10 +11,10 @@ export const CHAR_W = 24;
 export const CHAR_H = 34;
 export const CHAR_AX = 12;
 export const CHAR_AY = 31;
-/** Origem da grade da cabeça (coluna 0, linha 0) em pé. */
+/** Head grid origin (column 0, row 0) standing. */
 const HX = 5;
 const HY = 3;
-/** Quanto o corpo desce quando sentado. */
+/** How much the body drops when seated. */
 export const SEAT_DROP = 4;
 
 export const POSE_FRAMES: Readonly<Record<Pose, number>> = {
@@ -29,16 +29,16 @@ export const POSE_DURATION: Readonly<Record<Pose, number>> = {
 
 const SEATED_ONLY: ReadonlySet<Pose> = new Set<Pose>(['sit', 'type', 'sleep', 'wait']);
 const NEVER_SEATED: ReadonlySet<Pose> = new Set<Pose>(['walk', 'run', 'stretch', 'play', 'groom']);
-/** Poses que posicionam as mãos (e o item) por conta própria: a lógica genérica de itens não mexe nelas. */
+/** Poses that position hands (and item) on their own: generic item logic does not touch them. */
 const OWN_HANDS: ReadonlySet<Pose> = new Set<Pose>(['play', 'drink', 'raise_hand', 'stretch', 'cheer', 'laugh', 'game', 'rps', 'groom', 'sulk']);
-/** Gestos do jokenpô (a mão vira pedra, papel ou tesoura). */
+/** Rock-paper-scissors gestures (hand becomes rock, paper, or scissors). */
 const GESTURES: ReadonlySet<HeldItem> = new Set<HeldItem>(['rock', 'paper', 'scissors']);
 
 export function isSeated(pose: Pose, seated?: boolean): boolean {
   return SEATED_ONLY.has(pose) || (!!seated && !NEVER_SEATED.has(pose));
 }
 
-// ---------------------------------------------------------------- paleta
+// ---------------------------------------------------------------- palette
 
 interface CharPal {
   skin: Ramp;
@@ -85,55 +85,55 @@ function paletteOf(a: Appearance): CharPal {
   return p;
 }
 
-// ---------------------------------------------------------------- rig (pose -> posições)
+// ---------------------------------------------------------------- rig (pose -> positions)
 
 type Pt = readonly [number, number];
 
 interface Arm {
-  /** Caminho do pincel 2x2: ombro -> ... -> mão (coordenadas em pé, sem deslocamento). */
+  /** 2x2 brush path: shoulder -> ... -> hand (standing coordinates, unshifted). */
   pts: readonly Pt[];
 }
 
 interface Rig {
   view: HeadView;
   seated: boolean;
-  /** Deslocamento vertical do tronco/braços/cabeça (sentado, respiração, quique). */
+  /** Vertical shift of torso/arms/head (seated, breathing, bounce). */
   ub: number;
-  /** Deslocamento extra só da cabeça (cochilo). */
+  /** Extra shift for head only (doze). */
   hd: number;
-  /** Inclinação para frente no perfil (corrida): desloca cabeça/tronco em x. */
+  /** Forward lean in profile (run): shifts head/torso in x. */
   lean: number;
-  /** Pés: deslocamento vertical (frente/costas) ou horizontal (perfil) de cada perna. */
+  /** Feet: vertical shift (front/back) or horizontal shift (profile) of each leg. */
   legA: { dx: number; dy: number };
   legB: { dx: number; dy: number };
-  /** Braço A = esquerdo da tela (frente/costas) ou distante (perfil). B = direito/próximo. */
+  /** Arm A = screen left (front/back) or far arm (profile). B = right/near arm. */
   armA: Arm;
   armB: Arm;
-  /** 'half' = pálpebras a meio mastro (tédio/impaciência); 'happy' = olhos fechados em arco (^ ^), rindo. */
+  /** 'half' = half-mast eyelids (boredom/impatience); 'happy' = arched closed eyes (^ ^), laughing. */
   eyes: 'open' | 'closed' | 'half' | 'happy';
-  /** 'wide' = gargalhada (boca larga com a língua aparecendo); 'frown' = boca triste (cantos para baixo). */
+  /** 'wide' = hearty laugh (wide mouth with tongue showing); 'frown' = sad mouth (corners down). */
   mouth: 'none' | 'open' | 'wide' | 'frown';
   held: HeldItem;
-  /** Item atrás do corpo (costas). */
+  /** Item behind body (back). */
   itemBehind: boolean;
-  /** Mãos que seguram o item com as duas mãos (desenhadas por cima do item). */
+  /** Hands holding the item with both hands (drawn over the item). */
   twoHands: boolean;
   /**
-   * Posição FIXA do item (coordenadas em pé, sem ub/lean), independente da mão — ex.: o balde de
-   * pipoca no colo enquanto a mão vai do balde à boca. null = o item acompanha a mão do braço B.
+   * FIXED position of item (standing coordinates, without ub/lean), independent of hand — e.g. the
+   * popcorn bucket on lap while hand moves from bucket to mouth. null = item follows arm B hand.
    */
   itemAt: Pt | null;
-  /** Sentado: a ponta do sapato direito sobe 1px (pé batendo, impaciência). */
+  /** Seated: right shoe toe raises 1px (foot tapping, impatience). */
   toeTap: boolean;
-  /** Pontas dos dedos (2 px de pele) batendo sobre o braço — de costas, nos braços cruzados. */
+  /** Fingertips (2 px of skin) tapping on arm — seen from back, with crossed arms. */
   tapAt: Pt | null;
-  /** Uma pipoca entre os dedos (2 px), a caminho da boca. */
+  /** A popcorn piece between fingers (2 px), en route to mouth. */
   kernelAt: Pt | null;
-  /** De frente: braços cruzados desenhados à mão (ver drawCrossedArms); 1 = dedos levantados. */
+  /** Front: hand-drawn crossed arms (see drawCrossedArms); 1 = raised fingers. */
   crossFront: 0 | 1 | null;
 }
 
-/** Braços retos ao lado do corpo (frente/costas). */
+/** Straight arms alongside body (front/back). */
 const DOWN_A: Arm = { pts: [[6, 18], [6, 22]] };
 const DOWN_B: Arm = { pts: [[16, 18], [16, 22]] };
 
@@ -175,7 +175,7 @@ function makeRig(req: CharacterFrameRequest, view: HeadView): Rig {
   switch (pose) {
     case 'stand':
     case 'sit':
-      // Respiração: a cabeça desce 1px no segundo quadro.
+      // Breathing: head drops 1px on the second frame.
       if (f === 1) rig.hd = 1;
       break;
     case 'walk':
@@ -305,7 +305,7 @@ function makeRig(req: CharacterFrameRequest, view: HeadView): Rig {
       break;
   }
 
-  // Itens segurados: braços e posição do item (exceto poses que já posicionam a mão).
+  // Held items: arms and item position (except poses that position hand on their own).
   const h = rig.held;
   if (h !== 'none' && !rig.itemAt && !OWN_HANDS.has(pose)) {
     if (TWO_HANDED.has(h) || pose === 'read') {
@@ -318,7 +318,7 @@ function makeRig(req: CharacterFrameRequest, view: HeadView): Rig {
         rig.armB = arm([16, 18], [16, 20], [14, 21]);
       }
     } else if (pose !== 'type' && pose !== 'use' && pose !== 'sleep' && pose !== 'talk') {
-      // Copo, garrafa ou raquete numa mão só, braço dobrado à frente.
+      // Cup, bottle, or paddle in one hand, arm bent forward.
       if (side) rig.armB = arm([10, 18], [10, 21], [8, 21]);
       else rig.armB = arm([16, 18], [17, 21], [16, 21]);
     }
@@ -328,12 +328,12 @@ function makeRig(req: CharacterFrameRequest, view: HeadView): Rig {
 }
 
 /**
- * Pose 'wait' (esperando um shell terminar): sentado e recostado 1px para trás — para cima de frente
- * (o encosto fica ao norte), para baixo de costas (encosto ao sul) e para trás no perfil.
- * - Com pipoca: balde no colo/abraçado e a mão alternando entre o balde (quadro 0) e a boca (1).
- *   De costas o balde fica apoiado ao lado do quadril (fora do encosto) para continuar legível.
- * - Sem item: braços cruzados, dedos batendo no braço e a ponta do pé batendo; olhar entediado.
- * - Outros itens: como 'sit' segurando o item (a lógica genérica de itens cuida dos braços).
+ * Pose 'wait' (waiting for a shell to finish): seated and leaning back 1px — upward from front
+ * (backrest is north), downward from back (backrest south) and backward in profile.
+ * - With popcorn: bucket on lap/hugged and hand alternating between bucket (frame 0) and mouth (1).
+ *   From back bucket rests beside hip (outside backrest) to remain readable.
+ * - Without item: arms crossed, fingers tapping on arm and toe tapping; bored look.
+ * - Other items: like 'sit' holding item (generic item logic handles arms).
  */
 function waitRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   if (view === 'down') rig.ub -= 1;
@@ -343,22 +343,22 @@ function waitRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   if (held === 'popcorn') {
     rig.itemBehind = false;
     if (view === 'down') {
-      // Balde abraçado colado ao queixo: a desk_back (verso do monitor) esconde o sprite a partir de
-      // y≈26, então pipoca, aro e três listras precisam caber acima disso. A mão vai da lateral do
-      // balde (mastigando, boca aberta) até a boca (cobrindo-a, com uma pipoca entre os dedos).
+      // Bucket hugged against chin: desk_back (monitor back) hides sprite starting from
+      // y≈26, so popcorn, rim, and three stripes must fit above that. Hand moves from side of
+      // bucket (chewing, open mouth) to mouth (covering it, with a popcorn between fingers).
       rig.itemAt = [9, 17];
       rig.armA = arm([6, 18], [6, 21], [9, 21]);
       rig.armB = eat ? arm([16, 18], [17, 19], [11, 15]) : arm([16, 18], [16, 20], [15, 20]);
       rig.mouth = eat ? 'none' : 'open';
       if (eat) rig.kernelAt = [11, 14];
     } else if (view === 'up') {
-      // De costas: balde ao lado do quadril esquerdo; o braço esquerdo mergulha nele e leva à boca
-      // (a mão some atrás da cabeça, o cotovelo aparece para fora).
+      // From back: bucket beside left hip; left arm dips into it and brings to mouth
+      // (hand disappears behind head, elbow shows outward).
       rig.itemAt = [0, 18];
       rig.armB = arm([16, 18], [16, 22]);
       rig.armA = eat ? arm([6, 18], [3, 16], [6, 13]) : arm([6, 18], [4, 20], [3, 18]);
     } else {
-      // Perfil (virado à esquerda): balde no colo, à frente da barriga.
+      // Profile (facing left): bucket on lap, in front of belly.
       rig.itemAt = [3, 18];
       rig.armA = arm([12, 18], [12, 21], [8, 22]);
       rig.armB = eat ? arm([10, 18], [9, 21], [5, 16]) : arm([10, 18], [10, 21], [6, 19]);
@@ -368,7 +368,7 @@ function waitRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
     return;
   }
   if (held !== 'none') return;
-  // Braços cruzados, batendo os dedos (no 2º quadro a mão de cima sobe 1px) e o pé.
+  // Arms crossed, tapping fingers (in 2nd frame upper hand moves up 1px) and foot.
   const lifted = f === 1;
   rig.eyes = 'half';
   rig.toeTap = lifted;
@@ -376,7 +376,7 @@ function waitRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   if (view === 'down') {
     rig.crossFront = lifted ? 1 : 0;
   } else if (view === 'up') {
-    // De costas só aparecem os cotovelos para fora; a ponta dos dedos bate no braço esquerdo.
+    // From back only elbows show outward; fingertips tap on left arm.
     rig.armA = arm([6, 18], [4, 20], [6, 22]);
     rig.armB = arm([16, 18], [18, 20], [16, 22]);
     rig.tapAt = [3, 19 + tap];
@@ -386,12 +386,12 @@ function waitRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   }
 }
 
-// ---------------------------------------------------------------- vida social
+// ---------------------------------------------------------------- social life
 
 /**
- * 'cheer' (comemorando): os dois braços para o alto em V com os punhos fechados e a boca aberta.
- * No quadro 1, pulinho (o corpo inteiro sobe 2 px; sentado, só um quique) e olhos de alegria.
- * De perfil o braço de trás passa por trás da cabeça e aparece acima dela.
+ * 'cheer' (cheering): both arms up in V with clenched fists and open mouth.
+ * In frame 1, hop (entire body rises 2 px; seated, just a bounce) and joyous eyes.
+ * In profile back arm passes behind head and appears above it.
  */
 function cheerRig(rig: Rig, view: HeadView, f: number): void {
   const jump = f === 1;
@@ -405,8 +405,8 @@ function cheerRig(rig: Rig, view: HeadView, f: number): void {
       rig.legB = { dx: 0, dy: -2 };
     }
   }
-  // Punhos acima do topo da cabeça: sentado de costas (sofá diante da TV) só a cabeça e as mãos
-  // passam do encosto.
+  // Fists above top of head: seated from back (sofa in front of TV) only head and hands
+  // clear the backrest.
   if (view === 'side') {
     rig.armB = jump ? arm([10, 18], [5, 13], [3, 3]) : arm([10, 18], [6, 13], [4, 4]);
     rig.armA = jump ? arm([12, 18], [17, 12], [18, 2]) : arm([12, 18], [16, 12], [17, 3]);
@@ -417,8 +417,8 @@ function cheerRig(rig: Rig, view: HeadView, f: number): void {
 }
 
 /**
- * 'laugh' (gargalhando): olhos fechados em arco, boca larga, uma mão na barriga e o corpo
- * sacudindo 1 px; no quadro 1 a outra mão bate na coxa e, de perfil, o corpo dobra para a frente.
+ * 'laugh' (laughing out loud): arched closed eyes, wide mouth, one hand on belly, and body
+ * shaking 1 px; in frame 1 other hand slaps thigh and, in profile, body bends forward.
  */
 function laughRig(rig: Rig, view: HeadView, f: number): void {
   rig.eyes = 'happy';
@@ -431,7 +431,7 @@ function laughRig(rig: Rig, view: HeadView, f: number): void {
     return;
   }
   if (view === 'up') {
-    // De costas: cotovelos para fora (as mãos estão na barriga, escondidas pelo corpo).
+    // From back: elbows outward (hands are on belly, hidden by body).
     rig.armA = arm([6, 18], [4, 21], [7, 22]);
     rig.armB = arm([16, 18], [18, 21], [15, 22]);
     return;
@@ -441,9 +441,9 @@ function laughRig(rig: Rig, view: HeadView, f: number): void {
 }
 
 /**
- * 'game' (videogame): controle nas duas mãos à frente do peito, polegares alternando (uma mão sobe
- * 1 px a cada quadro). De perfil o corpo inclina para a tela; de costas só os cotovelos para fora,
- * mexendo — o controle fica escondido pelo corpo.
+ * 'game' (videogame): controller in both hands in front of chest, alternating thumbs (one hand raises
+ * 1 px each frame). In profile body leans toward screen; from back only elbows outward,
+ * moving — controller is hidden by body.
  */
 function gameRig(rig: Rig, view: HeadView, f: number): void {
   rig.held = 'controller';
@@ -470,9 +470,9 @@ function gameRig(rig: Rig, view: HeadView, f: number): void {
 }
 
 /**
- * 'rps' (pedra-papel-tesoura). Sem gesto: o punho sobe (quadro 0, gritando) e desce (1) na
- * contagem. Com gesto: braço estendido para o adversário mostrando a mão — de perfil para a frente,
- * de frente diante do peito e de costas para o lado (para continuar legível).
+ * 'rps' (rock-paper-scissors). Without gesture: fist moves up (frame 0, shouting) and down (1) on
+ * count. With gesture: arm extended toward opponent showing hand — in profile forward,
+ * front-facing in front of chest and from back to the side (to remain readable).
  */
 function rpsRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   const reveal = GESTURES.has(held);
@@ -507,9 +507,9 @@ function rpsRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
 }
 
 /**
- * 'groom' (diante do espelho): uma mão perto do rosto/cabelo indo e voltando. De costas (o normal,
- * virado para o espelho) o cotovelo fica levantado para fora e a mão aparece na lateral da cabeça;
- * de frente a mão passa o batom/pente na altura da boca/cabelo.
+ * 'groom' (in front of mirror): one hand near face/hair moving back and forth. From back (standard,
+ * facing mirror) elbow is raised outward and hand appears at side of head;
+ * from front hand applies lipstick/comb at mouth/hair height.
  */
 function groomRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   rig.itemBehind = false;
@@ -530,7 +530,7 @@ function groomRig(rig: Rig, view: HeadView, f: number, held: HeldItem): void {
   if (!comb) rig.mouth = 'none';
 }
 
-/** 'sulk' (chateado): ombros caídos, cabeça baixa, olhos semicerrados e braços pendurados. */
+/** 'sulk' (sulking): slumped shoulders, head down, half-closed eyes, and hanging arms. */
 function sulkRig(rig: Rig, view: HeadView, f: number): void {
   rig.eyes = 'half';
   rig.mouth = 'frown';
@@ -547,34 +547,34 @@ function sulkRig(rig: Rig, view: HeadView, f: number): void {
 }
 
 /**
- * Braços cruzados de frente (pixel a pixel: com mangas compridas o pincel 2x2 some na blusa).
- * O antebraço direito da tela passa por cima (linha clara + base), o outro aparece por baixo
- * (linha escura); a mão de cima segura o braço esquerdo e bate os dedos; a de baixo espia à direita.
+ * Crossed arms from front (pixel by pixel: with long sleeves 2x2 brush disappears into top).
+ * Screen-right forearm crosses on top (light line + base), other appears underneath
+ * (dark line); top hand holds left arm and taps fingers; bottom hand peeks on the right.
  */
 function drawCrossedArms(dc: Dc, sleeveCol: Ramp, sleeve: number, fingersUp: boolean): void {
   const { b, p, r } = dc;
   const y = r.ub;
   const sl = sleeveCol;
-  const fa = sleeve < 4 ? p.skin : sl; // antebraço: pele em mangas curtas
+  const fa = sleeve < 4 ? p.skin : sl; // forearm: skin in short sleeves
   const sk = p.skin;
-  // Tudo bem alto no peito: atrás da desk_back só ~4 px do tronco ficam à mostra.
-  // Braços (ombro -> cotovelo) dos dois lados.
+  // High on chest: behind desk_back only ~4 px of torso remain visible.
+  // Arms (shoulder -> elbow) on both sides.
   for (let yy = 18; yy <= 20; yy++) {
     b.set(6, yy + y, yy === 20 ? sl.dk : sl.base);
     b.set(7, yy + y, sl.dk);
     b.set(16, yy + y, sl.base);
     b.set(17, yy + y, yy === 20 ? sl.dd : sl.dk);
   }
-  // Antebraço de baixo (só a borda inferior aparece) e a mão escondida espiando à direita.
+  // Lower forearm (only bottom edge shows) and hidden hand peeking on the right.
   b.hline(8, 15, 21 + y, fa.dk);
   b.set(16, 21 + y, sk.base);
   b.set(17, 21 + y, sk.dk);
-  // Antebraço de cima, do cotovelo direito até a mão sobre o braço esquerdo.
+  // Upper forearm, from right elbow to hand over left arm.
   b.hline(8, 17, 19 + y, fa.lt);
   b.hline(8, 17, 20 + y, fa.base);
   b.set(17, 20 + y, fa.dk);
-  b.set(12, 20 + y, fa.dk); // dobra onde os antebraços se cruzam
-  // Mão sobre o braço esquerdo; nos quadros ímpares os dedos sobem (batendo).
+  b.set(12, 20 + y, fa.dk); // fold where forearms cross
+  // Hand over left arm; on odd frames fingers raise (tapping).
   const hy = fingersUp ? 18 : 19;
   b.set(5, hy + y, sk.lt);
   b.set(6, hy + y, sk.base);
@@ -584,9 +584,9 @@ function drawCrossedArms(dc: Dc, sleeveCol: Ramp, sleeve: number, fingersUp: boo
   b.set(7, 20 + y, sk.dk);
 }
 
-// ---------------------------------------------------------------- desenho
+// ---------------------------------------------------------------- drawing
 
-/** Contexto de desenho: buffer + paleta + rig. */
+/** Drawing context: buffer + palette + rig. */
 interface Dc {
   b: PixelBuf;
   a: Appearance;
@@ -611,7 +611,7 @@ function stampTpl(dc: Dc, tpl: Tpl, pal: Palette, dy: number, textured = false):
     b.stamp(tpl.rows, ox, oy, pal);
     return;
   }
-  // Textura de cachos: pontilhado determinístico nas áreas de base.
+  // Curl texture: deterministic stippling in base areas.
   for (let r = 0; r < tpl.rows.length; r++) {
     const row = tpl.rows[r];
     for (let i = 0; i < row.length; i++) {
@@ -633,8 +633,8 @@ function drawHead(dc: Dc): void {
   const dy = r.ub + r.hd;
   const closed = r.eyes === 'closed' || r.eyes === 'happy';
   const half = r.eyes === 'half';
-  // Semicerrado: a linha de cima vira pálpebra e a de baixo usa o tom mais escuro do olho
-  // (em peles escuras eyeTop é o brilho claro, então a pupila fica com eyeBot).
+  // Half-closed: top row becomes eyelid and bottom row uses darker eye shade
+  // (on dark skin eyeTop is light reflection, so pupil uses eyeBot).
   const pupil = luminance(p.eyeTop) > 0.5 ? p.eyeBot : p.eyeTop;
   const pal: Palette = {
     s: p.skin.base,
@@ -650,7 +650,7 @@ function drawHead(dc: Dc): void {
   const ox = HX + tpl.x + r.lean;
   const oy = HY + tpl.y + dy;
   if (r.eyes === 'happy' && r.view !== 'up') {
-    // Olhos de riso: arco "^" de 3 px no lugar de cada olho (a pupila vira pele).
+    // Laughing eyes: 3 px "^" arch in place of each eye (pupil becomes skin).
     const ink = mix(p.skin.base, '#1d1826', 0.7);
     for (const cx of r.view === 'down' ? [4, 9] : [3]) {
       dc.b.set(ox + cx, oy + 6, ink);
@@ -660,7 +660,7 @@ function drawHead(dc: Dc): void {
     }
   }
   if (r.mouth === 'frown' && r.view !== 'up') {
-    // Boca triste: os cantos descem 1 px (um arco virado para baixo).
+    // Sad mouth: corners turn down 1 px (downward arch).
     const corner = shade(p.mouth, -0.12);
     if (r.view === 'down') {
       dc.b.set(ox + 5, oy + 10, corner);
@@ -668,7 +668,7 @@ function drawHead(dc: Dc): void {
     } else dc.b.set(ox + 3, oy + 10, corner);
   }
   if (r.mouth === 'wide' && r.view !== 'up') {
-    // Gargalhada: a boca abre para os lados e a língua aparece embaixo.
+    // Hearty laugh: mouth opens wide and tongue appears underneath.
     const tongue = '#d8646e';
     if (r.view === 'down') {
       dc.b.set(ox + 5, oy + 9, p.mouthOpen);
@@ -680,7 +680,7 @@ function drawHead(dc: Dc): void {
       dc.b.set(ox + 2, oy + 10, tongue);
     }
   }
-  // Brilho na testa (luz de cima/esquerda).
+  // Forehead highlight (light from top/left).
   if (r.view !== 'up') dc.b.set(HX + 3 + r.lean, HY + 7 + dy, p.skin.lt);
 }
 
@@ -733,7 +733,7 @@ function drawHair(dc: Dc, layer: 'front' | 'back'): void {
   const set = HAIR[style]?.[dc.r.view];
   const tpl = set?.[layer];
   if (!tpl) return;
-  // Boné/gorro escondem a parte de cima do cabelo.
+  // Cap/beanie hides top of hair.
   const pal = hairPalette(dc.p, style === 'buzz');
   const pal2: Palette = { ...pal, a: dc.a.accessory === 'bow' ? dc.p.item.base : shade(dc.a.top, 0.05) };
   stampTpl(dc, tpl, pal2, dc.r.ub + dc.r.hd, TEXTURED.has(style));
@@ -748,7 +748,7 @@ function drawAccessory(dc: Dc): void {
   const v = r.view;
   switch (a.accessory) {
     case 'glasses': {
-      // Duas lentes emolduradas (o olho continua visível dentro) + ponte e hastes.
+      // Two framed lenses (eye remains visible inside) + bridge and temples.
       const fr = shade(it.dk, -0.08);
       const lens = 'rgba(225,240,255,0.6)';
       if (v === 'down') {
@@ -860,9 +860,9 @@ function drawAccessory(dc: Dc): void {
   }
 }
 
-// ----- corpo
+// ----- body
 
-/** Pincel 2x2 ao longo do caminho do braço: manga até `sleeve` pontos, depois pele; mão no fim. */
+/** 2x2 brush along arm path: sleeve up to `sleeve` points, then skin; hand at the end. */
 function drawArm(dc: Dc, a: Arm, sleeveCol: Ramp, sleeve: number, dim = 0, backShadow = false): void {
   const { b, p, r } = dc;
   const pts: [number, number][] = [];
@@ -880,7 +880,7 @@ function drawArm(dc: Dc, a: Arm, sleeveCol: Ramp, sleeve: number, dim = 0, backS
   const sk = dim ? ramp(shade(p.skin.base, -dim), 0.07) : p.skin;
   const sl = dim ? ramp(shade(sleeveCol.base, -dim), 0.08) : sleeveCol;
   if (backShadow) {
-    // Linha de sombra atrás do braço (sobre o tronco) para separá-lo do corpo no perfil.
+    // Shadow line behind arm (on torso) to separate it from body in profile.
     const sep = shade(sleeveCol.dd, -0.06);
     for (const [x, y] of pts) {
       if (b.alpha(x + 2 + lean, y + dy) > 0) b.set(x + 2 + lean, y + dy, sep);
@@ -926,7 +926,7 @@ function drawLegs(dc: Dc): void {
   }
   if (r.seated) {
     if (r.view === 'down') {
-      // Colo (coxas em direção à câmera) e pontas dos sapatos.
+      // Lap (thighs toward camera) and shoe tips.
       const y0 = 24 + r.ub;
       const lapTop = style === 'skirt' ? p.bottom : pants;
       b.rect(8, y0, 8, 1, lapTop.lt);
@@ -944,7 +944,7 @@ function drawLegs(dc: Dc): void {
       b.rect(8, 30, 3, 1, sh.base);
       b.set(8, 30, sh.lt);
       if (r.toeTap) {
-        // Ponta do pé direito no ar (o calcanhar fica no chão).
+        // Right toe in the air (heel stays on ground).
         b.rect(13, 29, 3, 1, sh.base);
         b.set(13, 29, sh.lt);
         b.set(14, 30, sh.dk);
@@ -961,7 +961,7 @@ function drawLegs(dc: Dc): void {
     }
     return;
   }
-  // Em pé (frente/costas). Quadril/cintura.
+  // Standing (front/back). Hips/waist.
   const top = 24 + r.ub;
   b.rect(8, top, 8, 2, pants.base);
   b.set(15, top, pants.dk);
@@ -982,7 +982,7 @@ function drawLegs(dc: Dc): void {
       b.set(x + 1, y, c.base);
       b.set(x + 2, y, shadeRight ? c.dk : c.base);
     }
-    // Sapato: duas linhas, ponta clara, sola escura.
+    // Shoe: two lines, light tip, dark sole.
     b.rect(x, y1 + 1, 3, 1, sh.base);
     b.set(x, y1 + 1, sh.lt);
     b.rect(x, y1 + 2, 3, 1, sh.dk);
@@ -1001,8 +1001,8 @@ function drawLegsSide(dc: Dc, pants: Ramp, sh: Ramp, skinLeg: boolean): void {
   const { b, p, r, a } = dc;
   const style = a.bottomStyle ?? 'pants';
   if (r.seated) {
-    const y0 = 24 + r.ub; // linha do quadril
-    // Coxa horizontal para a frente (esquerda) e canela para baixo.
+    const y0 = 24 + r.ub; // hip line
+    // Horizontal thigh forward (left) and shin downward.
     b.rect(7, y0 - 1, 7, 2, pants.base);
     b.rect(7, y0 - 1, 6, 1, pants.lt);
     b.set(13, y0, pants.dk);
@@ -1010,7 +1010,7 @@ function drawLegsSide(dc: Dc, pants: Ramp, sh: Ramp, skinLeg: boolean): void {
     b.rect(7, y0 + 1, 2, 30 - (y0 + 1), shin.base);
     b.set(8, y0 + 1, shin.dk);
     if (r.toeTap) {
-      // Ponta do pé levantada, calcanhar apoiado.
+      // Raised toe, resting heel.
       b.rect(5, 29, 2, 1, sh.base);
       b.set(5, 29, sh.lt);
       b.rect(7, 30, 2, 1, sh.base);
@@ -1031,7 +1031,7 @@ function drawLegsSide(dc: Dc, pants: Ramp, sh: Ramp, skinLeg: boolean): void {
     b.set(14, top + 2, pants.dk);
   }
   const leg = (dx: number, lift: number, dim: boolean) => {
-    // Perna de 3px do quadril (x≈11) ao pé deslocado `dx`.
+    // 3px leg from hip (x≈11) to foot shifted by `dx`.
     const pc = dim ? ramp(pants.dk, 0.07) : pants;
     const sc = dim ? ramp(p.skin.dk, 0.07) : p.skin;
     const shc = dim ? ramp(sh.dk, 0.08) : sh;
@@ -1061,7 +1061,7 @@ function drawTorso(dc: Dc): void {
   const ac = p.acc;
   const lx = r.lean;
   if (r.view === 'side') {
-    // Tronco de perfil (x 8..14), frente à esquerda.
+    // Torso in profile (x 8..14), front on left.
     b.rect(8 + lx, y, 7, 6, t.base);
     for (let yy = y; yy < y + 6; yy++) {
       b.set(8 + lx, yy, t.lt);
@@ -1109,7 +1109,7 @@ function drawTorso(dc: Dc): void {
     drawLanyard(dc);
     return;
   }
-  // Frente / costas: x 8..15.
+  // Front / back: x 8..15.
   b.rect(8, y, 8, 6, t.base);
   for (let yy = y; yy < y + 6; yy++) {
     b.set(8, yy, t.lt);
@@ -1239,7 +1239,7 @@ function drawLanyard(dc: Dc): void {
   }
 }
 
-// ----- itens segurados
+// ----- held items
 
 const MUG: readonly string[] = ['wwwo', 'cccw', 'rrrh', 'wwwh', 'www.'];
 const CUP: readonly string[] = ['bbb', 'www', 'www', '.w.'];
@@ -1270,7 +1270,7 @@ function drawItem(dc: Dc, x: number, y: number): void {
         b.rect(x, y, 2, 6, '#3f63a8');
         b.vline(x + 1, y + 1, y + 4, '#f2efe6');
       } else if (r.view === 'down' && r.twoHands) {
-        // Livro aberto diante do peito.
+        // Open book in front of chest.
         b.rect(x, y, 8, 5, '#f6f3ea');
         b.vline(x + 3, y, y + 4, '#cfc8b8');
         b.vline(x + 4, y, y + 4, '#e2dccd');
@@ -1318,7 +1318,7 @@ function drawItem(dc: Dc, x: number, y: number): void {
       b.stamp(side ? PHONE_SIDE : PHONE, x, y, PHONE_PAL);
       break;
     case 'lipstick':
-      // Batom deitado, ponta vermelha para o lado da boca (de costas não aparece).
+      // Lipstick lying flat, red tip toward mouth (does not appear from back).
       if (r.view !== 'up') b.stamp(['rgG'], x, y, { r: '#d8365a', g: '#f0c75a', G: '#b38a2e' });
       break;
     case 'comb':
@@ -1334,19 +1334,19 @@ function drawItem(dc: Dc, x: number, y: number): void {
   }
 }
 
-/** Controle de videogame (7x3): corpo grafite com brilho, direcional escuro e dois botões. */
+/** Game controller (7x3): graphite body with highlight, dark D-pad and two buttons. */
 const CONTROLLER: readonly string[] = ['.hLLLL.', 'LdLLrbL', 'cc...cc'];
 const CONTROLLER_SIDE: readonly string[] = ['hLL', 'cLr'];
 const CONTROLLER_PAL: Palette = { L: '#4c5263', h: '#737b8f', d: '#1d2029', r: '#e8545a', b: '#4f8fe6', c: '#363b48' };
-/** Celular (3x5) com a tela azul acesa; de perfil (2x4), a borda com a tela virada para o rosto. */
+/** Phone (3x5) with glowing blue screen; in profile (2x4), edge with screen facing face. */
 const PHONE: readonly string[] = ['dDd', 'dBd', 'dbd', 'dbd', 'ddd'];
 const PHONE_SIDE: readonly string[] = ['dB', 'db', 'db', 'dd'];
 const PHONE_PAL: Palette = { d: '#2b2f3a', D: '#5a6172', b: '#6fbdf0', B: '#c8eaff' };
 
 /**
- * Gestos do jokenpô em pele (L = luz, s = base, S = sombra), relativos à mão (canto do pincel 2x2).
- * De perfil apontam para a frente (esquerda); de costas usam o mesmo desenho espelhado (para a
- * direita, braço aberto para o lado); de frente aparecem diante do peito.
+ * Rock-paper-scissors gestures in skin (L = light, s = base, S = shadow), relative to hand (2x2 brush corner).
+ * In profile they point forward (left); from back they use same mirrored drawing (to the
+ * right, arm extended to side); from front they appear in front of chest.
  */
 interface GestureTpl {
   rows: readonly string[];
@@ -1354,11 +1354,11 @@ interface GestureTpl {
   dy: number;
 }
 const GESTURE_SIDE: Readonly<Record<'rock' | 'paper' | 'scissors', GestureTpl>> = {
-  // Punho redondo, maior que a mão parada.
+  // Round fist, larger than idle hand.
   rock: { rows: ['.LLs', 'LsLs', 'sssS', '.SS.'], dx: -2, dy: -1 },
-  // Mão aberta em leque: quatro dedos separados e o polegar para cima.
+  // Fan open hand: four separated fingers and thumb up.
   paper: { rows: ['..L.L.', 'L.L.Ls', '.LsLss', 'LsssSS', '.SSSS.'], dx: -4, dy: -3 },
-  // Indicador e médio abertos em V para a frente.
+  // Index and middle fingers in V pointing forward.
   scissors: { rows: ['L....', '.L...', '..Lss', '.SsSS', 'S....'], dx: -3, dy: -2 },
 };
 const GESTURE_FRONT: Readonly<Record<'rock' | 'paper' | 'scissors', GestureTpl>> = {
@@ -1382,12 +1382,12 @@ function drawGesture(dc: Dc, kind: 'rock' | 'paper' | 'scissors', hx: number, hy
     const g = GESTURE_SIDE[kind];
     rows = g.rows;
     flip = r.view === 'up';
-    // Espelhado em torno do centro da mão (o pincel ocupa hx..hx+1).
+    // Mirrored around hand center (brush occupies hx..hx+1).
     x0 = flip ? hx - g.dx - rows[0].length + 2 : hx + g.dx;
     hy += g.dy;
   }
   b.stamp(rows, x0, hy, pal, flip);
-  // Contorno próprio onde o gesto passa por cima da roupa (o contorno geral só pega o lado de fora).
+  // Custom outline where gesture crosses over clothing (general outline only catches exterior).
   const ink = mix(p.skin.dd, '#1d2433', 0.45);
   const w = rows[0].length;
   const on = (cx: number, cy: number) => {
@@ -1422,24 +1422,24 @@ function pixelKey(b: PixelBuf, x: number, y: number): number {
 }
 
 /**
- * Balde de pipoca (6x7, canto superior esquerdo = início da pipoca): pipocas transbordando por cima,
- * aro claro e listras verticais vermelho/branco que afinam para baixo. Luz do alto-esquerda.
+ * Popcorn bucket (6x7, top-left corner = start of popcorn): popcorn overflowing at top,
+ * light rim and red/white vertical stripes tapering downward. Light from top-left.
  */
 const POPCORN: readonly string[] = ['.pk.p.', 'kpypkK', 'aAAAAa', 'lwrwrW', 'lwrwrW', 'lwrwrW', '.wrwr.'];
 const POPCORN_PAL: Palette = {
-  p: '#fff9e6', // pipoca (luz)
-  k: '#f3e3b8', // pipoca (sombra)
+  p: '#fff9e6', // popcorn (light)
+  k: '#f3e3b8', // popcorn (shadow)
   K: '#e2cc92',
-  y: '#ffd75e', // manteiga
-  a: '#e9e3d6', // aro (bordas)
-  A: '#fbf8f1', // aro
-  l: '#ef6457', // listra vermelha iluminada (borda esquerda)
-  r: '#d8413f', // listra vermelha
-  w: '#f6f1e6', // listra branca
-  W: '#cfc6b6', // listra branca na sombra (borda direita)
+  y: '#ffd75e', // butter
+  a: '#e9e3d6', // rim (edges)
+  A: '#fbf8f1', // rim
+  l: '#ef6457', // highlighted red stripe (left edge)
+  r: '#d8413f', // red stripe
+  w: '#f6f1e6', // white stripe
+  W: '#cfc6b6', // white stripe in shadow (right edge)
 };
 
-/** Posição do item em relação à mão (mão = último ponto do braço B, em coordenadas desenhadas). */
+/** Item position relative to hand (hand = last point of arm B, in drawn coordinates). */
 function itemPos(dc: Dc): Pt | null {
   const { r } = dc;
   const it = r.held;
@@ -1466,7 +1466,7 @@ function itemPos(dc: Dc): Pt | null {
     case 'paddle':
       return r.view === 'side' ? [hx - 2, hy - 5] : [hx + 1, hy - 4];
     case 'popcorn':
-      // Segurado pela lateral do balde (a mão fica na borda de trás/esquerda).
+      // Held by side of bucket (hand is on back/left edge).
       return r.view === 'side' ? [hx - 5, hy - 4] : [hx + 1, hy - 4];
     case 'controller':
       return r.view === 'side' ? [hx - 2, hy] : [hx - 2, hy];
@@ -1481,9 +1481,9 @@ function itemPos(dc: Dc): Pt | null {
   }
 }
 
-// ---------------------------------------------------------------- composição
+// ---------------------------------------------------------------- composition
 
-/** Usa o mesmo rig da cabeça para acompanhar quique, cochilo e poses sentadas. */
+/** Uses same head rig to follow bounce, doze, and seated poses. */
 function drawCostume(dc: Dc, costume: CharacterFrameRequest['costume']): void {
   if (!costume) return;
   const { b, r } = dc;
@@ -1511,7 +1511,7 @@ function drawCostume(dc: Dc, costume: CharacterFrameRequest['costume']): void {
     b.vline(x + 8, y + 1, y + 4, '#f9ae48');
     b.hline(x + 2, x + 11, y + 5, '#8d4930');
   } else {
-    // Gola da capa: rosto e crachá continuam visíveis.
+    // Cape collar: face and lanyard remain visible.
     b.rect(x, y + 12, 2, 5, '#702743');
     b.rect(x + 12, y + 12, 2, 5, '#702743');
   }
@@ -1531,7 +1531,7 @@ export function renderCharacter(req: CharacterFrameRequest): BufSprite {
   const sr = dc.p.top;
   const ip = itemPos(dc);
 
-  // 1) Atrás de tudo: cabelo longo (frente), item nas costas.
+  // 1) Behind everything: long hair (front), item on back.
   if (req.costume === 'vampire') {
     b.rect(5 + r.lean, 18 + r.ub, 14, 8, '#35283e');
     b.rect(6 + r.lean, 19 + r.ub, 12, 6, '#702743');
@@ -1548,8 +1548,8 @@ export function renderCharacter(req: CharacterFrameRequest): BufSprite {
   };
 
   if (view !== 'side' && r.itemAt) {
-    // Item em posição fixa (pipoca na pose 'wait'). De costas: balde e braços antes da cabeça (a mão
-    // que vai à boca some atrás dela). De frente: cabeça, balde, braço que abraça e a mão por cima.
+    // Item in fixed position (popcorn in 'wait' pose). From back: bucket and arms before head (hand
+    // moving to mouth disappears behind it). From front: head, bucket, hugging arm, and hand on top.
     drawLegs(dc);
     drawTorso(dc);
     if (view === 'up') {
@@ -1592,12 +1592,12 @@ export function renderCharacter(req: CharacterFrameRequest): BufSprite {
     drawHair(dc, 'front');
     drawAccessory(dc);
     drawCostume(dc, req.costume);
-    // Braços cruzados por cima do cabelo comprido que cai no peito (a mão que bate fica visível).
+    // Crossed arms over long hair falling on chest (tapping hand remains visible).
     if (r.crossFront !== null) drawCrossedArms(dc, sr, sleeve, r.crossFront === 1);
     if (ip && !r.itemBehind) {
       drawItem(dc, ip[0], ip[1]);
       if (r.twoHands) {
-        // Mãos por cima das bordas do item.
+        // Hands over item edges.
         drawArm(dc, r.armA, sr, sleeve);
         drawArm(dc, r.armB, sr, sleeve);
       }

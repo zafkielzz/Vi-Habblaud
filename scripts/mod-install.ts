@@ -1,38 +1,38 @@
-// Instala (ou remove) o mod do Habblaud no Claude Code de cada conta. Roda no HOST, com tsx:
+// Installs (or removes) the Habblaud mod in each account's Claude Code. Runs on the HOST, with tsx:
 //
-//   npm run mod:install      # marketplace "habblaud" (esta pasta) + plugins habblaud, habblaud-permissoes e
+//   npm run mod:install      # "habblaud" marketplace (this folder) + plugins habblaud, habblaud-permissoes and
 //                            # habblaud-mensagens
-//   npm run mod:uninstall    # tira os três plugins e o marketplace de cada conta
-//   npm run mod:status       # por conta: marketplace, plugins (e versões) e restos do jeito antigo
-//   (opções: --sem-permissoes, --sem-mensagens, --conta <pasta>, --dry-run, --claude <comando>)
+//   npm run mod:uninstall    # removes the three plugins and the marketplace from each account
+//   npm run mod:status       # per account: marketplace, plugins (and versions) and remnants of the legacy way
+//   (options: --sem-permissoes, --sem-mensagens, --conta <folder>, --dry-run, --claude <command>)
 //
-// Tudo passa pelo CLI do próprio Claude Code (`claude plugin ...`), rodado uma vez por conta com o
-// CLAUDE_CONFIG_DIR daquela conta, como faz o atalho do shell (`alias d='CLAUDE_CONFIG_DIR=... claude'`). Assim
-// quem grava os registros (enabledPlugins e extraKnownMarketplaces no settings.json, <conta>/plugins/*.json) é o
-// Claude Code, no formato que ele conhece: este script não edita esses campos.
+// Everything goes through Claude Code's own CLI (`claude plugin ...`), run once per account with that account's
+// CLAUDE_CONFIG_DIR, like the shell alias does (`alias d='CLAUDE_CONFIG_DIR=... claude'`). That way
+// Claude Code records the registrations (enabledPlugins and extraKnownMarketplaces in settings.json,
+// <account>/plugins/*.json) in its own format: this script does not edit those fields.
 //
-// O marketplace é ESTA pasta (.claude-plugin/marketplace.json na raiz do repositório), adicionado como diretório
-// local: o Claude Code carrega os plugins direto das pastas em mod/, sem copiar. Depois de um `git pull`, sessões
-// novas (ou /reload-plugins) já rodam o código novo; o `claude plugin update` acerta a versão registrada (o
-// `npm run docker:up` faz isso sozinho para quem já instalou).
+// The marketplace is THIS folder (.claude-plugin/marketplace.json at repo root), added as a local directory:
+// Claude Code loads plugins directly from folders in mod/, without copying. After a `git pull`, new
+// sessions (or /reload-plugins) already run the new code; `claude plugin update` updates the registered version
+// (`npm run docker:up` does this automatically for existing installs).
 //
-// Mensagens pelo escritório (habblaud-mensagens, o plugin que digita na sessão em seu nome): vai junto por padrão;
-// com --sem-mensagens fica de fora, e um já instalado continua (como o de permissões com --sem-permissoes). O
-// docker:up nunca o instala sozinho: numa conta com o mod e sem ele, só dá a dica de rodar o mod:install.
+// Messages from the office (habblaud-mensagens, the plugin that types into the session on your behalf): included by
+// default; excluded with --sem-mensagens, and an already installed one stays (like permissions with --sem-permissoes).
+// docker:up never installs it on its own: on an account with mod but without it, it only suggests running mod:install.
 //
-// Migração do jeito antigo: o mod grava o uso no mesmo arquivo do tap de statusline (usage:install) e o plugin
-// de permissões faz o mesmo que o settings hook PermissionRequest (hooks:install). Na instalação, cada um sai do
-// settings.json da conta (com backup), pelas funções dos instaladores antigos, para não ficarem dois capturando
-// o uso nem dois respondendo o mesmo pedido. Com --sem-permissoes, o hook antigo fica como está.
+// Migration from the legacy way: the mod writes usage to the same file as the statusline tap (usage:install) and the
+// permissions plugin does the same as the PermissionRequest settings hook (hooks:install). On install, each is
+// removed from the account's settings.json (with backup) via legacy installer functions, preventing double usage
+// capture or two responders for the same request. With --sem-permissoes, the legacy hook remains as is.
 //
-// Nome antigo (CodeTown, até a 0.3.2): o install tira os plugins codetown e codetown-permissoes e o marketplace
-// codetown (esta mesma pasta, com o nome que o manifesto não tem mais) ANTES de adicionar o habblaud, e leva
-// ~/.codetown para ~/.habblaud. O uninstall também os tira, o status os mostra e o docker:up só avisa.
+// Legacy name (CodeTown, up to 0.3.2): install removes plugins codetown and codetown-permissoes and marketplace
+// codetown (this same folder, under its former name) BEFORE adding habblaud, and moves ~/.codetown to
+// ~/.habblaud. uninstall also removes them, status shows them, and docker:up only warns.
 //
-// Status (e o plano de cada conta): vem de `claude plugin list --json` e `claude plugin marketplace list --json`,
-// saídas documentadas que já resolvem escopo, ligado/desligado e CLAUDE_CODE_PLUGIN_CACHE_DIR. Os arquivos
-// <conta>/plugins/installed_plugins.json e known_marketplaces.json são internos do Claude Code e podem mudar de
-// formato (o primeiro já está na versão 2).
+// Status (and each account's plan): comes from `claude plugin list --json` and `claude plugin marketplace list --json`,
+// documented outputs that already resolve scope, enabled/disabled, and CLAUDE_CODE_PLUGIN_CACHE_DIR.
+// <account>/plugins/installed_plugins.json and known_marketplaces.json are Claude Code internals and may change
+// format (the former is already on version 2).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -56,52 +56,52 @@ import { tr } from '../shared/i18n';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Nome do marketplace em .claude-plugin/marketplace.json (contrato com mod/). */
+/** Marketplace name in .claude-plugin/marketplace.json (contract with mod/). */
 export const MARKETPLACE = 'habblaud';
-/** O mod: uso do plano, aviso de "precisa de você" no terminal e /habblaud. */
+/** The mod: plan usage, "needs you" terminal notice and /habblaud. */
 export const MOD_PLUGIN = `habblaud@${MARKETPLACE}`;
-/** O settings hook PermissionRequest de responder pelo escritório, empacotado como plugin. */
+/** The PermissionRequest settings hook to answer from the office, packaged as a plugin. */
 export const PERMISSIONS_PLUGIN = `habblaud-permissoes@${MARKETPLACE}`;
-/** Mandar mensagens pelo escritório: leva para a sessão, como suas, as mensagens digitadas no Habblaud. */
+/** Send messages from the office: relays messages typed in Habblaud to the session as yours. */
 export const MESSAGES_PLUGIN = `habblaud-mensagens@${MARKETPLACE}`;
-/** Os plugins do Habblaud, na ordem da saída (status, remoção, atualização). */
+/** Habblaud plugins in output order (status, removal, update). */
 export const PLUGINS = [MOD_PLUGIN, PERMISSIONS_PLUGIN, MESSAGES_PLUGIN] as const;
-/** Marketplace do nome antigo (CodeTown, até a 0.3.2): a mesma pasta, registrada com o nome que ela tinha. */
+/** Marketplace under legacy name (CodeTown, up to 0.3.2): same folder, registered with its former name. */
 export const LEGACY_MARKETPLACE = LEGACY_NAME;
-/** Os plugins que vinham dele (o mod e o de permissões, com o nome antigo). */
+/** Plugins that came from it (the mod and permissions plugin, under legacy name). */
 export const LEGACY_PLUGINS = [`${LEGACY_NAME}@${LEGACY_MARKETPLACE}`, `${LEGACY_NAME}-permissoes@${LEGACY_MARKETPLACE}`] as const;
-/** Primeira versão do Claude Code (terminal) que carrega mods. */
+/** First Claude Code version (terminal) that loads mods. */
 export const MIN_CLAUDE_VERSION = '2.1.287';
-/** Os plugins vão sempre para o escopo do usuário: valem em todos os projetos da conta. */
+/** Plugins always go into user scope: valid in all projects of the account. */
 const SCOPE = 'user';
-/** Tempo máximo de cada chamada ao CLI (o add/update de um diretório local leva poucos segundos). */
+/** Timeout for each CLI call (add/update of a local directory takes a few seconds). */
 const CLI_TIMEOUT_MS = 120_000;
 
-const USAGE = tr('Uso: npm run mod:<install|uninstall|status> [-- opções]\n\n  install     instala o mod do Habblaud no Claude Code de cada conta (marketplace desta pasta + plugins)\n              e tira o que ele substitui: o tap de statusline e o hook de permissão antigos e o mod do\n              nome antigo (codetown)\n  uninstall   tira os plugins e o marketplace do Habblaud de cada conta (e os do nome antigo, se sobraram)\n  status      mostra, por conta, o marketplace, os plugins (e versões) e o que sobrou do jeito antigo\n\nOpções:\n  --sem-permissoes   não instala o plugin de responder permissões pelo escritório (e mantém o hook antigo)\n  --sem-mensagens    não instala o plugin de mandar mensagens pelo escritório (um já instalado continua)\n  --conta <pasta>    só esta conta (ex.: --conta ~/.claude-conta2); pode repetir\n  --dry-run          mostra o que faria, sem instalar nem gravar nada\n  --claude <cmd>     comando do Claude Code (padrão: claude, do PATH)\n  -h, --help         mostra esta ajuda\n\nPrecisa do Claude Code {0} ou mais novo. Em versões anteriores, use o jeito antigo:\nnpm run usage:install (uso ao vivo) e npm run hooks:install (responder permissões); mandar mensagens pelo\nescritório só existe com o mod.\n\nContas: as mesmas do servidor (~/.claude* com projects/ ou sessions/, CLAUDE_CONFIG_DIR ou\nHABBLAUD_CLAUDE_DIRS). Uso capturado em HABBLAUD_USAGE_DIR (padrão ~/.habblaud/usage).', [MIN_CLAUDE_VERSION]);
+const USAGE = tr("Usage: npm run mod:<install|uninstall|status> [-- options]\n\n  install     installs the Habblaud mod into each account's Claude Code (this folder's marketplace + plugins)\n              and removes what it replaces: the old statusline tap, the old permission hook and the mod under\n              the old name (codetown)\n  uninstall   removes the Habblaud plugins and marketplace from each account (and the old-name ones, if any are left)\n  status      shows, per account, the marketplace, the plugins (and versions) and what's left of the old way\n\nOptions:\n  --sem-permissoes   doesn't install the plugin for answering permissions from the office (and keeps the old hook)\n  --sem-mensagens    doesn't install the plugin for sending messages from the office (one already installed stays)\n  --conta <folder>   only this account (e.g. --conta ~/.claude-conta2); can be repeated\n  --dry-run          shows what it would do, without installing or writing anything\n  --claude <cmd>     Claude Code command (default: claude, from PATH)\n  -h, --help         shows this help\n\nRequires Claude Code {0} or newer. On earlier versions, use the old way:\nnpm run usage:install (live usage) and npm run hooks:install (answer permissions); sending messages from the\noffice only exists with the mod.\n\nAccounts: the same as the server's (~/.claude* with projects/ or sessions/, CLAUDE_CONFIG_DIR or\nHABBLAUD_CLAUDE_DIRS). Usage captured in HABBLAUD_USAGE_DIR (default ~/.habblaud/usage).", [MIN_CLAUDE_VERSION]);
 
 // ---------------------------------------------------------------------------------------------
-// O CLI do Claude Code (injetável: os testes nunca chamam o de verdade)
+// Claude Code CLI (injectable: tests never call the real one)
 // ---------------------------------------------------------------------------------------------
 
 export interface ClaudeResult {
-  /** Código de saída (null se nem chegou a rodar ou foi morto). */
+  /** Exit code (null if never ran or was killed). */
   code: number | null;
   stdout: string;
   stderr: string;
-  /** Falha ao iniciar o processo (ex.: `claude` fora do PATH). */
+  /** Process launch failure (e.g. `claude` not in PATH). */
   error?: string;
 }
 
-/** Roda `claude <args>` com o ambiente dado (o CLAUDE_CONFIG_DIR da conta vem nele). */
+/** Runs `claude <args>` with given environment (account's CLAUDE_CONFIG_DIR is included). */
 export type ClaudeRunner = (args: string[], env: NodeJS.ProcessEnv) => ClaudeResult;
 
-/** O runner de verdade. stdin fechado: nada fica esperando uma resposta no terminal. */
+/** The real runner. Closed stdin: nothing waits for a terminal response. */
 export function makeClaudeRunner(cmd = 'claude'): ClaudeRunner {
   return (args, env) => {
     const r = spawnSync(cmd, args, { env, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
     if (r.error) {
       const code = (r.error as NodeJS.ErrnoException).code;
-      const error = code === 'ENOENT' ? tr('o comando "{0}" não foi encontrado no PATH', [cmd]) : code === 'ETIMEDOUT' ? tr('"{0} {1}" não terminou em {2} s', [cmd, args.join(' '), CLI_TIMEOUT_MS / 1000]) : r.error.message;
+      const error = code === 'ENOENT' ? tr('the "{0}" command wasn\'t found in PATH', [cmd]) : code === 'ETIMEDOUT' ? tr('"{0} {1}" didn\'t finish within {2} s', [cmd, args.join(' '), CLI_TIMEOUT_MS / 1000]) : r.error.message;
       return { code: null, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error };
     }
     return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
@@ -109,9 +109,9 @@ export function makeClaudeRunner(cmd = 'claude'): ClaudeRunner {
 }
 
 /**
- * Ambiente do CLI para uma conta. A conta padrão (~/.claude) roda SEM CLAUDE_CONFIG_DIR, como o `claude` puro:
- * com a variável apontando para ~/.claude, o Claude Code passaria a usar ~/.claude/.claude.json em vez de
- * ~/.claude.json. E a variável herdada (ex.: rodando de dentro de uma sessão da outra conta) nunca vaza.
+ * CLI environment for an account. The default account (~/.claude) runs WITHOUT CLAUDE_CONFIG_DIR, like plain `claude`:
+ * with the variable pointing to ~/.claude, Claude Code would use ~/.claude/.claude.json instead of
+ * ~/.claude.json. And the inherited variable (e.g. running from within another account's session) never leaks.
  */
 export function accountEnv(env: NodeJS.ProcessEnv, dir: string, home: string): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
@@ -121,7 +121,7 @@ export function accountEnv(env: NodeJS.ProcessEnv, dir: string, home: string): N
 }
 
 // ---------------------------------------------------------------------------------------------
-// Funções puras (testadas em server/test/mod-install.test.ts)
+// Pure functions (tested in server/test/mod-install.test.ts)
 // ---------------------------------------------------------------------------------------------
 
 type Rec = Record<string, unknown>;
@@ -144,14 +144,14 @@ export function versionAtLeast(version: string, min: string): boolean {
   return true;
 }
 
-/** Sem códigos de cor do terminal. */
+/** Without terminal color codes. */
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
 }
 
 /**
- * JSON da saída do CLI, com tolerância: a saída inteira, ou a partir da primeira linha que abre um JSON (avisos
- * antes dele), ou só a última linha (formato de resultado do `--json` das ações). undefined se nada servir.
+ * CLI output JSON, with tolerance: entire output, or from first line starting a JSON (warnings
+ * before it), or just the last line (result format of action `--json`). undefined if nothing works.
  */
 export function parseJsonOutput(stdout: string): unknown {
   const text = stripAnsi(stdout).trim();
@@ -174,20 +174,20 @@ export function parseJsonOutput(stdout: string): unknown {
   return tryParse(lines[lines.length - 1]);
 }
 
-/** Uma instalação de plugin, como `claude plugin list --json` mostra (só o que usamos). */
+/** A plugin installation, as `claude plugin list --json` shows (only what we use). */
 export interface PluginInfo {
   id: string;
   version?: string;
   scope?: string;
   enabled: boolean;
-  /** Pasta de onde carrega, quando lido no lugar a partir de um marketplace local (Claude Code 2.1.289+). */
+  /** Folder it loads from, when read in-place from a local marketplace (Claude Code 2.1.289+). */
   readFromFolder?: string;
-  /** Versão do manifesto nessa pasta (pode ser mais nova que a registrada). */
+  /** Manifest version in that folder (may be newer than registered version). */
   folderVersion?: string;
   errors: string[];
 }
 
-/** Lista de plugins instalados; aceita o array ou o objeto de `--available` ({installed: [...]}). */
+/** Installed plugin list; accepts array or `--available` object ({installed: [...]}). */
 export function parsePluginList(stdout: string): PluginInfo[] | undefined {
   const raw = parseJsonOutput(stdout);
   const list = Array.isArray(raw) ? raw : rec(raw) && Array.isArray(rec(raw)!.installed) ? (rec(raw)!.installed as unknown[]) : undefined;
@@ -214,7 +214,7 @@ export function parsePluginList(stdout: string): PluginInfo[] | undefined {
 export interface MarketplaceInfo {
   name: string;
   source?: string;
-  /** Pasta (marketplaces de diretório ou arquivo local). */
+  /** Folder (directory or local file marketplaces). */
   path?: string;
 }
 
@@ -234,27 +234,27 @@ export function parseMarketplaceList(stdout: string): MarketplaceInfo[] | undefi
   return out;
 }
 
-/** O que uma conta tem do Habblaud no Claude Code. */
+/** What an account has of Habblaud in Claude Code. */
 export interface AccountState {
   marketplace?: MarketplaceInfo;
-  /** O marketplace do nome antigo (codetown), se ainda estiver registrado. */
+  /** Legacy name marketplace (codetown), if still registered. */
   legacyMarketplace?: MarketplaceInfo;
   plugins: PluginInfo[];
 }
 
-/** A instalação de `id` no escopo do usuário (o único que este script gerencia). */
+/** Installation of `id` in user scope (the only one this script manages). */
 export function userInstall(state: AccountState, id: string): PluginInfo | undefined {
   return state.plugins.find((p) => p.id === id && (p.scope === SCOPE || p.scope === undefined));
 }
 
-/** Plugins do nome antigo no escopo do usuário (onde o mod:install da 0.3 os pôs). */
+/** Legacy name plugins in user scope (where 0.3 mod:install put them). */
 export function legacyPlugins(state: AccountState): PluginInfo[] {
   return LEGACY_PLUGINS.map((id) => userInstall(state, id)).filter((p): p is PluginInfo => !!p);
 }
 
 /**
- * Os restos do nome antigo numa frase ("marketplace codetown, codetown@codetown 0.3.2"), ou undefined se não
- * sobrou nada. `where` descreve a pasta do marketplace (o status diz se é esta).
+ * Remnants of the legacy name in a phrase ("marketplace codetown, codetown@codetown 0.3.2"), or undefined
+ * if nothing remains. `where` describes the marketplace folder (status indicates if it is this one).
  */
 export function legacySummary(state: AccountState, where?: (m: MarketplaceInfo) => string): string | undefined {
   const parts = legacyPlugins(state).map((p) => `${p.id}${p.version ? ` ${p.version}` : ''}`);
@@ -263,47 +263,47 @@ export function legacySummary(state: AccountState, where?: (m: MarketplaceInfo) 
   return parts.length ? parts.join(', ') : undefined;
 }
 
-/** Uma chamada ao CLI, com a frase que conta o que ela faz. */
+/** A CLI call, with the phrase describing what it does. */
 export interface CliStep {
   args: string[];
-  /** "habblaud: instalado" (vira ✓, ~ ou ✗ na saída). */
+  /** "habblaud: installed" (becomes ✓, ~ or ✗ in output). */
   message: string;
-  /** Plugin que depende deste passo (falhou = não conta como instalado). */
+  /** Plugin that depends on this step (failed = does not count as installed). */
   plugin?: string;
-  /** Se falhar, os passos seguintes da instalação rodam assim mesmo (a falha ainda conta no fim). */
+  /** If it fails, subsequent installation steps run anyway (failure still counts in the end). */
   keepGoing?: boolean;
 }
 
-/** Item do plano, na ordem da saída: uma chamada ao CLI ou algo que já está certo (vira "="). */
+/** Plan item in output order: a CLI call or something already correct (becomes "="). */
 export type PlanItem = CliStep | { unchanged: string };
 
 export interface InstallPlan {
   items: PlanItem[];
-  /** Avisos que não impedem a instalação. */
+  /** Warnings that do not prevent installation. */
   notes: string[];
-  /** Plugins que ficam instalados se todos os passos derem certo. */
+  /** Plugins that remain installed if all steps succeed. */
   plugins: string[];
 }
 
-/** Só as chamadas ao CLI de um plano. */
+/** Only the CLI calls of a plan. */
 export function cliSteps(plan: InstallPlan): CliStep[] {
   return plan.items.filter((i): i is CliStep => 'args' in i);
 }
 
 export interface PlanOptions {
-  /** Raiz do repositório (onde está .claude-plugin/marketplace.json). */
+  /** Repo root (where .claude-plugin/marketplace.json is). */
   root: string;
-  /** Versão do package.json (= versão dos plugins). */
+  /** package.json version (= plugin version). */
   version: string;
-  /** Instalar também o plugin de permissões. */
+  /** Also install permissions plugin. */
   permissions: boolean;
-  /** Instalar também o plugin de mensagens. */
+  /** Also install messages plugin. */
   messages: boolean;
-  /** Compara pastas (padrão: caminho real). */
+  /** Compares folders (default: real path). */
   sameDir?: (a: string, b: string) => boolean;
 }
 
-/** Mesma pasta, resolvendo symlinks quando der. */
+/** Same folder, resolving symlinks when possible. */
 export function sameDir(a: string, b: string): boolean {
   if (resolve(a) === resolve(b)) return true;
   const real = (p: string) => {
@@ -319,44 +319,43 @@ export function sameDir(a: string, b: string): boolean {
 const shortName = (id: string) => id.split('@')[0];
 
 /**
- * Passos que tiram os restos do nome antigo: os plugins (escopo do usuário) e depois o marketplace. Um plugin
- * que não sair não segura os passos seguintes: tirar o marketplace leva junto o que veio dele.
+ * Steps that remove remnants of legacy name: plugins (user scope) then marketplace. A plugin
+ * that fails to uninstall does not block subsequent steps: removing marketplace removes what came from it.
  */
 function legacySteps(state: AccountState): CliStep[] {
   const steps: CliStep[] = legacyPlugins(state).map((p) => ({
     args: ['plugin', 'uninstall', p.id, '--scope', SCOPE],
-    message: tr('{0} (nome antigo): removido', [shortName(p.id)]),
+    message: tr('{0} (old name): removed', [shortName(p.id)]),
     keepGoing: true,
   }));
   if (state.legacyMarketplace) {
-    steps.push({ args: ['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE], message: tr('marketplace {0} (nome antigo): removido', [LEGACY_MARKETPLACE]) });
+    steps.push({ args: ['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE], message: tr('marketplace {0} (old name): removed', [LEGACY_MARKETPLACE]) });
   }
   return steps;
 }
 
 /**
- * Passos de instalação de uma conta, a partir do que ela já tem. Os restos do nome antigo saem primeiro. O
- * marketplace é adicionado (ou, se já existe, tem o catálogo relido; se apontava para outra pasta, passa a
- * apontar para esta). Cada plugin é instalado, religado (se estava desligado) ou atualizado (se a versão
- * registrada difere da do package.json).
+ * Installation steps for an account, based on what it already has. Legacy name remnants are removed first.
+ * Marketplace is added (or, if it exists, catalog is reloaded; if pointing to another folder, points
+ * to this one). Each plugin is installed, re-enabled (if disabled) or updated (if registered version
+ * differs from package.json).
  */
 export function planInstall(state: AccountState, o: PlanOptions): InstallPlan {
   const same = o.sameDir ?? sameDir;
   const plan: InstallPlan = { items: [], notes: [], plugins: [] };
-  // O marketplace codetown aponta para esta mesma pasta: ele sai antes de o habblaud entrar, para nunca ficarem
-  // dois nomes registrados para a mesma pasta (um deles que o manifesto não tem mais).
+  // The codetown marketplace points to this same folder: it is removed before habblaud is added,
+  // preventing two registered names for the same folder (one no longer in manifest).
   plan.items.push(...legacySteps(state));
   const m = state.marketplace;
   if (!m) {
-    plan.items.push({ args: ['plugin', 'marketplace', 'add', o.root], message: tr('marketplace {0}: adicionado (esta pasta)', [MARKETPLACE]) });
+    plan.items.push({ args: ['plugin', 'marketplace', 'add', o.root], message: tr('marketplace {0}: added (this folder)', [MARKETPLACE]) });
   } else if (m.path && same(m.path, o.root)) {
-    plan.items.push({ args: ['plugin', 'marketplace', 'update', MARKETPLACE], message: tr('marketplace {0}: catálogo relido desta pasta', [MARKETPLACE]) });
+    plan.items.push({ args: ['plugin', 'marketplace', 'update', MARKETPLACE], message: tr('marketplace {0}: catalog reloaded from this folder', [MARKETPLACE]) });
   } else {
-    // Outra pasta (o Habblaud mudou de lugar) ou outra origem: o add com a mesma chave só troca a origem e
-    // mantém os plugins instalados.
+    // Another folder (Habblaud moved) or another source: add with same key changes source and keeps plugins.
     plan.items.push({
       args: ['plugin', 'marketplace', 'add', o.root],
-      message: tr('marketplace {0}: passou a apontar para esta pasta (antes: {1})', [MARKETPLACE, m.path ?? m.source ?? tr('outra origem')]),
+      message: tr('marketplace {0}: now points to this folder (before: {1})', [MARKETPLACE, m.path ?? m.source ?? tr('another source')]),
     });
   }
   const wanted = [MOD_PLUGIN, ...(o.permissions ? [PERMISSIONS_PLUGIN] : []), ...(o.messages ? [MESSAGES_PLUGIN] : [])];
@@ -364,23 +363,23 @@ export function planInstall(state: AccountState, o: PlanOptions): InstallPlan {
     const name = shortName(id);
     const cur = userInstall(state, id);
     if (!cur) {
-      plan.items.push({ args: ['plugin', 'install', id, '--scope', SCOPE], message: tr('{0}: instalado', [name]), plugin: id });
+      plan.items.push({ args: ['plugin', 'install', id, '--scope', SCOPE], message: tr('{0}: installed', [name]), plugin: id });
       plan.plugins.push(id);
       continue;
     }
     plan.plugins.push(id);
     let touched = false;
     if (!cur.enabled) {
-      plan.items.push({ args: ['plugin', 'enable', id, '--scope', SCOPE], message: tr('{0}: religado (estava desligado)', [name]), plugin: id });
+      plan.items.push({ args: ['plugin', 'enable', id, '--scope', SCOPE], message: tr('{0}: re-enabled (was disabled)', [name]), plugin: id });
       touched = true;
     }
     if (cur.version !== o.version) {
-      plan.items.push({ args: ['plugin', 'update', id, '--scope', SCOPE], message: tr('{0}: atualizado de {1} para {2}', [name, cur.version ?? '?', o.version]), plugin: id });
+      plan.items.push({ args: ['plugin', 'update', id, '--scope', SCOPE], message: tr('{0}: updated from {1} to {2}', [name, cur.version ?? '?', o.version]), plugin: id });
       touched = true;
     }
-    if (!touched) plan.items.push({ unchanged: tr('{0}: já instalado na versão {1}', [name, o.version]) });
+    if (!touched) plan.items.push({ unchanged: tr('{0}: already installed at version {1}', [name, o.version]) });
   }
-  // Com --sem-permissoes (ou --sem-mensagens), um plugin desses já instalado continua (e acompanha a versão do mod).
+  // With --sem-permissoes (or --sem-mensagens), an already installed plugin stays (and tracks mod version).
   const left: Array<[id: string, flag: string]> = [];
   if (!o.permissions) left.push([PERMISSIONS_PLUGIN, '--sem-permissoes']);
   if (!o.messages) left.push([MESSAGES_PLUGIN, '--sem-mensagens']);
@@ -388,163 +387,162 @@ export function planInstall(state: AccountState, o: PlanOptions): InstallPlan {
     const cur = userInstall(state, id);
     if (!cur) continue;
     if (cur.version !== o.version) {
-      plan.items.push({ args: ['plugin', 'update', id, '--scope', SCOPE], message: tr('{0}: atualizado de {1} para {2}', [shortName(id), cur.version ?? '?', o.version]), plugin: id });
+      plan.items.push({ args: ['plugin', 'update', id, '--scope', SCOPE], message: tr('{0}: updated from {1} to {2}', [shortName(id), cur.version ?? '?', o.version]), plugin: id });
     }
     plan.plugins.push(id);
-    plan.notes.push(tr('{0} já estava instalado e continua ({1} não o remove; para tirar: claude plugin uninstall {2})', [shortName(id), flag, id]));
+    plan.notes.push(tr("{0} was already installed and stays ({1} doesn't remove it; to remove it: claude plugin uninstall {2})", [shortName(id), flag, id]));
   }
   return plan;
 }
 
 /**
- * Passos de remoção: os restos do nome antigo (se houver), os plugins do escopo do usuário e o marketplace, só o
- * que existir. (Tirar o marketplace já desinstalaria o que veio dele, mas um passo por plugin deixa claro, na
- * saída, o que saiu.)
+ * Removal steps: remnants of legacy name (if any), user-scope plugins and marketplace, only
+ * what exists. (Removing marketplace would already uninstall its plugins, but a step per plugin clarifies output.)
  */
 export function planUninstall(state: AccountState): InstallPlan {
   const plan: InstallPlan = { items: [...legacySteps(state)], notes: [], plugins: [] };
   for (const id of PLUGINS) {
     const name = shortName(id);
-    if (userInstall(state, id)) plan.items.push({ args: ['plugin', 'uninstall', id, '--scope', SCOPE], message: tr('{0}: removido', [name]), plugin: id });
-    else plan.items.push({ unchanged: tr('{0}: não estava instalado', [name]) });
+    if (userInstall(state, id)) plan.items.push({ args: ['plugin', 'uninstall', id, '--scope', SCOPE], message: tr('{0}: removed', [name]), plugin: id });
+    else plan.items.push({ unchanged: tr("{0}: wasn't installed", [name]) });
   }
-  if (state.marketplace) plan.items.push({ args: ['plugin', 'marketplace', 'remove', MARKETPLACE], message: tr('marketplace {0}: removido', [MARKETPLACE]) });
-  else plan.items.push({ unchanged: tr('marketplace {0}: não estava adicionado', [MARKETPLACE]) });
+  if (state.marketplace) plan.items.push({ args: ['plugin', 'marketplace', 'remove', MARKETPLACE], message: tr('marketplace {0}: removed', [MARKETPLACE]) });
+  else plan.items.push({ unchanged: tr("marketplace {0}: wasn't added", [MARKETPLACE]) });
   return plan;
 }
 
 export interface MigrationPlan {
-  /** settings.json novo, se algo mudou. */
+  /** New settings.json, if anything changed. */
   settings?: Settings;
-  /** O que foi tirado (vira ✓). */
+  /** What was removed (becomes ✓). */
   done: string[];
-  /** O que ficou e por quê (vira "="). */
+  /** What was kept and why (becomes "="). */
   kept: string[];
-  /** Formatos que não dá para mexer com segurança (vira "!"). */
+  /** Formats that cannot be safely modified (becomes "!"). */
   warnings: string[];
 }
 
 /**
- * Tira do settings.json o que o mod substitui: o tap de statusline (se o mod ficou instalado) e o hook de
- * permissão antigo (se o plugin de permissões ficou instalado). Uma gravação só, para um backup só.
+ * Removes from settings.json what the mod replaces: statusline tap (if mod remained installed) and
+ * legacy permission hook (if permissions plugin remained installed). A single write, for a single backup.
  */
 export function planMigration(settings: Settings, o: { modInstalled: boolean; permissionsInstalled: boolean; permissions: boolean }): MigrationPlan {
   const out: MigrationPlan = { done: [], kept: [], warnings: [] };
   let next = settings;
   const sl = rec(settings.statusLine);
   if (sl && isTapCommand(sl.command)) {
-    if (!o.modInstalled) out.kept.push(tr('tap de statusline antigo mantido (o mod não ficou instalado)'));
+    if (!o.modInstalled) out.kept.push(tr("old statusline tap kept (the mod didn't get installed)"));
     else {
       const p = planTapUninstall(next);
       if (p.action === 'uninstall') {
         next = p.settings;
-        out.done.push(tr('tap de statusline antigo removido: o mod grava o uso no lugar dele ({0})', [p.message]));
-      } else if (p.action === 'skip') out.warnings.push(tr('tap de statusline antigo: {0} (rode npm run usage:uninstall depois de conferir)', [p.message]));
+        out.done.push(tr('old statusline tap removed: the mod records usage in its place ({0})', [p.message]));
+      } else if (p.action === 'skip') out.warnings.push(tr('old statusline tap: {0} (run npm run usage:uninstall after checking)', [p.message]));
     }
   }
   if (installedHook(next)) {
-    if (!o.permissions) out.kept.push(tr('hook de permissão antigo mantido (--sem-permissoes)'));
-    else if (!o.permissionsInstalled) out.kept.push(tr('hook de permissão antigo mantido (o plugin de permissões não ficou instalado)'));
+    if (!o.permissions) out.kept.push(tr('old permission hook kept (--sem-permissoes)'));
+    else if (!o.permissionsInstalled) out.kept.push(tr("old permission hook kept (the permissions plugin didn't get installed)"));
     else {
       const p = planHookUninstall(next);
       if (p.action === 'uninstall') {
         next = p.settings;
-        out.done.push(tr('hook de permissão antigo removido: o plugin {0} responde no lugar dele', [shortName(PERMISSIONS_PLUGIN)]));
-      } else if (p.action === 'skip') out.warnings.push(tr('hook de permissão antigo: {0} (rode npm run hooks:uninstall depois de conferir)', [p.message]));
+        out.done.push(tr('old permission hook removed: the {0} plugin answers in its place', [shortName(PERMISSIONS_PLUGIN)]));
+      } else if (p.action === 'skip') out.warnings.push(tr('old permission hook: {0} (run npm run hooks:uninstall after checking)', [p.message]));
     }
   }
   if (next !== settings) out.settings = next;
   return out;
 }
 
-/** Diferenças entre o que deveria ter ficado instalado e o que o Claude Code registra depois dos passos. */
+/** Differences between what should be installed and what Claude Code records after the steps. */
 export function verifyInstall(after: AccountState, plugins: string[], version: string): string[] {
   const out: string[] = [];
   for (const id of plugins) {
     const p = userInstall(after, id);
     const name = shortName(id);
-    if (!p) out.push(tr('{0}: não aparece instalado na lista do Claude Code', [name]));
-    else if (!p.enabled) out.push(tr('{0}: instalado, mas desligado (claude plugin enable {1})', [name, id]));
-    else if (p.version !== version) out.push(tr('{0}: o Claude Code registra a versão {1}, não a {2} (o manifesto em mod/ está com outra versão?)', [name, p.version ?? '?', version]));
+    if (!p) out.push(tr("{0}: doesn't show as installed in the Claude Code list", [name]));
+    else if (!p.enabled) out.push(tr('{0}: installed, but disabled (claude plugin enable {1})', [name, id]));
+    else if (p.version !== version) out.push(tr('{0}: Claude Code records version {1}, not {2} (does the manifest in mod/ have a different version?)', [name, p.version ?? '?', version]));
     if (p?.errors.length) out.push(`${name}: ${p.errors.join('; ')}`);
   }
   return out;
 }
 
 /**
- * Para o docker:up: atualiza só o que já está instalado, nunca instala. `hint` é a dica para quem tem o mod e não o
- * plugin de mensagens (que veio depois): o docker:up não o instala sozinho.
+ * For docker:up: updates only what is already installed, never installs. `hint` is the tip for accounts with
+ * mod but without messages plugin (which came later): docker:up does not install it on its own.
  */
 export type UpdatePlan =
   | { action: 'none'; installed: boolean; hint?: string }
   | { action: 'update'; steps: CliStep[]; hint?: string }
   | { action: 'warn'; message: string };
 
-/** A dica do plugin de mensagens, quando a conta tem o mod e não ele. */
-export const MESSAGES_HINT = tr('rode npm run mod:install para mandar mensagens pelo escritório (plugin {0})', [shortName(MESSAGES_PLUGIN)]);
+/** The messages plugin tip when account has mod but not messages. */
+export const MESSAGES_HINT = tr('run npm run mod:install to send messages from the office (plugin {0})', [shortName(MESSAGES_PLUGIN)]);
 
 export function planUpdate(state: AccountState, o: { root: string; version: string; sameDir?: (a: string, b: string) => boolean }): UpdatePlan {
   const same = o.sameDir ?? sameDir;
-  // Nome antigo: a troca (tirar o codetown, instalar o habblaud) é do mod:install; aqui só o aviso. Um aviso conta
-  // como "instalado", então a dica de instalar do zero não aparece para quem já usava o mod.
+  // Legacy name: migration (remove codetown, install habblaud) belongs to mod:install; here only warning.
+  // A warning counts as "installed", so clean install tip does not show for users already running mod.
   const legacy = legacySummary(state);
-  if (legacy) return { action: 'warn', message: tr('ainda com o nome antigo ({0}); o docker:up não troca sozinho: rode npm run mod:install', [legacy]) };
+  if (legacy) return { action: 'warn', message: tr("still under the old name ({0}); docker:up doesn't switch it on its own: run npm run mod:install", [legacy]) };
   const installed = PLUGINS.map((id) => userInstall(state, id)).filter((p): p is PluginInfo => !!p);
   if (!installed.length) return { action: 'none', installed: false };
   const hint = userInstall(state, MOD_PLUGIN) && !userInstall(state, MESSAGES_PLUGIN) ? { hint: MESSAGES_HINT } : {};
   const stale = installed.filter((p) => p.version !== o.version);
   if (!stale.length) return { action: 'none', installed: true, ...hint };
-  // Marketplace de outra pasta (outro clone, pasta movida): atualizar dali não traria esta versão.
+  // Marketplace from another folder (different clone, moved folder): updating from there would not bring this version.
   const m = state.marketplace;
-  if (!m) return { action: 'warn', message: tr('o mod está instalado, mas o marketplace {0} sumiu; rode npm run mod:install', [MARKETPLACE]) };
+  if (!m) return { action: 'warn', message: tr('the mod is installed, but the marketplace {0} is gone; run npm run mod:install', [MARKETPLACE]) };
   if (!m.path || !same(m.path, o.root)) {
-    return { action: 'warn', message: tr('o mod vem de outra pasta ({0}), então não foi atualizado; para usar esta: npm run mod:install', [m.path ?? m.source ?? '?']) };
+    return { action: 'warn', message: tr("the mod comes from another folder ({0}), so it wasn't updated; to use this one: npm run mod:install", [m.path ?? m.source ?? '?']) };
   }
   return {
     action: 'update',
     steps: [
-      { args: ['plugin', 'marketplace', 'update', MARKETPLACE], message: tr('marketplace {0}: catálogo relido', [MARKETPLACE]) },
+      { args: ['plugin', 'marketplace', 'update', MARKETPLACE], message: tr('marketplace {0}: catalog reloaded', [MARKETPLACE]) },
       ...stale.map((p) => ({ args: ['plugin', 'update', p.id, '--scope', SCOPE], message: `${shortName(p.id)}: ${p.version ?? '?'} → ${o.version}`, plugin: p.id })),
     ],
     ...hint,
   };
 }
 
-/** Últimas linhas úteis da saída do CLI (para explicar uma falha). */
+/** Last useful lines of CLI output (to explain a failure). */
 export function cliMessage(r: ClaudeResult): string {
   if (r.error) return r.error;
   const lines = stripAnsi(`${r.stdout}\n${r.stderr}`)
     .split(/\r?\n/)
     .map((l) => l.replace(/^[\s✘✔✗✓×]+/, '').trim())
     .filter(Boolean);
-  return lines.slice(-2).join(' · ') || tr('saiu com código {0}', [r.code ?? '?']);
+  return lines.slice(-2).join(' · ') || tr('exited with code {0}', [r.code ?? '?']);
 }
 
-/** Linhas do status de uma conta (sem o cabeçalho). */
+/** Status lines of an account (without header). */
 export function describeStatus(state: AccountState, settings: Settings, o: { root: string; version: string; home: string; sameDir?: (a: string, b: string) => boolean }): string[] {
   const same = o.sameDir ?? sameDir;
   const lines: string[] = [];
   const m = state.marketplace;
-  if (!m) lines.push(tr('marketplace {0}: não adicionado', [MARKETPLACE]));
-  else if (m.path && same(m.path, o.root)) lines.push(tr('marketplace {0}: esta pasta', [MARKETPLACE]));
-  else lines.push(tr('marketplace {0}: outra origem ({1}); npm run mod:install aponta para esta pasta', [MARKETPLACE, m.path ? tildify(m.path, o.home) : (m.source ?? '?')]));
+  if (!m) lines.push(tr('marketplace {0}: not added', [MARKETPLACE]));
+  else if (m.path && same(m.path, o.root)) lines.push(tr('marketplace {0}: this folder', [MARKETPLACE]));
+  else lines.push(tr('marketplace {0}: another source ({1}); npm run mod:install points it to this folder', [MARKETPLACE, m.path ? tildify(m.path, o.home) : (m.source ?? '?')]));
   for (const id of PLUGINS) {
     const name = shortName(id);
     const all = state.plugins.filter((p) => p.id === id);
     if (!all.length) {
-      lines.push(tr('{0}: não instalado', [name]));
+      lines.push(tr('{0}: not installed', [name]));
       continue;
     }
     for (const p of all) {
-      const parts = [tr('instalado{0}', [p.scope && p.scope !== SCOPE ? tr(' (escopo {0})', [p.scope]) : '']), p.enabled ? tr('ligado') : tr('desligado')];
-      parts.push(tr('versão {0}{1}', [p.version ?? '?', p.version === o.version ? '' : tr(' (esta pasta: {0}; npm run mod:install ou npm run docker:up atualiza)', [o.version])]));
-      if (p.folderVersion && p.folderVersion !== p.version) parts.push(tr('carrega {0} de {1}', [p.folderVersion, tildify(p.readFromFolder ?? '?', o.home)]));
-      if (p.errors.length) parts.push(`erro: ${p.errors.join('; ')}`);
+      const parts = [tr('installed{0}', [p.scope && p.scope !== SCOPE ? tr(' (scope {0})', [p.scope]) : '']), p.enabled ? tr('enabled') : tr('off')];
+      parts.push(tr('version {0}{1}', [p.version ?? '?', p.version === o.version ? '' : tr(' (this folder: {0}; npm run mod:install or npm run docker:up updates it)', [o.version])]));
+      if (p.folderVersion && p.folderVersion !== p.version) parts.push(tr('loads {0} from {1}', [p.folderVersion, tildify(p.readFromFolder ?? '?', o.home)]));
+      if (p.errors.length) parts.push(`error: ${p.errors.join('; ')}`);
       lines.push(`${name}: ${parts.join(', ')}`);
     }
   }
-  const legacy = legacySummary(state, (lm) => (lm.path && same(lm.path, o.root) ? tr('esta pasta') : lm.path ? tildify(lm.path, o.home) : (lm.source ?? '?')));
-  if (legacy) lines.push(tr('! nome antigo ainda registrado: {0}; npm run mod:install troca pelo habblaud', [legacy]));
+  const legacy = legacySummary(state, (lm) => (lm.path && same(lm.path, o.root) ? tr('this folder') : lm.path ? tildify(lm.path, o.home) : (lm.source ?? '?')));
+  if (legacy) lines.push(tr('! old name still registered: {0}; npm run mod:install replaces it with habblaud', [legacy]));
   const sl = rec(settings.statusLine);
   const hook = installedHook(settings);
   const modOn = !!userInstall(state, MOD_PLUGIN);
@@ -552,33 +550,33 @@ export function describeStatus(state: AccountState, settings: Settings, o: { roo
   if (sl && isTapCommand(sl.command)) {
     lines.push(
       modOn
-        ? tr('! tap de statusline antigo ainda instalado junto com o mod: npm run mod:install tira (ou npm run usage:uninstall)')
-        : tr('tap de statusline antigo instalado (jeito antigo; o mod o substitui)'),
+        ? tr('! old statusline tap still installed alongside the mod: npm run mod:install removes it (or npm run usage:uninstall)')
+        : tr('old statusline tap installed (old way; the mod replaces it)'),
     );
   }
   if (hook) {
     lines.push(
       permOn
-        ? tr('! hook de permissão antigo ainda no settings.json junto com o plugin: os dois respondem; npm run mod:install tira (ou npm run hooks:uninstall)')
-        : tr('hook de permissão antigo instalado (jeito antigo; o plugin de permissões o substitui)'),
+        ? tr('! old permission hook still in settings.json alongside the plugin: both answer; npm run mod:install removes it (or npm run hooks:uninstall)')
+        : tr('old permission hook installed (old way; the permissions plugin replaces it)'),
     );
   }
-  if (settings.disableAllHooks === true) lines.push(tr('! disableAllHooks está ligado no settings.json desta conta: nenhum mod (nem hook) roda'));
+  if (settings.disableAllHooks === true) lines.push(tr("! disableAllHooks is on in this account's settings.json: no mod (or hook) runs"));
   return lines;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Efeitos (CLI do Claude Code e settings.json)
+// Effects (Claude Code CLI and settings.json)
 // ---------------------------------------------------------------------------------------------
 
 export interface RunOptions {
   command: 'install' | 'uninstall' | 'status';
   dryRun: boolean;
-  /** false com --sem-permissoes. */
+  /** false with --sem-permissoes. */
   permissions: boolean;
-  /** false com --sem-mensagens. */
+  /** false with --sem-mensagens. */
   messages: boolean;
-  /** --conta (vazio = todas as detectadas). */
+  /** --conta (empty = all detected). */
   accounts: string[];
   claudeCmd?: string;
 }
@@ -587,17 +585,17 @@ export interface RunContext {
   env: NodeJS.ProcessEnv;
   home: string;
   now: Date;
-  /** Raiz do repositório (o marketplace). */
+  /** Repo root (the marketplace). */
   root: string;
-  /** Versão do package.json. */
+  /** package.json version. */
   version: string;
   claude: ClaudeRunner;
   out: (line: string) => void;
-  /** Consulta o /api/health do Habblaud no status (testes injetam um falso). */
+  /** Queries Habblaud /api/health during status (tests inject a mock). */
   health?: (port: number) => Promise<HealthInfo | undefined>;
 }
 
-/** O que o status usa do /api/health (`messages` só existe a partir do Habblaud com mensagens pelo escritório). */
+/** What status uses from /api/health (`messages` exists from Habblaud with messages support). */
 export interface HealthInfo {
   permissions?: boolean;
   messages?: boolean;
@@ -615,7 +613,7 @@ async function fetchHealth(port: number): Promise<HealthInfo | undefined> {
   }
 }
 
-/** Porta do Habblaud (HABBLAUD_PORT ou a padrão). */
+/** Habblaud port (HABBLAUD_PORT or default). */
 function habblaudPort(env: NodeJS.ProcessEnv): number {
   const p = Number.parseInt(env.HABBLAUD_PORT ?? '', 10);
   return Number.isInteger(p) && p > 0 && p < 65_536 ? p : DEFAULT_PORT;
@@ -636,39 +634,39 @@ export function parseArgs(argv: string[]): RunOptions | 'help' {
     else if (a === '--sem-mensagens') messages = false;
     else if (a === '--conta') {
       const dir = argv[++i];
-      if (!dir) throw new FatalError(tr('--conta precisa da pasta da conta (ex.: --conta ~/.claude-conta2).'));
+      if (!dir) throw new FatalError(tr('--conta needs the account folder (e.g. --conta ~/.claude-conta2).'));
       accounts.push(dir);
     } else if (a === '--claude') {
       claudeCmd = argv[++i];
-      if (!claudeCmd) throw new FatalError(tr('--claude precisa de um comando ou caminho.'));
+      if (!claudeCmd) throw new FatalError(tr('--claude needs a command or path.'));
     } else if ((a === 'install' || a === 'uninstall' || a === 'status') && !command) command = a;
-    else throw new FatalError(tr('opção desconhecida: {0}\n\n{1}', [a, USAGE]));
+    else throw new FatalError(tr('unknown option: {0}\n\n{1}', [a, USAGE]));
   }
-  if (!command) throw new FatalError(tr('diga o que fazer: install, uninstall ou status.\n\n{0}', [USAGE]));
+  if (!command) throw new FatalError(tr('specify what to do: install, uninstall or status.\n\n{0}', [USAGE]));
   return { command, dryRun, permissions, messages, accounts, claudeCmd };
 }
 
-/** Versão do package.json da raiz. */
+/** Root package.json version. */
 export function readPackageVersion(root: string): string {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown };
-  if (typeof pkg.version !== 'string' || !pkg.version) throw new FatalError(tr('package.json sem "version" em {0}', [root]));
+  if (typeof pkg.version !== 'string' || !pkg.version) throw new FatalError(tr('package.json without "version" in {0}', [root]));
   return pkg.version;
 }
 
-/** Marketplace e plugins de uma conta, pelo CLI (ou o motivo de não conseguir). */
+/** Marketplace and plugins for an account, via CLI (or reason for failure). */
 export function readAccountState(claude: ClaudeRunner, env: NodeJS.ProcessEnv): AccountState | { error: string } {
   const mr = claude(['plugin', 'marketplace', 'list', '--json'], env);
-  if (mr.error || mr.code !== 0) return { error: tr('não consegui listar os marketplaces ({0})', [cliMessage(mr)]) };
+  if (mr.error || mr.code !== 0) return { error: tr("couldn't list the marketplaces ({0})", [cliMessage(mr)]) };
   const markets = parseMarketplaceList(mr.stdout);
-  if (!markets) return { error: tr('não entendi a lista de marketplaces do Claude Code') };
+  if (!markets) return { error: tr("couldn't parse Claude Code's marketplace list") };
   const pr = claude(['plugin', 'list', '--json'], env);
-  if (pr.error || pr.code !== 0) return { error: tr('não consegui listar os plugins ({0})', [cliMessage(pr)]) };
+  if (pr.error || pr.code !== 0) return { error: tr("couldn't list the plugins ({0})", [cliMessage(pr)]) };
   const plugins = parsePluginList(pr.stdout);
-  if (!plugins) return { error: tr('não entendi a lista de plugins do Claude Code') };
+  if (!plugins) return { error: tr("couldn't parse Claude Code's plugin list") };
   return { marketplace: markets.find((m) => m.name === MARKETPLACE), legacyMarketplace: markets.find((m) => m.name === LEGACY_MARKETPLACE), plugins };
 }
 
-/** Pastas das contas: as de --conta (que precisam existir) ou as detectadas. */
+/** Account directories: those from --conta (must exist) or detected. */
 function accountDirs(opts: RunOptions, env: NodeJS.ProcessEnv, home: string): string[] {
   if (!opts.accounts.length) return discoverClaudeDirs(env, home);
   return [...new Set(opts.accounts.map((a) => expandHome(a, home)))].map((dir) => {
@@ -678,74 +676,74 @@ function accountDirs(opts: RunOptions, env: NodeJS.ProcessEnv, home: string): st
     } catch {
       ok = false;
     }
-    if (!ok) throw new FatalError(tr('--conta {0}: pasta não encontrada.', [dir]));
+    if (!ok) throw new FatalError(tr('--conta {0}: folder not found.', [dir]));
     return dir;
   });
 }
 
-/** Último uso capturado (pelo mod ou pelo tap) de uma conta, para o status. */
+/** Last captured usage (via mod or tap) of an account, for status. */
 function lastCapture(dir: string, env: NodeJS.ProcessEnv, home: string, now: Date): string {
   const file = join(usageDirOf(env, home), `${basename(dir)}.json`);
   try {
     const j = JSON.parse(readFileSync(file, 'utf8')) as Rec;
     const at = typeof j.fetchedAt === 'number' ? j.fetchedAt : statSync(file).mtimeMs;
-    return tr('último uso capturado há {0} ({1})', [formatAge(now.getTime() - at), j.source === 'mod' ? tr('pelo mod') : tr('pelo tap de statusline')]);
+    return tr('last usage captured {0} ago ({1})', [formatAge(now.getTime() - at), j.source === 'mod' ? tr('via the mod') : tr('via the statusline tap')]);
   } catch {
-    return tr('nenhum uso capturado ainda (chega depois da próxima resposta numa sessão aberta desta conta)');
+    return tr('no usage captured yet (it arrives after the next reply in an open session of this account)');
   }
 }
 
-/** Executa o comando para todas as contas. Devolve o código de saída. */
+/** Runs command for all accounts. Returns exit code. */
 export async function run(opts: RunOptions, ctx: RunContext): Promise<number> {
   const { env, home, out } = ctx;
   const dirs = accountDirs(opts, env, home);
   if (!dirs.length) {
-    out(tr('Nenhuma conta do Claude Code encontrada (~/.claude* com projects/ ou sessions/). Use --conta <pasta> ou HABBLAUD_CLAUDE_DIRS.'));
+    out(tr('No Claude Code account found (~/.claude* with projects/ or sessions/). Use --conta <folder> or HABBLAUD_CLAUDE_DIRS.'));
     return 1;
   }
   const manifest = join(ctx.root, '.claude-plugin', 'marketplace.json');
   if (opts.command === 'install' && !existsSync(manifest)) {
-    out(tr('Não achei {0}: esta pasta não tem o mod (versão antiga do Habblaud? rode git pull).', [tildify(manifest, home)]));
+    out(tr("{0} not found: this folder doesn't have the mod (old Habblaud version? run git pull).", [tildify(manifest, home)]));
     return 1;
   }
 
-  // Uma versão só: todas as contas usam o mesmo executável, só muda o CLAUDE_CONFIG_DIR.
+  // Single version: all accounts use same executable, only CLAUDE_CONFIG_DIR varies.
   const vr = ctx.claude(['--version'], env);
   if (vr.error) {
-    out(tr('Não consegui rodar o Claude Code: {0}.', [vr.error]));
-    out(tr('Instale o Claude Code (https://code.claude.com) ou diga onde ele está: npm run mod:<comando> -- --claude <caminho>'));
+    out(tr("Couldn't run Claude Code: {0}.", [vr.error]));
+    out(tr('Install Claude Code (https://code.claude.com) or say where it is: npm run mod:<command> -- --claude <path>'));
     return 1;
   }
   const cliVersion = parseVersion(vr.stdout) ? parseVersion(vr.stdout)!.join('.') : undefined;
   if (opts.command === 'install') {
-    if (!cliVersion) out(tr('! Não entendi a versão do Claude Code ("{0}"); sigo assim mesmo.', [cliMessage(vr)]));
+    if (!cliVersion) out(tr('! Couldn\'t parse the Claude Code version ("{0}"); continuing anyway.', [cliMessage(vr)]));
     else if (!versionAtLeast(cliVersion, MIN_CLAUDE_VERSION)) {
-      out(tr('O mod precisa do Claude Code {0} ou mais novo, e este é o {1}.', [MIN_CLAUDE_VERSION, cliVersion]));
-      out(tr('Atualize o Claude Code (claude update) e rode de novo. Ou use o jeito antigo, que funciona em versões anteriores:'));
-      out(tr('  npm run usage:install    # uso de 5h/semanal ao vivo (tap de statusline)'));
-      out(tr('  npm run hooks:install    # responder pedidos de permissão pelo escritório'));
+      out(tr('The mod requires Claude Code {0} or newer, and this one is {1}.', [MIN_CLAUDE_VERSION, cliVersion]));
+      out(tr('Update Claude Code (claude update) and run again. Or use the old way, which works on earlier versions:'));
+      out(tr('  npm run usage:install    # live 5h/weekly usage (statusline tap)'));
+      out(tr('  npm run hooks:install    # answer permission requests from the office'));
       return 1;
     }
   }
   if (opts.command === 'status') {
-    out(tr('Claude Code {0}{1} · Habblaud {2} em {3}', [cliVersion ?? tr('(versão desconhecida)'), cliVersion && !versionAtLeast(cliVersion, MIN_CLAUDE_VERSION) ? tr(' — o mod precisa do {0}+', [MIN_CLAUDE_VERSION]) : '', ctx.version, tildify(ctx.root, home)]));
+    out(tr('Claude Code {0}{1} · Habblaud {2} in {3}', [cliVersion ?? tr('(unknown version)'), cliVersion && !versionAtLeast(cliVersion, MIN_CLAUDE_VERSION) ? tr(' — the mod requires {0}+', [MIN_CLAUDE_VERSION]) : '', ctx.version, tildify(ctx.root, home)]));
   }
 
-  // Nome antigo: ~/.codetown vira ~/.habblaud antes de criar (ou usar) a pasta do uso.
+  // Legacy name: ~/.codetown becomes ~/.habblaud before creating (or using) usage folder.
   if (opts.command === 'install') {
     const moved = migrateLegacyState(home, opts.dryRun);
     if (moved) out(moved);
   }
-  // O mod grava o uso em ~/.habblaud/usage, mas não cria a pasta (o docker:up também a monta no container).
+  // The mod saves usage in ~/.habblaud/usage, but doesn't create folder (docker:up also mounts it).
   if (opts.command === 'install' && !opts.dryRun) {
     const usageDir = usageDirOf(env, home);
     try {
       if (!existsSync(usageDir)) {
         mkdirSync(usageDir, { recursive: true, mode: 0o700 });
-        out(tr('✓ pasta do uso criada: {0}', [tildify(usageDir, home)]));
+        out(tr('✓ usage folder created: {0}', [tildify(usageDir, home)]));
       }
     } catch (err) {
-      out(tr('! não consegui criar {0} ({1}); o uso ao vivo não vai ser gravado', [tildify(usageDir, home), (err as Error).message]));
+      out(tr("! couldn't create {0} ({1}); live usage won't be recorded", [tildify(usageDir, home), (err as Error).message]));
     }
   }
 
@@ -786,12 +784,12 @@ export async function run(opts: RunOptions, ctx: RunContext): Promise<number> {
         continue;
       }
       if (opts.dryRun) {
-        out(tr('  ~ {0} (simulação: claude {1})', [item.message, item.args.join(' ')]));
+        out(tr('  ~ {0} (dry run: claude {1})', [item.message, item.args.join(' ')]));
         continue;
       }
-      // Na instalação, depois de uma falha os passos seguintes desta conta não rodam (sem marketplace não há
-      // plugin), menos depois de um plugin do nome antigo que não saiu (o marketplace dele o leva junto). Na
-      // remoção, segue: o que der para tirar, sai.
+      // On install, after a failure subsequent steps for this account do not run (no marketplace = no
+      // plugin), except after a legacy name plugin that failed to uninstall (its marketplace removes it). On
+      // removal, keep going: remove whatever can be removed.
       if (broken && opts.command === 'install') {
         if (item.plugin) failed.add(item.plugin);
         continue;
@@ -801,7 +799,7 @@ export async function run(opts: RunOptions, ctx: RunContext): Promise<number> {
         out(`  ✓ ${item.message}`);
         changed++;
       } else {
-        out(tr('  ✗ {0}: falhou ({1})', [item.message.split(':')[0], cliMessage(r)]));
+        out(tr('  ✗ {0}: failed ({1})', [item.message.split(':')[0], cliMessage(r)]));
         if (item.plugin) failed.add(item.plugin);
         stepFailed = true;
         if (!item.keepGoing) broken = true;
@@ -811,71 +809,71 @@ export async function run(opts: RunOptions, ctx: RunContext): Promise<number> {
     for (const n of plan.notes) out(`  ! ${n}`);
     if (opts.command !== 'install') continue;
 
-    // Confere com o próprio Claude Code o que ficou instalado (um update sem efeito também sai com 0) e decide a
-    // migração por isso. Na simulação (ou se a lista falhar), vale o plano menos o que deu erro.
+    // Verify with Claude Code what remained installed (a no-op update exits with 0) and decide
+    // migration based on that. In dry-run (or if list fails), plan minus failures applies.
     let ok = (id: string) => plan.plugins.includes(id) && !failed.has(id);
     if (!opts.dryRun) {
       const after = readAccountState(ctx.claude, cenv);
       if (!('error' in after)) {
         for (const w of verifyInstall(after, plan.plugins, ctx.version)) out(`  ! ${w}`);
         const legacy = legacySummary(after);
-        if (legacy) out(tr('  ! nome antigo ainda registrado: {0}; rode npm run mod:install de novo (ou confira com npm run mod:status)', [legacy]));
+        if (legacy) out(tr('  ! old name still registered: {0}; run npm run mod:install again (or check with npm run mod:status)', [legacy]));
         ok = (id: string) => userInstall(after, id)?.enabled === true;
       }
     }
 
-    // Migração: lê o settings.json DEPOIS do CLI (ele também grava ali: enabledPlugins, marketplaces).
+    // Migration: read settings.json AFTER CLI (it also writes there: enabledPlugins, marketplaces).
     const read = readSettings(file);
     if ('error' in read) {
-      out(tr('  ✗ settings.json: {0}; o tap e o hook antigos não foram conferidos', [read.error]));
+      out(tr("  ✗ settings.json: {0}; the old tap and hook weren't checked", [read.error]));
       failures++;
       continue;
     }
     const mig = planMigration(read.settings, { modInstalled: ok(MOD_PLUGIN), permissionsInstalled: ok(PERMISSIONS_PLUGIN), permissions: opts.permissions });
     for (const k of mig.kept) out(`  = ${k}`);
     for (const w of mig.warnings) out(`  ! ${w}`);
-    if (read.settings.disableAllHooks === true) out(tr('  ! disableAllHooks está ligado no settings.json desta conta: o mod não roda até você desligar'));
+    if (read.settings.disableAllHooks === true) out(tr("  ! disableAllHooks is on in this account's settings.json: the mod won't run until you turn it off"));
     if (!mig.settings) continue;
     if (opts.dryRun) {
-      for (const d of mig.done) out(tr('  ~ {0} (simulação: nada gravado)', [d]));
+      for (const d of mig.done) out(tr('  ~ {0} (dry run: nothing written)', [d]));
       continue;
     }
     try {
       const backup = writeSettings(file, mig.settings, read.raw, ctx.now);
       for (const d of mig.done) out(`  ✓ ${d}`);
-      if (backup) out(tr('    backup do settings.json em {0}', [tildify(backup, home)]));
+      if (backup) out(tr('    settings.json backup in {0}', [tildify(backup, home)]));
       changed++;
     } catch (err) {
-      out(tr('  ✗ não consegui gravar o settings.json ({0}); o tap e o hook antigos continuam', [(err as Error).message]));
+      out(tr("  ✗ couldn't write settings.json ({0}); the old tap and hook remain", [(err as Error).message]));
       failures++;
     }
   }
 
   if (opts.command === 'install' && !opts.dryRun && !failures) {
     out('');
-    out(tr('Pronto. Sessões novas do Claude Code já carregam o mod; nas que já estão abertas, rode /reload-plugins (ou'));
-    out(tr('reabra a sessão). O uso de 5h/semanal chega ao Habblaud depois da próxima resposta de cada sessão.'));
-    out(tr('Para conferir: npm run mod:status · Para desfazer: npm run mod:uninstall'));
+    out(tr('Done. New Claude Code sessions already load the mod; in sessions already open, run /reload-plugins (or'));
+    out(tr("reopen the session). The 5h/weekly usage reaches Habblaud after each session's next reply."));
+    out(tr('To check: npm run mod:status · To undo: npm run mod:uninstall'));
   }
   if (opts.command === 'uninstall' && !opts.dryRun && changed) {
     out('');
-    out(tr('Pronto. Sessões já abertas continuam com o mod até /reload-plugins (ou até reabrir a sessão).'));
-    out(tr('Para voltar ao jeito antigo (Claude Code anterior ao 2.1.287): npm run usage:install e npm run hooks:install'));
+    out(tr('Done. Sessions already open keep the mod until /reload-plugins (or until the session is reopened).'));
+    out(tr('To go back to the old way (Claude Code before 2.1.287): npm run usage:install and npm run hooks:install'));
   }
   if (opts.command === 'status') {
-    // O mod e os plugins só falam com o Habblaud local: diz se ele está lá para responder.
+    // Mod and plugins only speak with local Habblaud: check if it is there to answer.
     const port = habblaudPort(env);
     const health = await (ctx.health ?? fetchHealth)(port);
-    const at = tr('Habblaud em http://127.0.0.1:{0}', [port]);
-    if (!health) out(tr('{0}: fora do ar (o mod segue gravando o uso; os pedidos de permissão ficam só no terminal).', [at]));
-    else if (health.permissions) out(tr('{0}: no ar e respondendo pedidos de permissão (com alguma página aberta).', [at]));
-    else out(tr('{0}: no ar, mas responder pelo escritório está desligado (porta exposta na rede ou HABBLAUD_TERMINAL=0).', [at]));
-    // Um Habblaud de antes das mensagens não diz nada sobre elas.
+    const at = tr('Habblaud at http://127.0.0.1:{0}', [port]);
+    if (!health) out(tr('{0}: down (the mod keeps recording usage; permission requests stay in the terminal only).', [at]));
+    else if (health.permissions) out(tr('{0}: up and handling permission requests (with a page open).', [at]));
+    else out(tr('{0}: up, but answering from the office is off (port exposed on the network or HABBLAUD_TERMINAL=0).', [at]));
+    // A Habblaud prior to messages says nothing about them.
     if (health && typeof health.messages === 'boolean') {
       out(
         health.messages
-          ? tr('Mensagens pelo escritório: ligadas (chegam às sessões abertas com o plugin {0}).', [shortName(MESSAGES_PLUGIN)])
-          : tr('Mensagens pelo escritório: desligadas no Habblaud (porta exposta na rede, HABBLAUD_TERMINAL=0 ou HABBLAUD_MENSAGENS=0).'),
+          ? tr('Messages from the office: on (they reach open sessions with the {0} plugin).', [shortName(MESSAGES_PLUGIN)])
+          : tr('Messages from the office: off in Habblaud (port exposed on the network, HABBLAUD_TERMINAL=0 or HABBLAUD_MENSAGENS=0).'),
       );
     }
   }
@@ -883,7 +881,7 @@ export async function run(opts: RunOptions, ctx: RunContext): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Para o docker:up: atualiza o mod de quem já instalou
+// For docker:up: updates mod for existing installs
 // ---------------------------------------------------------------------------------------------
 
 export interface ModUpdateContext {
@@ -895,22 +893,22 @@ export interface ModUpdateContext {
 }
 
 export interface ModUpdateResult {
-  /** Alguma conta tem o mod (ou um dos outros plugins) instalado, mesmo que com o nome antigo. */
+  /** Some account has mod (or another plugin) installed, even under legacy name. */
   installed: boolean;
-  /** Não deu para consultar o Claude Code em nenhuma conta (ex.: `claude` fora do PATH). */
+  /** Could not query Claude Code on any account (e.g. `claude` not in PATH). */
   unavailable: boolean;
   lines: Array<{ level: 'info' | 'warn'; text: string }>;
 }
 
 /**
- * Para cada conta com o mod instalado numa versão diferente da do package.json: relê o catálogo e atualiza os
- * plugins instalados. Com restos do nome antigo, só avisa (a troca é do mod:install). Com o mod e sem o plugin de
- * mensagens, dá a dica de rodar o mod:install. Nunca instala nada e nunca lança: qualquer falha vira um aviso.
+ * For each account with mod installed at a version different from package.json: reloads catalog and updates
+ * installed plugins. With legacy name remnants, only warns (switch belongs to mod:install). With mod and
+ * without messages plugin, hints to run mod:install. Never installs and never throws: any failure becomes a warning.
  */
 export function updateInstalledMods(accounts: Array<{ dir: string; label: string }>, ctx: ModUpdateContext): ModUpdateResult {
   const res: ModUpdateResult = { installed: false, unavailable: false, lines: [] };
   if (!accounts.length) return res;
-  // Um runner que nunca lança: qualquer exceção vira uma falha comum (o docker:up não pode cair por isso).
+  // Runner that never throws: any exception becomes a normal failure (docker:up cannot crash because of this).
   const claude: ClaudeRunner = (args, env) => {
     try {
       return ctx.claude(args, env);
@@ -918,47 +916,47 @@ export function updateInstalledMods(accounts: Array<{ dir: string; label: string
       return { code: null, stdout: '', stderr: '', error: (err as Error).message };
     }
   };
-  // Sem o CLI, a mesma falha se repetiria em todas as contas: confere uma vez e avisa uma vez.
+  // Without CLI, same failure would repeat across all accounts: probe once and warn once.
   const probe = claude(['--version'], ctx.env);
   if (probe.error || probe.code !== 0) {
     res.unavailable = true;
-    res.lines.push({ level: 'warn', text: tr('não consegui consultar o Claude Code ({0}); o mod não foi conferido.', [cliMessage(probe)]) });
+    res.lines.push({ level: 'warn', text: tr("couldn't query Claude Code ({0}); the mod wasn't checked.", [cliMessage(probe)]) });
     return res;
   }
   for (const { dir, label } of accounts) {
     const env = accountEnv(ctx.env, dir, ctx.home);
     const state = readAccountState(claude, env);
     if ('error' in state) {
-      res.lines.push({ level: 'warn', text: tr('mod na {0}: {1}', [label, state.error]) });
+      res.lines.push({ level: 'warn', text: tr('mod on {0}: {1}', [label, state.error]) });
       continue;
     }
     const plan = planUpdate(state, { root: ctx.root, version: ctx.version });
     if (plan.action !== 'none' || plan.installed) res.installed = true;
     if (plan.action === 'warn') {
-      res.lines.push({ level: 'warn', text: tr('mod na {0}: {1}', [label, plan.message]) });
+      res.lines.push({ level: 'warn', text: tr('mod on {0}: {1}', [label, plan.message]) });
       continue;
     }
     if (plan.action === 'update') res.lines.push(applyUpdate(plan.steps, { claude, env, version: ctx.version, label }));
-    // Tem o mod e não o plugin de mensagens (que veio depois): o docker:up não o instala sozinho, só dá a dica.
-    if (plan.hint) res.lines.push({ level: 'info', text: tr('Dica para a {0}: {1}', [label, plan.hint]) });
+    // Has mod and not messages plugin (which came later): docker:up does not install on its own, only hints.
+    if (plan.hint) res.lines.push({ level: 'info', text: tr('Tip for {0}: {1}', [label, plan.hint]) });
   }
   return res;
 }
 
-/** Roda os passos da atualização de uma conta e conta como foi, numa linha. */
+/** Runs update steps for an account and reports outcome in a single line. */
 function applyUpdate(steps: CliStep[], o: { claude: ClaudeRunner; env: NodeJS.ProcessEnv; version: string; label: string }): ModUpdateResult['lines'][number] {
   for (const step of steps) {
     const r = o.claude(step.args, o.env);
     if (r.error || r.code !== 0) {
-      return { level: 'warn', text: tr('não consegui atualizar o mod na {0}: {1} ({2}). Tente: npm run mod:install', [o.label, step.message.split(':')[0], cliMessage(r)]) };
+      return { level: 'warn', text: tr("couldn't update the mod on {0}: {1} ({2}). Try: npm run mod:install", [o.label, step.message.split(':')[0], cliMessage(r)]) };
     }
   }
-  // Só diz "atualizado" se o Claude Code passou mesmo a registrar a versão nova.
+  // Only report "updated" if Claude Code actually registered the new version.
   const after = readAccountState(o.claude, o.env);
   const ids = steps.flatMap((s) => (s.plugin ? [s.plugin] : []));
   const issues = 'error' in after ? [after.error] : verifyInstall(after, ids, o.version);
-  if (issues.length) return { level: 'warn', text: tr('mod na {0}: {1}', [o.label, issues.join('; ')]) };
-  return { level: 'info', text: tr('Mod atualizado para {0} na {1}; sessões abertas: /reload-plugins', [o.version, o.label]) };
+  if (issues.length) return { level: 'warn', text: tr('mod on {0}: {1}', [o.label, issues.join('; ')]) };
+  return { level: 'info', text: tr('Mod updated to {0} on {1}; open sessions: /reload-plugins', [o.version, o.label]) };
 }
 
 async function main(): Promise<void> {
@@ -981,7 +979,7 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((err: unknown) => {
-    console.error(err instanceof FatalError ? tr('[mod] Erro: {0}', [err.message]) : tr('[mod] Erro inesperado: {0}', [String(err)]));
+    console.error(err instanceof FatalError ? tr('[mod] Error: {0}', [err.message]) : tr('[mod] Unexpected error: {0}', [String(err)]));
     process.exitCode = 1;
   });
 }
