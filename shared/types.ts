@@ -284,6 +284,9 @@ export interface JobBoardItem {
   at: number;
   endedAt?: number;
   tokens?: number;
+  /** Of `tokens` when the worker reports them: served from the prompt cache, and written to it. */
+  cacheRead?: number;
+  cacheWrite?: number;
   /** WorkerJob.id when the job ran through the worker's terminal (server/workers): it can be cancelled. */
   job?: string;
   /** Worker id (TeamInfo.workers) of that job. */

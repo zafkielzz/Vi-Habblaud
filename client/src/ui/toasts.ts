@@ -12,6 +12,9 @@ const MAX_VISIBLE = 4;
 const DEDUPE_MS = 20_000;
 const LIFETIME: Record<NoticeLevel, number> = { info: 5_000, success: 6_000, warn: 9_000, alert: Infinity };
 
+/** A notice from the page itself: `open` replaces "show in the office", `sticky` stays until dismissed. */
+export type PageNotice = Notice & { open?: () => void; sticky?: boolean };
+
 interface Toast {
   key: string;
   notice: Notice;
@@ -34,7 +37,7 @@ export class Toasts implements UiComponent {
     ctx.store.on('notice', (n) => this.push(n));
   }
 
-  push(n: Notice): void {
+  push(n: PageNotice): void {
     // Accounts hidden in sidebar filter do not generate notices, except "needs you" (requires action).
     if (n.level !== 'alert' && n.agentId) {
       const acc = this.ctx.agent(n.agentId)?.account;
@@ -50,7 +53,7 @@ export class Toasts implements UiComponent {
       dup.el.classList.remove('is-bump');
       void dup.el.offsetWidth;
       dup.el.classList.add('is-bump');
-      this.arm(dup, LIFETIME[n.level]);
+      this.arm(dup, n.sticky ? Infinity : LIFETIME[n.level]);
       return;
     }
     // A new alert from the same agent replaces the previous one.
@@ -59,7 +62,7 @@ export class Toasts implements UiComponent {
     const toast = this.create(n, key);
     this.toasts.push(toast);
     this.el.prepend(toast.el);
-    this.arm(toast, LIFETIME[n.level]);
+    this.arm(toast, n.sticky ? Infinity : LIFETIME[n.level]);
     while (this.toasts.length > MAX_VISIBLE) {
       const victim = this.toasts.find((t) => t.notice.level !== 'alert') ?? this.toasts[0];
       this.dismiss(victim);
@@ -77,18 +80,19 @@ export class Toasts implements UiComponent {
     }
   }
 
-  private create(n: Notice, key: string): Toast {
+  private create(n: PageNotice, key: string): Toast {
     const agent = n.agentId ? this.ctx.agent(n.agentId) : undefined;
     const count = h('span', { class: 'ui-toast__count', hidden: true });
     const body = h(
       'button',
-      { class: 'ui-toast__body', type: 'button', title: n.agentId || n.roomId ? tr('Show in the office') : '' },
+      { class: 'ui-toast__body', type: 'button', title: !n.open && (n.agentId || n.roomId) ? tr('Show in the office') : '' },
       agent ? createAvatar(agent, 'xs') : null,
       h('span', { class: 'ui-toast__text', text: n.text }),
       count,
     );
     body.addEventListener('click', () => {
-      if (n.agentId && this.ctx.agent(n.agentId)) this.ctx.select({ type: 'agent', id: n.agentId }, { focus: true });
+      if (n.open) n.open();
+      else if (n.agentId && this.ctx.agent(n.agentId)) this.ctx.select({ type: 'agent', id: n.agentId }, { focus: true });
       else if (n.roomId && this.ctx.store.room(n.roomId)) this.ctx.select({ type: 'room', id: n.roomId }, { focus: true });
     });
     const el = h('div', { class: `ui-toast ui-toast--${n.level}`, role: n.level === 'alert' ? 'alert' : 'status' }, body);

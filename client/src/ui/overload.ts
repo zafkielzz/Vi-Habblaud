@@ -2,12 +2,14 @@
 // compacted (shared/overload.ts), the boss first. Long sessions get slow and forgetful, so the dialog suggests the
 // usual way out: ask the session to update the project's handoff file (through habblaud-mensagens, when the session
 // takes messages), then open a new session in the same folder, which reads the handoff and carries on.
-import type { AgentInfo } from '../../../shared/types';
+import type { AgentInfo, OfficeInfo, OfficeSnapshot } from '../../../shared/types';
 import { sessionLoad, type LoadLevel, type LoadThresholds, type SessionLoad } from '../../../shared/overload';
 import type { TerminalRouter, UiContext } from './context';
 import { h, iconButton, setHidden, setText, setVariant } from './dom';
 import { formatDuration } from './format';
 import { ICONS } from './icons';
+import type { PageNotice } from './toasts';
+import { agentOfficeId, teamOffices } from './offices';
 import { tr } from '../../../shared/i18n';
 
 export interface LoadedSession {
@@ -26,6 +28,20 @@ export function loadedSessions(agents: readonly AgentInfo[], thresholds?: LoadTh
     .sort((a, b) => Number(!!b.agent.boss) - Number(!!a.agent.boss) || RANK[b.load.level] - RANK[a.load.level] || (b.load.share ?? 0) - (a.load.share ?? 0));
 }
 
+/** The office's own sessions (its building); everyone with a single office or none shown. */
+export function officeSessions(sessions: readonly LoadedSession[], snap: Pick<OfficeSnapshot, 'agents' | 'team'> | null | undefined, office: OfficeInfo | undefined): LoadedSession[] {
+  const offices = teamOffices(snap?.team);
+  return office && offices.length > 1 ? sessions.filter((s) => agentOfficeId(snap, s.agent, offices) === office.id) : [...sessions];
+}
+
+/** Sessions whose level rose past what you were told; `told` keeps the highest level until the session is fine again. */
+export function risenLoads(sessions: readonly LoadedSession[], told: Map<string, LoadLevel>): LoadedSession[] {
+  const risen = sessions.filter((s) => RANK[s.load.level] > RANK[told.get(s.agent.id) ?? 'ok']);
+  for (const id of [...told.keys()]) if (!sessions.some((s) => s.agent.id === id)) told.delete(id);
+  for (const s of risen) told.set(s.agent.id, s.load.level);
+  return risen;
+}
+
 /** The text sent to the session when you ask for a handoff. */
 export function handoffRequest(): string {
   return tr(
@@ -38,10 +54,16 @@ export class OverloadDialog {
   readonly button: HTMLButtonElement;
   private readonly list: HTMLElement;
   private readonly status: HTMLElement;
+  private titleEl!: HTMLElement;
   private sig = '';
   private sent = new Set<string>();
+  /** Bosses you were warned about, and at what level. */
+  private readonly told = new Map<string, LoadLevel>();
 
-  constructor(private ctx: UiContext) {
+  constructor(
+    private ctx: UiContext,
+    private toast: (n: PageNotice) => void,
+  ) {
     this.button = h('button', { class: 'ui-icon-btn ui-btn-overload', type: 'button', text: '🥵', on: { click: () => this.toggle() }, attrs: { 'aria-haspopup': 'dialog' } });
     this.button.hidden = true;
     const close = iconButton(ICONS.close, tr('Close (Esc)'), () => this.close(), 'ui-icon-btn--sm');
@@ -50,7 +72,7 @@ export class OverloadDialog {
     this.el = h(
       'dialog',
       { class: 'ui-dialog ui-overload', attrs: { 'aria-labelledby': 'ui-overload-title' } },
-      h('div', { class: 'ui-dialog__head' }, h('h2', { attrs: { id: 'ui-overload-title' }, text: tr('🥵 Boss overloaded') }), close),
+      h('div', { class: 'ui-dialog__head' }, (this.titleEl = h('h2', { attrs: { id: 'ui-overload-title' }, text: tr('🥵 Boss overloaded') })), close),
       h(
         'div',
         { class: 'ui-overload__body' },
@@ -93,13 +115,48 @@ export class OverloadDialog {
   }
 
   private sessions(): LoadedSession[] {
-    return loadedSessions(this.ctx.store.snapshot?.agents ?? [], this.ctx.prefs.overload);
+    const snap = this.ctx.store.snapshot;
+    return officeSessions(loadedSessions(snap?.agents ?? [], this.ctx.prefs.overload), snap, this.ctx.selectedOffice());
+  }
+
+  /** A boss past a threshold, in any office: a notice right away, once per level. The boss itself is not told. */
+  private warn(): void {
+    const snap = this.ctx.store.snapshot;
+    if (!snap || this.ctx.store.mock) return;
+    const offices = teamOffices(snap.team);
+    const bosses = loadedSessions(snap.agents, this.ctx.prefs.overload).filter((s) => s.agent.boss);
+    for (const { agent, load } of risenLoads(bosses, this.told)) {
+      const officeId = agentOfficeId(snap, agent, offices);
+      const office = offices.find((o) => o.id === officeId);
+      const who = office && offices.length > 1 ? `${agent.name} · ${office.name}` : agent.name;
+      const facts = this.facts(load).join(', ');
+      const text = load.level === 'overloaded' ? tr('😵 {0} is overloaded ({1}). Save the work to the HANDOFF file and start a new session.', [who, facts]) : tr('🥵 {0} is getting tired ({1}). Save the work to the HANDOFF file and start a new session.', [who, facts]);
+      this.toast({
+        id: `overload:${agent.id}:${load.level}`,
+        level: 'warn',
+        text,
+        agentId: agent.id,
+        at: this.ctx.now(),
+        sticky: load.level === 'overloaded',
+        open: () => {
+          if (officeId) this.ctx.selectOffice(officeId);
+          this.open();
+        },
+      });
+    }
+  }
+
+  private facts(load: SessionLoad): string[] {
+    return [load.share !== undefined ? tr('context {0}%', [Math.round(load.share * 100)]) : '', load.compacts ? tr('compacted {0}×', [load.compacts]) : ''].filter(Boolean);
   }
 
   render(): void {
+    this.warn();
     const sessions = this.sessions();
     this.renderButton(sessions);
     if (!this.el.open) return;
+    const office = this.ctx.selectedOffice();
+    setText(this.titleEl, office && teamOffices(this.ctx.store.snapshot?.team).length > 1 ? tr('🥵 Boss overloaded · {0}', [office.name]) : tr('🥵 Boss overloaded'));
     const now = this.ctx.now();
     const sig = JSON.stringify([sessions.map((s) => [s.agent.id, s.agent.name, s.agent.canMessage, s.load]), [...this.sent], Math.floor(now / 60_000)]);
     if (sig === this.sig) return;
@@ -109,11 +166,7 @@ export class OverloadDialog {
     this.list.replaceChildren(
       ...sessions.map(({ agent, load }) => {
         const room = this.ctx.store.snapshot?.rooms.find((r) => r.id === agent.roomId);
-        const facts = [
-          load.share !== undefined ? tr('context {0}%', [Math.round(load.share * 100)]) : '',
-          load.compacts ? tr('compacted {0}×', [load.compacts]) : '',
-          tr('open for {0}', [formatDuration(now - agent.startedAt)]),
-        ].filter(Boolean);
+        const facts = [...this.facts(load), tr('open for {0}', [formatDuration(now - agent.startedAt)])];
         const asked = this.sent.has(agent.id);
         const ask = h('button', {
           class: 'ui-btn',

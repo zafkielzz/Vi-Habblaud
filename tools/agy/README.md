@@ -10,7 +10,10 @@ Needs Linux, Python 3, Claude Code, and for Antigravity workers the `agy` CLI, `
 ## Install
 
 ```bash
+npm install
+npm run mod:install    # Habblaud's Claude Code plugins: usage, messages and permissions from the page, boss rules
 tools/agy/install.sh
+npm run office         # builds and starts it in the background: open http://127.0.0.1:4747
 ```
 
 It links everything from this folder into `~/.local/bin`, the Claude Code skills and each agy profile, so editing a file

@@ -574,6 +574,8 @@ export class WorkerService {
     if (j.role) item.role = j.role;
     if (j.endedAt) item.endedAt = j.endedAt;
     if (j.tokens) item.tokens = j.tokens;
+    if (j.turn?.usage?.cache_read_tokens) item.cacheRead = j.turn.usage.cache_read_tokens;
+    if (j.turn?.usage?.cache_creation_tokens) item.cacheWrite = j.turn.usage.cache_creation_tokens;
     this.opts.board?.(item);
   }
 

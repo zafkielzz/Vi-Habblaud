@@ -11,7 +11,7 @@
 // Several offices: the list and the jobs are those of the office shown (the office tabs).
 import type { JobBoard, JobBoardItem, NewsItem, OfficeInfo, TeamInfo, WorkerJob } from '../../../shared/types';
 import type { UiContext } from './context';
-import { bossPlan, boardRoom, hasBoard, importantNews, officeItems, type BoardTab } from './board-model';
+import { bossPlan, boardRoom, cacheLabel, hasBoard, importantNews, officeItems, type BoardTab } from './board-model';
 import { teamOffices, type TodoList } from './offices';
 import { h, iconButton, setHidden, setText } from './dom';
 import { formatClock, relativeTime } from './format';
@@ -204,7 +204,7 @@ export class JobBoardDialog {
     setText(this.jobMore, this.showAll ? tr('Show less') : tr('View more ({0})', [board.items.length - JOBS_SHOWN]));
     this.jobList.replaceChildren(
       ...shown.map((it) => {
-        const meta = [byLabel(it.by), relativeTime(it.at, now), it.tokens ? tr('{0} tokens', [tokens(it.tokens)]) : ''].filter(Boolean).join(' · ');
+        const meta = [byLabel(it.by), relativeTime(it.at, now), it.tokens ? tr('{0} tokens', [tokens(it.tokens)]) : '', cacheLabel(it, tokens)].filter(Boolean).join(' · ');
         return h(
           'li',
           { class: `ui-board__item is-${it.status}` },

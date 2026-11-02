@@ -342,7 +342,7 @@ export function createUI(root: HTMLElement, store: OfficeStore, world: WorldApi,
     open: (kind) => sidebar.dialogs.open(kind),
     blocked: (kind) => (kind === 'workers' && !store.snapshot?.team ? tr('This Habblaud server does not keep a team yet (restart it to get one).') : ''),
   };
-  const overload = new OverloadDialog(ctx);
+  const overload = new OverloadDialog(ctx, (n) => toasts.push(n));
   topbar.addPanelButton(overload.button);
   const empty = new EmptyState(ctx);
   const banner = new ConnectionBanner(ctx);

@@ -23,6 +23,7 @@
     "build:client": "vite build --config vite.config.ts",
     "build:server": "node scripts/build-server.mjs",
     "start": "node dist/server/index.js",
+    "office": "sh scripts/office.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json",
     "test": "vitest run",
     "i18n:check": "tsx scripts/i18n-check.ts",

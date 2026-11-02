@@ -3406,4 +3406,10 @@ export const VI: Readonly<Record<string, string>> = {
   "💦 Tired from": "💦 Mệt từ",
   "😵 Overloaded from": "😵 Quá tải từ",
   "When a session shows as tired or overloaded. Defaults: 60% or 1 compaction, 80% or 2.": "Khi nào một phiên hiện là mệt hoặc quá tải. Mặc định: 60% hoặc 1 lần nén, 80% hoặc 2.",
+  "{0} read": "{0} đọc",
+  "{0} written": "{0} ghi",
+  "cache: {0}": "cache: {0}",
+  "🥵 Boss overloaded · {0}": "🥵 Sếp quá tải · {0}",
+  "🥵 {0} is getting tired ({1}). Save the work to the HANDOFF file and start a new session.": "🥵 {0} đang mệt ({1}). Hãy ghi lại việc vào file HANDOFF và mở phiên mới.",
+  "😵 {0} is overloaded ({1}). Save the work to the HANDOFF file and start a new session.": "😵 {0} đã quá tải ({1}). Hãy ghi lại việc vào file HANDOFF và mở phiên mới.",
 };

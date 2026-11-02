@@ -4,6 +4,7 @@
 // - The workers' jobs of the office shown (each job carries the office that gave it).
 // - Important news: failed jobs and quota hits today, and who needs you now (fixed rules, no tokens).
 import type { JobBoardItem, NewsItem, OfficeInfo, OfficeSnapshot, RoomInfo } from '../../../shared/types';
+import { tr } from '../../../shared/i18n';
 import { jobInOffice, officeBoss, officePlan, roomTodo, teamOffices, type TodoList } from './offices';
 
 /** Kept for callers that still name a part of the Board; the Board shows everything at once. */
@@ -32,6 +33,12 @@ export function bossPlan(snap: PlanSnap | null | undefined, office?: OfficeInfo)
 /** The jobs of the office shown: a job from anywhere else (another session or folder, no office) is not its business. */
 export function officeItems<T extends Pick<JobBoardItem, 'office'>>(items: readonly T[], office: OfficeInfo | undefined): T[] {
   return items.filter((it) => jobInOffice(it, office));
+}
+
+/** "cache: 12k read, 3k written" for a job that reports it; '' otherwise. */
+export function cacheLabel(it: Pick<JobBoardItem, 'cacheRead' | 'cacheWrite'>, fmt: (n: number) => string): string {
+  const parts = [it.cacheRead ? tr('{0} read', [fmt(it.cacheRead)]) : '', it.cacheWrite ? tr('{0} written', [fmt(it.cacheWrite)]) : ''].filter(Boolean);
+  return parts.length ? tr('cache: {0}', [parts.join(', ')]) : '';
 }
 
 /** The first room with a job board (the Antigravity workers room). */

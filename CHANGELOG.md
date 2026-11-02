@@ -247,6 +247,14 @@ middle one (0.**3**.0).
 - **The Board shows only the jobs of the office you are in.** A job from another session or folder, or with no office, no
   longer appears under "The workers' jobs"; jobs keep their office after a server restart.
 
+- **"Boss overloaded" per office, and it warns you:** the 🥵 button and dialog list only the sessions of the office shown,
+  with its name in the title. When a boss passes a threshold, in any office, a notice appears right away, once per level,
+  and suggests saving the work to the HANDOFF file and starting a new session; click it for the dialog. An overloaded
+  boss's notice stays until you dismiss it. The boss itself is not told.
+- **Board › Jobs splits the cache:** a job that reports it shows "cache: 12k read, 3k written" next to its tokens.
+
+- **`npm run office`** builds Habblaud and starts it in the background with its web terminals on.
+
 ## [1.0.3] - 2026-10-16
 
 ### Fixed

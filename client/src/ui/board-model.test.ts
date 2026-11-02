@@ -1,7 +1,7 @@
 // What the Board shows: the boss's to-do list and the important news.
 import { describe, expect, it } from 'vitest';
 import type { AgentInfo, OfficeSnapshot, RoomInfo } from '../../../shared/types';
-import { bossPlan, hasBoard, importantNews, officeItems } from './board-model';
+import { bossPlan, cacheLabel, hasBoard, importantNews, officeItems } from './board-model';
 
 function agent(id: string, roomId: string, extra: Partial<AgentInfo> = {}): AgentInfo {
   return { id, kind: 'main', roomId, name: id, tasks: [], ...extra } as AgentInfo;
@@ -74,5 +74,14 @@ describe('board model', () => {
       { id: 'b', at: 2, kind: 'rule' as const, icon: '📜', text: 'acc2 stopped by the rules of X', detail: 'git push' },
     ];
     expect(importantNews(snap([], [], { news }), 10).map((n) => n.text)).toEqual(['acc2 stopped by the rules of X · git push', 'acc2 stopped by the rules of X · ~/.ssh/id_ed25519']);
+  });
+});
+
+describe('cacheLabel', () => {
+  const fmt = (n: number) => `${n / 1000}k`;
+  it('read and written, only what the job reports', () => {
+    expect(cacheLabel({ cacheRead: 12_000, cacheWrite: 3_000 }, fmt)).toBe('cache: 12k read, 3k written');
+    expect(cacheLabel({ cacheRead: 12_000 }, fmt)).toBe('cache: 12k read');
+    expect(cacheLabel({}, fmt)).toBe('');
   });
 });

@@ -75,7 +75,7 @@ export interface AgyAskLine {
   prompt?: string;
   /** End line of a failed job: the last error lines (e.g. 429 "Individual quota reached"). */
   error?: string;
-  usage?: { input_tokens?: number; output_tokens?: number; thinking_tokens?: number; total_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; thinking_tokens?: number; total_tokens?: number; cache_read_tokens?: number };
   /** "terminal": a job run in the worker's terminal by server/workers (it puts it on the board itself). */
   via?: string;
   /** Start line: OfficeInfo.id of the office that gave the job. */
@@ -559,6 +559,7 @@ export class AgySource implements AgentSource {
       item.status = line.status && line.status !== 'SUCCESS' ? 'failed' : 'done';
       item.endedAt = at;
       if (line.usage?.total_tokens) item.tokens = line.usage.total_tokens;
+      if (line.usage?.cache_read_tokens) item.cacheRead = line.usage.cache_read_tokens;
     }
     const news = this.opts.news;
     if (!news || STOPPED.has(line.status ?? '')) return;
