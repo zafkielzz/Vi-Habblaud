@@ -5,13 +5,15 @@ set -eu
 here=$(dirname "$(readlink -f "$0")")
 bin="$HOME/.local/bin"
 skills="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
+commands="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
 root="${HABBLAUD_AGY_PROFILES:-$HOME/.agy_profiles}"
-mkdir -p "$bin" "$skills"
+mkdir -p "$bin" "$skills" "$commands"
 
-for f in agy-as agy-up agy-mode agy-sync office_rules.py rules-hook; do ln -sfn "$here/bin/$f" "$bin/$f"; done
+for f in agy-as agy-up agy-mode agy-sync office-boss office_rules.py rules-hook; do ln -sfn "$here/bin/$f" "$bin/$f"; done
 ln -sfn "$here/bin/worker-ask" "$bin/agy-ask"
 ln -sfn agy-ask "$bin/claude-ask"
 for s in "$here"/skills/*/; do ln -sfn "${s%/}" "$skills/$(basename "$s")"; done
+for c in "$here"/commands/*.md; do ln -sfn "$c" "$commands/$(basename "$c")"; done  # /boss
 
 # agy skips a symlinked plugin folder, and `agy plugin install` copies without office_rules.py: a real folder of links.
 for p in "$root"/acc*/; do

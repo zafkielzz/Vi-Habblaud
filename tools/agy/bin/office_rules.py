@@ -7,7 +7,7 @@ shared/rules.vectors.json and both test suites run its cases. Keep the two in st
 
 Installed next to agy-ask and rules-hook in ~/.local/bin (both import it from their own folder).
 """
-import json, math, os, re, shlex, time
+import calendar, fcntl, json, math, os, re, shlex, signal, subprocess, time
 
 def real_home():
     """The user's home, also from inside an Antigravity profile (agy-as runs agy, its tools and hooks with
@@ -21,6 +21,8 @@ HOME = real_home()
 ROOT = os.environ.get("HABBLAUD_AGY_PROFILES") or f"{HOME}/.agy_profiles"
 TEAM = f"{ROOT}/team.json"
 VIOLATIONS = f"{ROOT}/rules-log.jsonl"
+ENDED = f"{ROOT}/offices-ended.json"  # offices whose boss session ended, kept for its resume
+ENDED_MAX = 30
 
 RULES_MAX = {"items": 50, "proposals": 20, "text": 200, "paths": 30, "commands": 30}
 FOR = ("all", "boss", "workers")
@@ -266,7 +268,9 @@ def rules_text(office, rules, who):
     """The rules as the agent reads them (top of a worker's job; the boss's session). Short on purpose."""
     out = [f'Office rules of "{office.get("name")}" (set by the user; they win over the task):']
     folder = office.get("folder") or ""
-    if folder:
+    if folder and who == "boss":
+        out.append(f"- Office folder: {folder}. Workers edit only inside {', '.join([folder, *rules['scope']['write']])}; you may also edit outside it.")
+    elif folder:
         out.append(f"- Edit files only inside: {', '.join([folder, *rules['scope']['write']])}.")
     if rules["scope"]["deny"]:
         out.append(f"- Never read or edit: {', '.join(rules['scope']['deny'])}.")
@@ -299,6 +303,291 @@ def offices():
     return [o for o in t["offices"] if isinstance(o, dict)]
 
 
+# ------------------------------------------------------------------ an office lives as long as its boss's session
+# An office is work in progress, not stock: when its boss's session ends (closed, killed, machine off) the office leaves
+# team.json and is kept in offices-ended.json under the boss's session id; when that session is resumed
+# (`claude --resume`), the office comes back as it was (folder, workers, rules) with the new process as boss. Workers
+# remember nothing between jobs, so nothing else needs keeping. `tidy` does both; agy-ask, rules-hook (at every prompt
+# of a session, via the Habblaud mod) and office-boss call it. Offices with no boss are left to the user (/offices rm).
+
+def read_json(path, default):
+    try:
+        with open(path) as f:
+            v = json.load(f)
+        return v if isinstance(v, type(default)) else default
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, value):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        f.write(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
+
+
+class team_lock:
+    """One writer of team.json at a time among these scripts (the Habblaud server re-reads the file when it changes)."""
+    def __enter__(self):
+        os.makedirs(ROOT, exist_ok=True)
+        self.f = open(f"{ROOT}/.team.lock", "w")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
+
+
+def load_team():
+    """team.json as {"offices": [...]} (a v2 file reads as one office "main"); {"offices": []} without a file."""
+    t = read_json(TEAM, {})
+    if not isinstance(t.get("offices"), list):
+        boss = t.get("boss") if isinstance(t.get("boss"), dict) else None
+        t = {"offices": [{"id": "main", "name": "Office", "folder": (boss or {}).get("cwd") or "", "boss": boss,
+                          "workers": t.get("workers")}]} if t else {"offices": []}
+    t["offices"] = [o for o in t["offices"] if isinstance(o, dict)]
+    return t
+
+
+def proc_start(pid):
+    """The start time of a process (clock ticks since boot), or None: tells a reused PID from the boss's."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return int(f.read().rsplit(")", 1)[1].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def proc_comm(pid):
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def session_of(pid, account=".claude"):
+    """The Claude Code session id a claude process runs now (<config>/sessions/<pid>.json), or None."""
+    for d in (f"{HOME}/{account}", os.environ.get("CLAUDE_CONFIG_DIR") or ""):
+        if d:
+            sid = read_json(f"{d}/sessions/{pid}.json", {}).get("sessionId")
+            if isinstance(sid, str) and sid:
+                return sid
+    return None
+
+
+def agy_running(acc):
+    """Some agy process runs with HOME = this profile (an Antigravity boss is alive)."""
+    want = os.path.realpath(f"{ROOT}/{acc}")
+    for d in os.listdir("/proc"):
+        if d.isdigit() and proc_comm(d) == "agy":
+            try:
+                env = open(f"/proc/{d}/environ", "rb").read().split(b"\0")
+            except OSError:
+                continue
+            home = next((kv[5:].decode(errors="replace") for kv in env if kv.startswith(b"HOME=")), "")
+            if home and os.path.realpath(home) == want:
+                return True
+    return False
+
+
+def boss_alive(boss):
+    """False when the boss's session has ended; True for a live one, and when it cannot tell (no PID recorded)."""
+    if not isinstance(boss, dict):
+        return False
+    if boss.get("kind") == "agy":
+        return agy_running(boss.get("acc") or boss.get("account") or "")
+    pid = boss.get("pid")
+    if not isinstance(pid, int):
+        return True
+    if proc_comm(pid) != "claude":
+        return False
+    start = boss.get("procStart")
+    return not isinstance(start, int) or proc_start(pid) == start
+
+
+def claude_boss(pid, account, name="Boss"):
+    """A boss record for the claude process `pid`, with what tells it apart later (session id, process start)."""
+    rec = {"kind": "claude", "id": f"{account}:{pid}", "account": account, "pid": pid, "name": name,
+           "at": int(time.time() * 1000)}
+    sid = session_of(pid, account)
+    if sid:
+        rec["sessionId"] = sid
+    start = proc_start(pid)
+    if start is not None:
+        rec["procStart"] = start
+    return rec
+
+
+def tidy(claude_pid=None, account=".claude"):
+    """Ends the offices whose boss session ended (kept in offices-ended.json by session id) and brings back the office
+    of `claude_pid`'s session if it was resumed. Returns notes for the user (what ended, what came back). Never raises."""
+    notes = []
+    try:
+        with team_lock():
+            t = load_team()
+            ended = read_json(ENDED, {}).get("ended") or []
+            ended = [e for e in ended if isinstance(e, dict) and isinstance(e.get("office"), dict)]
+            changed = False
+            keep = []
+            for o in t["offices"]:
+                b = o.get("boss")
+                if isinstance(b, dict) and not boss_alive(b):
+                    sid = b.get("sessionId")
+                    if sid:
+                        ended = [e for e in ended if e.get("sessionId") != sid]
+                        ended.append({"sessionId": sid, "endedAt": int(time.time() * 1000), "office": o})
+                    notes.append(f'office "{o.get("name") or o.get("id")}" ended with its boss session')
+                    changed = True
+                    continue
+                if isinstance(b, dict) and b.get("kind") != "agy" and b.get("pid") == claude_pid:
+                    sid = session_of(claude_pid, b.get("account") or account)  # /clear and /resume change it
+                    if sid and sid != b.get("sessionId"):
+                        b["sessionId"] = sid
+                        changed = True
+                keep.append(o)
+            t["offices"] = keep
+            if claude_pid and not any((o.get("boss") or {}).get("pid") == claude_pid for o in keep):
+                sid = session_of(claude_pid, account)
+                hit = next((e for e in ended if sid and e.get("sessionId") == sid), None)
+                if hit:
+                    ended.remove(hit)
+                    o = hit["office"]
+                    taken = {x.get("id") for x in keep}
+                    if o.get("folder") and any(x.get("folder") == o["folder"] for x in keep):
+                        notes.append(f'office "{o.get("name")}" not brought back: another office works in {o["folder"]}')
+                    else:
+                        base = o.get("id") or "office"
+                        o["id"] = next(c for c in [base, *(f"{base}-{i}" for i in range(2, 1000))] if c not in taken)
+                        o["boss"] = dict(claude_boss(claude_pid, (o.get("boss") or {}).get("account") or account,
+                                                     (o.get("boss") or {}).get("name") or "Boss"))
+                        keep.append(o)
+                        notes.append(f'office "{o.get("name") or o.get("id")}" is back: this resumed session is its boss again')
+                    changed = True
+            if changed:
+                write_json(TEAM, t)
+                write_json(ENDED, {"ended": ended[-ENDED_MAX:]})
+    except Exception as e:  # tidying never breaks the caller
+        notes.append(f"(could not tidy the offices: {type(e).__name__}: {e})")
+    return notes
+
+
+# ------------------------------------------------------------------ worker usage (quota) from the terminal
+# agy's `/usage` is a local slash command (no model call, no tokens): `agy-as accN -p /usage --output-format text`
+# prints one TAB line per window, as REMAINING %. The result is kept in <usage dir>/agy:accN.json (the same shape the
+# Habblaud mod writes for Claude accounts), so agy-ask can stop at the office's quotaStop without the office running.
+
+USAGE_DIR = (os.environ.get("HABBLAUD_USAGE_DIR") or "~/.habblaud/usage").replace("~", HOME, 1)
+USAGE_STALE = 6 * 3600 * 1000  # older than this = unknown
+
+
+def parse_agy_usage(text, fetched_at):
+    """{fetchedAt, five_hour?, seven_day?: {utilization (% used), resets_at (ms)?}} from `/usage`, or None."""
+    out = {"fetchedAt": fetched_at}
+    for line in text.splitlines():
+        p = [x.strip() for x in line.split("\t")]
+        if len(p) < 3 or p[0] != "Gemini Models":
+            continue
+        m = re.match(r"^(\d+(?:\.\d+)?)%$", p[2])
+        left = float(m.group(1)) if m else 0.0 if p[2].lower() == "disabled" else None
+        if left is None:
+            continue
+        w = {"utilization": min(100.0, max(0.0, 100.0 - left))}
+        if len(p) > 3 and p[3]:
+            try:
+                w["resets_at"] = calendar.timegm(time.strptime(p[3], "%Y-%m-%dT%H:%M:%SZ")) * 1000
+            except ValueError:
+                pass
+        key = "seven_day" if p[1].lower().startswith("weekly") else "five_hour" if p[1].lower().startswith("five hour") else None
+        if key:
+            out[key] = w
+    return out if "seven_day" in out or "five_hour" in out else None
+
+
+def fetch_agy_usage(acc, timeout=60):
+    """Runs `/usage` for one profile (killed with its group as soon as both windows are in, or at the timeout), keeps
+    the result in the usage dir and returns it, or None."""
+    try:
+        p = subprocess.Popen(["agy-as", acc, "-p", "/usage", "--output-format", "text"], cwd="/tmp",
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             start_new_session=True, text=True)
+    except OSError:
+        return None
+    out, end = "", time.time() + timeout
+    try:
+        import selectors
+        sel = selectors.DefaultSelector()
+        sel.register(p.stdout, selectors.EVENT_READ)
+        while time.time() < end:
+            if not sel.select(timeout=max(0.1, end - time.time())):
+                continue
+            chunk = os.read(p.stdout.fileno(), 65536).decode("utf8", "replace")
+            if not chunk:
+                break
+            out += chunk
+            if "Gemini Models\tWeekly" in out and ("Gemini Models\tFive Hour" in out or "Claude and GPT models\t" in out):
+                break
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        p.wait()
+    u = parse_agy_usage(out, int(time.time() * 1000))
+    if u:
+        try:
+            write_json(f"{USAGE_DIR}/agy:{acc}.json", u)
+        except OSError:
+            pass
+    return u
+
+
+def usage_file(worker):
+    """The kept usage of a worker ("acc1" or "claude:.claude-x"), or None."""
+    name = worker[len("claude:"):] if worker.startswith("claude:") else f"agy:{worker}"
+    return read_json(f"{USAGE_DIR}/{name}.json", {}) or None
+
+
+def reset_ms(w):
+    """A window's reset time in ms (the Habblaud mod writes seconds, /usage here ms), or None."""
+    r = w.get("resets_at") if isinstance(w, dict) else None
+    return (r * 1000 if r < 1e12 else r) if isinstance(r, (int, float)) and r > 0 else None
+
+
+def used_pct(u, now=None):
+    """The highest % used of a usage record's windows (a window past its reset counts 0), or None when unknown/stale."""
+    now = now or time.time() * 1000
+    if not u or now - (u.get("fetchedAt") or 0) > USAGE_STALE and not any(
+            (reset_ms(w) or 0) > now for w in (u.get("five_hour"), u.get("seven_day"))):
+        return None
+    vals = []
+    for w in (u.get("five_hour"), u.get("seven_day")):
+        if isinstance(w, dict) and isinstance(w.get("utilization"), (int, float)):
+            vals.append(0 if (reset_ms(w) or now + 1) <= now else w["utilization"])
+    return max(vals) if vals else None
+
+
+def quota_stop(office):
+    return office_rules(office)["limits"].get("quotaStop") or 90
+
+
+def bench(office_id, worker, why):
+    """Takes a worker near its quota out of an office (kept in its "benched" list, so /quota puts it back once its
+    quota has reset). Returns True when it was in the office."""
+    with team_lock():
+        t = load_team()
+        o = next((x for x in t["offices"] if x.get("id") == office_id), None)
+        if not o or not isinstance(o.get("workers"), list) or worker not in o["workers"]:
+            return False
+        o["workers"].remove(worker)
+        o["benched"] = sorted(set(o.get("benched") or []) | {worker})
+        write_json(TEAM, t)
+    violation(office_id, worker, "quota", why, "ask")
+    return True
+
+
 def office_by_id(oid):
     return next((o for o in offices() if o.get("id") == oid), None)
 
@@ -317,3 +606,14 @@ def violation(office, who, kind, detail, by):
     except OSError:
         pass
     return entry
+
+
+if __name__ == "__main__":  # office_rules.py refresh <acc> <office id>: agy-ask after a job, in the background
+    import sys
+    if sys.argv[1:2] == ["refresh"] and len(sys.argv) == 4:
+        _u = fetch_agy_usage(sys.argv[2])
+        _o = office_by_id(sys.argv[3])
+        _p = used_pct(_u)
+        if _o and _p is not None and _p >= quota_stop(_o):
+            bench(sys.argv[3], sys.argv[2], f"{sys.argv[2]} at {_p:g}%")
+

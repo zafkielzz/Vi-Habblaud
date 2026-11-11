@@ -55,9 +55,14 @@ every office (folder, boss, workers, e.g. `acc2`, `claude:.claude-work`) and mar
 (`<- you are its boss`). As the boss of an office you give jobs only to that office's workers, never to your own
 account; the job carries your office's id (the office shows it on that office's board). Both commands refuse (exit 2)
 anything else: a call from someone who is no office's boss (while any office has a boss), another office's worker, an
-account that is not a registered worker. If you are not a boss, do not delegate: do the work yourself or tell the user.
-Never get around the rule (do not set `AGY_ASK_FROM_OFFICE` or `AGY_OFFICE`: they are for jobs the user sends from the
-office). No team file = no rule; no boss in any office = anyone may give jobs to the offices' workers.
+account that is not a registered worker. If you are not a boss, do not delegate: do the work yourself or tell the user
+they can make this session the boss by typing `/boss` (never run `office-boss` or edit team.json yourself: only the user
+appoints). Never get around the rule (do not set `AGY_ASK_FROM_OFFICE` or `AGY_OFFICE`: they are for jobs the user sends
+from the office). No team file = no rule; no boss in any office = anyone may give jobs to the offices' workers. An
+office closes when its boss's session ends and comes back when that session is resumed. The user changes the office's
+workers with `/workers add|rm` (never run it yourself). A worker near its quota leaves the office by itself (exit 2
+"left the office until its quota resets"): give the job to another worker. The office folder limits the
+workers' edits, not yours.
 
 ### Choosing mode and effort (you decide, every call)
 The user does not pick these by hand: you choose them per job and always pass `--role`, `--mode` and `--effort` explicitly

@@ -174,8 +174,8 @@ export function agyBossOffice(offices: readonly OfficeInfo[], account: string): 
 }
 
 /**
- * Why a folder cannot be an office's: '' when it can (absolute, not the whole disk, not overlapping another office's
- * folder); 'used:<office>', 'inside:<office>' or 'contains:<office>'. Symlinks are only resolved by the server, which
+ * Why a folder cannot be an office's: '' when it can (absolute, not the whole disk, not another office's folder:
+ * nested folders are fine); 'used:<office>'. Symlinks are only resolved by the server, which
  * then answers with its own reason.
  */
 export function folderProblem(offices: readonly OfficeInfo[], folder: string, except?: string): string {
@@ -186,15 +186,15 @@ export function folderProblem(offices: readonly OfficeInfo[], folder: string, ex
   for (const o of offices) {
     if (o.id === except || !o.folder) continue;
     const rel = folderRelation(f, o.folder);
-    if (FOLDER_CLASH.has(rel)) return `${rel === 'same' ? 'used' : rel}:${o.name}`;
+    if (FOLDER_CLASH.has(rel)) return `used:${o.name}`;
   }
   return '';
 }
 
-/** Another office whose folder overlaps this one's (same, inside, around): a team file from before the rule. */
+/** Another office with this one's very folder: a team file from before the rule. Nested folders are fine. */
 export function folderOverlap(offices: readonly OfficeInfo[], office: OfficeInfo): OfficeInfo | undefined {
   if (!office.folder) return undefined;
-  return offices.find((o) => o.id !== office.id && o.folder && folderRelation(office.folder, o.folder) !== '');
+  return offices.find((o) => o.id !== office.id && o.folder && FOLDER_CLASH.has(folderRelation(office.folder, o.folder)));
 }
 
 /** "/a/b/" -> "/a/b" (but "/" stays). */

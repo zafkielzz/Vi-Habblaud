@@ -61,7 +61,7 @@ export class OfficeTabs implements UiComponent {
         b.classList.toggle('is-overlap', !!overlap);
         setAttr(b, 'aria-selected', String(on));
         b.tabIndex = on ? 0 : -1;
-        const warn = overlap ? `\n${tr('⚠ Its folder overlaps the folder of {0}: change one of them.', [overlap.name])}` : '';
+        const warn = overlap ? `\n${tr('⚠ {0} works in the same folder: change one of them.', [overlap.name])}` : '';
         setTitle(b, `${o.folder ? `${o.name} · ${shortPath(o.folder)}` : tr('{0} · no folder yet', [o.name])}${warn}\n${tr('Double-click to edit · right-click for more')}`);
       },
     });

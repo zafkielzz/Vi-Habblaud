@@ -4,7 +4,7 @@
 Run: python3 tests/test_worker_ask.py. Nothing real runs: HABBLAUD_AGY_PROFILES is a temp folder, HABBLAUD_URL a
 fake server that answers every job at once, and the boss callers are fake `claude` / `agy` scripts (the rule finds
 the caller by the command name of its ancestors)."""
-import http.server, json, os, shutil, subprocess, sys, tempfile, threading, unittest
+import http.server, json, os, shutil, subprocess, sys, tempfile, threading, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "bin", "worker-ask")
@@ -160,10 +160,36 @@ class TeamRule(unittest.TestCase):
         self.assertEqual((code, out.strip()), (0, "pong"), err)
         self.assertEqual(Office.bodies[-1]["office"], "o1")
 
+    def live_claude(self):
+        """The PID of a running process named `claude` (another session that is boss)."""
+        d = tempfile.mkdtemp(dir=self.tmp)
+        path = os.path.join(d, "claude")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\nsleep 30\n")
+        os.chmod(path, 0o755)
+        p = subprocess.Popen([path])
+        self.addCleanup(p.wait)
+        self.addCleanup(p.kill)
+        for _ in range(50):  # until the shell has read its script (comm = the script's name)
+            try:
+                if open(f"/proc/{p.pid}/comm").read().strip() == "claude":
+                    break
+            except OSError:
+                pass
+            time.sleep(0.02)
+        return p.pid
+
     def test_not_a_boss_refused_while_an_office_has_one(self):
-        code, _, err = self.ask("acc1", team=self.v3(boss2={"kind": "claude", "account": ".claude", "pid": 1, "name": "Raul"}))
+        code, _, err = self.ask("acc1", team=self.v3(boss2={"kind": "claude", "account": ".claude", "pid": self.live_claude(), "name": "Raul"}))
         self.assertEqual(code, 2)
         self.assertIn("only a boss may give jobs (bosses: Raul", err)
+        self.assertIn("/boss", err)
+
+    def test_a_boss_whose_session_ended_leaves_the_office_vacant(self):
+        team = self.v3(boss2={"kind": "claude", "account": ".claude", "pid": 1, "name": "Raul"})  # pid 1 is not claude
+        team["offices"][0]["workers"].append("acc2")
+        code, _, err = self.ask("acc2", team=team)
+        self.assertEqual(code, 0, err)
 
     # -------------------------------------------------------------- no boss anywhere
 
@@ -350,7 +376,7 @@ class TeamRule(unittest.TestCase):
         self.assertIn("the office is not running", err)
 
     def test_team_not_a_boss(self):
-        code, out, _ = self.run_ask(["team"], team=self.v3(boss2={"kind": "claude", "account": ".claude", "pid": 1}))
+        code, out, _ = self.run_ask(["team"], team=self.v3(boss2={"kind": "claude", "account": ".claude", "pid": self.live_claude()}))
         self.assertIn("you: not a boss\n", out)
 
 
@@ -502,21 +528,17 @@ class RulesHook(unittest.TestCase):
         self.assertIn("agy-ask rules propose", b["text"])
         self.assertIn("Your workers: acc1.", b["text"])
         self.assertIn("skill agy-orchestrator", b["text"])
-        # the boss's own tool calls (no AGY_OFFICE): found by the same ancestry
-        out = self.hook("Edit", {"file_path": "/x/other/a.py"}, env=e, via="claude")[0]
-        self.assertEqual(out["permissionDecision"], "ask")
-        self.assertIn("edited only inside", out["permissionDecisionReason"])
-        self.assertNotIn("Stop and report", out["permissionDecisionReason"])
+        self.assertIn("you may also edit outside it", b["text"])
+        # the boss's own tool calls (no AGY_OFFICE): found by the same ancestry; the office folder limits workers only
+        self.assertIsNone(self.hook("Edit", {"file_path": "/x/other/a.py"}, env=e, via="claude")[0])
         self.assertIsNone(self.hook("Write", {"file_path": "~/.claude/projects/-home-u/memory/note.md"}, env=e, via="claude")[0])
-        self.assertIsNone(self.hook("Bash", {"command": "echo x > ~/.claude/projects/-home-u/memory/note.md"}, env=e, via="claude")[0])
-        self.assertEqual(self.hook("Bash", {"command": "rm /x/other/f"}, env=e, via="claude")[0]["permissionDecision"], "ask")
+        self.assertIsNone(self.hook("Bash", {"command": "rm /x/other/f"}, env=e, via="claude")[0])
         self.assertEqual(self.hook("Edit", {"file_path": "~/.ssh/config"}, env=e, via="claude")[0]["permissionDecision"], "deny")
-        self.assertEqual(self.hook("Write", {"file_path": "~/.claude/settings.json"}, env=e, via="claude")[0]["permissionDecision"], "ask")
         self.assertEqual(self.hook("Edit", {"file_path": "/x/other/a.py"}, env={}, args=())[0], None)
         self.assertEqual(subprocess.run([os.path.join(self.bin, "rules-hook"), "boss"], env=dict(os.environ, HABBLAUD_AGY_PROFILES=self.root),
                                         capture_output=True, text=True).stdout.strip(), "{}")
 
-    def test_a_worker_is_refused_where_a_boss_is_asked(self):
+    def test_a_worker_is_refused_where_a_boss_may_edit(self):
         self.denied("Write", {"file_path": "~/.claude/projects/-home-u/memory/note.md"})
         self.denied("Bash", {"command": "rm /x/other/f"})
 

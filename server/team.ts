@@ -230,6 +230,8 @@ export class TeamService {
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Bosses that already got their coronation (party and feed line), by office. */
   private readonly announced = new Map<string, string>();
+  /** mtime + size of team.json as last read or written here: a different one = changed by another program. */
+  private stamp = '';
 
   constructor(private readonly opts: TeamServiceOptions) {
     this.team = this.load();
@@ -478,6 +480,7 @@ export class TeamService {
 
   /** Puts the crowns on the bosses (if open), takes them off everyone else, and shows the offices in the snapshot. */
   sync(): void {
+    this.reloadIfChanged();
     const office = this.opts.office;
     const agents = office.list();
     const crowned = new Set<string>();
@@ -598,7 +601,7 @@ export class TeamService {
 
   /**
    * A valid office folder (normalized, symlinks resolved), or why not: absolute, an existing folder, not the whole
-   * disk, and not overlapping another office's folder (the same, inside it or holding it; also through a symlink).
+   * disk, and not another office's folder (also through a symlink). Nested folders are fine: the deepest one holds a room.
    */
   private checkFolder(folder: string, self?: OfficeRecord): string | { ok: false; status: number; error: string } {
     if (!folder || !isAbsolute(folder)) return { ok: false, status: 400, error: tr('the folder must be an absolute path') };
@@ -610,9 +613,7 @@ export class TeamService {
       if (o === self || !o.folder) continue;
       const rel = folderRelation(real, officeFolder((this.opts.realpath ?? realFolder)(o.folder)));
       if (!FOLDER_CLASH.has(rel)) continue;
-      const error =
-        rel === 'inside' ? tr('this folder is inside the folder of {0}', [o.name]) : rel === 'contains' ? tr('this folder holds the folder of {0}', [o.name]) : tr('{0} already works in this folder', [o.name]);
-      return { ok: false, status: 409, error };
+      return { ok: false, status: 409, error: tr('{0} already works in this folder', [o.name]) };
     }
     return real;
   }
@@ -628,9 +629,24 @@ export class TeamService {
     this.opts.office.celebrate(a.id, tr('👑 {0} is the boss', [a.name]), tr('👑 {0} is now the boss (orchestrator)', [a.name]));
   }
 
+  /** team.json as another program left it (`office-boss` appoints a boss from the terminal): read it again. */
+  private reloadIfChanged(): void {
+    const now = fileStamp(this.opts.file);
+    if (!now || now === this.stamp) return;
+    try {
+      this.team = parseTeam(readFileSync(this.opts.file, 'utf8'));
+      this.stamp = now;
+      this.opts.onWorkers?.(this.workers, this.agyBosses);
+    } catch {
+      // half-written or broken: keep ours, try again next tick
+    }
+  }
+
   private load(): TeamFile {
     try {
-      return parseTeam(readFileSync(this.opts.file, 'utf8'));
+      const t = parseTeam(readFileSync(this.opts.file, 'utf8'));
+      this.stamp = fileStamp(this.opts.file);
+      return t;
     } catch {
       // first run (or unreadable file): the workers in use until now, and the boss Habblaud kept before
     }
@@ -654,9 +670,20 @@ export class TeamService {
       const tmp = `${this.opts.file}.tmp`;
       writeFileSync(tmp, `${JSON.stringify(this.team, null, 2)}\n`);
       renameSync(tmp, this.opts.file);
+      this.stamp = fileStamp(this.opts.file);
     } catch {
       // read-only folder: the team lasts until the server restarts
     }
+  }
+}
+
+/** "mtime:size" of a file, '' when missing. */
+function fileStamp(path: string): string {
+  try {
+    const s = statSync(path);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return '';
   }
 }
 

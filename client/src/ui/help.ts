@@ -110,12 +110,13 @@ const GUIDE: [string, string[]][] = [
   [tr('🏢 Offices'), [
     tr('An office is one team for one project folder, shown as its own building. Press ＋ on the tab strip to make one.'),
     tr('To rename it, change its folder or delete it: ⋯ at the end of the strip, double-click its tab, or right-click it.'),
-    tr('Two offices cannot share a folder or sit inside each other, so give each its own project folder, not your home folder.'),
+    tr('Two offices cannot share a folder, but one may sit inside another: a session belongs to the deepest office folder holding it.'),
+    tr('An office lasts as long as its boss\'s session: it closes when the session ends and comes back when you resume it (claude --resume). In a terminal, /offices lists them.'),
     tr('Switching tabs closes the terminal and details of the office you left; its sessions keep running.'),
   ]],
   [tr('👑 The boss'), [
     tr('＋ next to Boss opens a Claude Code session in the office folder and makes it the boss. You talk to it in its terminal.'),
-    tr('You can also pick a session you already have: open its details and press 👑 Make boss.'),
+    tr('You can also pick a session you already have: open its details and press 👑 Make boss, or type /boss in that session\'s terminal.'),
     tr('The boss plans, gives jobs to the workers and checks the results. An account cannot be boss and worker in the same office.'),
     tr('In a folder without a HANDOFF file, the boss asks whether to create one before it starts.'),
   ]],
@@ -138,7 +139,7 @@ const GUIDE: [string, string[]][] = [
   ]],
   [tr('📜 Office rules (R)'), [
     tr('Each office sets where its agents may edit, what they may never read, which commands are forbidden, and job and quota limits.'),
-    tr('Writing outside the office folder: a boss asks you first, a worker is refused. /tmp and the boss\'s own memory folder stay free.'),
+    tr('The office folder limits the workers: a worker is refused outside it, the boss is not. Forbidden paths and commands hold for everyone.'),
     tr('This stops mistakes, not a determined script: a program the agent writes itself can still get around it.'),
     tr('A boss can only propose a rule; you accept it here. A refusal shows on the Board.'),
   ]],

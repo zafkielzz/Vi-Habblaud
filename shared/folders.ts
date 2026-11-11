@@ -29,10 +29,11 @@ export function folderRelation(f: string, other: string): FolderRelation {
 }
 
 /**
- * The relations that make a folder unusable for an office: office folders never overlap (not the same, not one inside
- * another), so every room belongs to one office only. Team files from before this rule still load (folderOverlap warns).
+ * The relations that make a folder unusable for an office: two offices never share one folder. Nested folders are fine
+ * (an office for ~/Workspace and one for ~/Workspace/app): a room belongs to the office with the deepest folder holding
+ * it (server/team.ts place). Team files from before this rule still load (folderOverlap warns).
  */
-export const FOLDER_CLASH: ReadonlySet<FolderRelation> = new Set<FolderRelation>(['same', 'inside', 'contains']);
+export const FOLDER_CLASH: ReadonlySet<FolderRelation> = new Set<FolderRelation>(['same']);
 
 /**
  * The other office whose folder an extra write folder of an office's rules (OfficeRules.scope.write) overlaps: a rule

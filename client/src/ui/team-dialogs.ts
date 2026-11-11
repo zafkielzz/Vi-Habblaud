@@ -37,8 +37,6 @@ export function folderWhy(problem: string): string {
   if (problem === 'relative') return tr('Write the full path (starting with /).');
   if (problem === 'root') return tr('Not the whole disk: pick a project folder.');
   const [kind, name] = [problem.slice(0, problem.indexOf(':')), problem.slice(problem.indexOf(':') + 1)];
-  if (kind === 'inside') return tr('This folder is inside the folder of {0}.', [name]);
-  if (kind === 'contains') return tr('This folder holds the folder of {0}.', [name]);
   return tr('The office {0} already works in this folder.', [name]);
 }
 

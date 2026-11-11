@@ -124,16 +124,16 @@ describe('offices', () => {
     expect(folderProblem(list, '/p/new')).toBe('');
     expect(folderProblem(list, '/')).toBe('root');
     expect(folderProblem(list, 'C:\\')).toBe('root');
-    // office folders never overlap
-    expect(folderProblem(list, '/p/a/sub')).toBe('inside:A');
-    expect(folderProblem(list, '/p')).toBe('contains:A');
+    // nested folders are fine; only the very same folder is taken
+    expect(folderProblem(list, '/p/a/sub')).toBe('');
+    expect(folderProblem(list, '/p')).toBe('');
     expect(folderProblem(list, '/p/ab')).toBe('');
   });
 
-  it('an office whose folder overlaps another (a team file from before the rule) is pointed out', () => {
-    const list = [office('a', { folder: '/home' }), office('b', { folder: '/home/x' }), office('c'), office('d', { folder: '' })];
-    expect(folderOverlap(list, list[0])?.id).toBe('b');
-    expect(folderOverlap(list, list[1])?.id).toBe('a');
+  it('an office sharing its folder with another (a team file from before the rule) is pointed out; nested is fine', () => {
+    const list = [office('a', { folder: '/home' }), office('b', { folder: '/home/x' }), office('c'), office('d', { folder: '' }), office('e', { folder: '/home/x/' })];
+    expect(folderOverlap(list, list[0])).toBeUndefined();
+    expect(folderOverlap(list, list[1])?.id).toBe('e');
     expect(folderOverlap(list, list[2])).toBeUndefined();
     expect(folderOverlap(list, list[3])).toBeUndefined();
   });

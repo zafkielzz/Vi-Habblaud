@@ -55,7 +55,7 @@ class Parse(unittest.TestCase):
         self.assertIn("Edit files only inside: /p.", w)
         self.assertIn("W only", w)
         self.assertNotRegex(w, r"B only|- Off|propose|At most")
-        self.assertRegex(R.rules_text({"name": "A", "folder": "/p"}, r, "boss"), r"(?s)B only.*At most 2 jobs.*agy-ask rules propose")
+        self.assertRegex(R.rules_text({"name": "A", "folder": "/p"}, r, "boss"), r"(?s)you may also edit outside it.*B only.*At most 2 jobs.*agy-ask rules propose")
 
 
 class CommandWrites(unittest.TestCase):

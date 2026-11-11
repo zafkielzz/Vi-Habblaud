@@ -44,7 +44,7 @@ Antigravity workers only run Gemini 3.8 Flash: --model accepts only gemini-3.8-f
 low, medium, high. Without --mode / --effort a call uses the worker's defaults in ~/.agy_profiles/defaults.json
 ({"acc2": {"mode": "plan", "effort": "low"}}, set from Habblaud), else mode plan (agy) or default (Claude).
 """
-import glob, json, os, signal, subprocess, sys, threading, time, urllib.error, urllib.parse, urllib.request
+import glob, json, os, re, signal, subprocess, sys, threading, time, urllib.error, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import office_rules as R  # noqa: E402  (installed next to this script)
@@ -52,7 +52,6 @@ import office_rules as R  # noqa: E402  (installed next to this script)
 HOME = R.HOME  # the real home, also when called from an Antigravity boss (HOME = its profile)
 ROOT = os.environ.get("HABBLAUD_AGY_PROFILES") or f"{HOME}/.agy_profiles"
 LOG = f"{ROOT}/agy-ask.log.jsonl"
-USAGE_DIR = (os.environ.get("HABBLAUD_USAGE_DIR") or "~/.habblaud/usage").replace("~", HOME, 1)
 RULES_HOOK = os.path.join(os.path.dirname(os.path.realpath(__file__)), "rules-hook")
 JOB_MAX_S = 30 * 60  # a job still "running" in the log after this long is not counted (the office stops it by then)
 DEFAULTS = f"{ROOT}/defaults.json"
@@ -215,8 +214,10 @@ def norm_worker(w):
 
 
 def boss_of(office):
+    """The office's boss, or None: none appointed, or one whose session has ended (tidy closes that office; this
+    covers a team file tidy could not write), which never blocks anyone."""
     b = office.get("boss")
-    return b if isinstance(b, dict) else None
+    return b if isinstance(b, dict) and R.boss_alive(b) else None
 
 
 def workers_of(office):
@@ -261,6 +262,7 @@ def check_team(worker, who):
     not allow. The boss of an office gives jobs to that office's workers only."""
     if os.environ.get("AGY_ASK_FROM_OFFICE") == "1":
         return "you", os.environ.get("AGY_OFFICE") or None
+    tidy(who)
     t = team()
     if t is None:
         return ("boss" if who["pid"] else "script"), None
@@ -276,7 +278,7 @@ def check_team(worker, who):
     bosses = [boss_of(o) for o in t["offices"] if boss_of(o)]
     if bosses:
         names = ", ".join(b.get("name") or b.get("id") or "?" for b in bosses)
-        die(f"only a boss may give jobs (bosses: {names}, appointed in Habblaud); this call is not from one", REFUSED)
+        die(f"only a boss may give jobs (bosses: {names}); this call is not from one. The user can make this session a boss with /boss", REFUSED)
     offices = [o for o in t["offices"] if workers_of(o) is None or worker in workers_of(o)]
     if not offices:
         listed = ", ".join(sorted({w for o in t["offices"] for w in workers_of(o) or []})) or "none"
@@ -284,7 +286,15 @@ def check_team(worker, who):
     return ("boss" if who["pid"] else "script"), offices[0].get("id")
 
 
+def tidy(who):
+    """Closes the offices whose boss session ended; a resumed boss gets its office back (office_rules.tidy)."""
+    pid = who.get("claude_pid")
+    for note in R.tidy(pid, os.path.basename((env_of(pid, "CLAUDE_CONFIG_DIR") or f"{HOME}/.claude").rstrip("/")) if pid else ".claude"):
+        print(f"agy-ask: {note}", file=sys.stderr)
+
+
 def print_team():
+    tidy(caller())
     t = team()
     if t is None:
         print("no team file: any caller may give jobs to any account")
@@ -450,18 +460,22 @@ def usage_of(worker):
             return None
     except NoOffice:
         pass
-    if not worker.startswith("claude:"):
-        return None
-    try:  # no office: the usage file the Habblaud mod writes for a Claude account
-        with open(f"{USAGE_DIR}/{account}.json") as f:
-            u = json.load(f)
-        if time.time() * 1000 - (u.get("fetchedAt") or 0) > 6 * 3600 * 1000:
-            return None
-        vals = [w.get("utilization") for w in (u.get("five_hour"), u.get("seven_day")) if isinstance(w, dict)]
-        vals = [v for v in vals if isinstance(v, (int, float))]
-        return max(vals) if vals else None
-    except (OSError, ValueError, AttributeError):
-        return None
+    # no office: the kept usage (the Habblaud mod writes a Claude account's; /quota and agy-ask keep agy's)
+    return R.used_pct(R.usage_file(worker))
+
+
+def refresh_usage(worker, office):
+    """After a job: the worker's usage again when the kept one is older than 15 min, in the background (agy's /usage
+    is local, no tokens); near the quota, the worker leaves the office (office_rules.py refresh)."""
+    u = R.usage_file(worker) or {}
+    if time.time() * 1000 - (u.get("fetchedAt") or 0) < 15 * 60 * 1000:
+        return
+    try:
+        subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.realpath(__file__)), "office_rules.py"),
+                          "refresh", worker, office], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
 
 
 def refuse(o, a, kind, detail, msg):
@@ -488,7 +502,8 @@ def apply_rules(a, oid):
     if stop:
         used = usage_of(a["worker"])
         if used is not None and used >= stop:
-            refuse(o, a, "quota", f"{a['worker']} at {used}%", f"{a['worker']} has used {used}% of its quota (limit {stop}%): give the job to another worker")
+            R.bench(o.get("id"), a["worker"], f"{a['worker']} at {used:g}%")
+            refuse(o, a, "quota", f"{a['worker']} at {used:g}%", f"{a['worker']} has used {used:g}% of its quota (limit {stop}%), so it left the office until its quota resets: give the job to another worker")
     a["prompt"] = R.rules_text(o, rules, "workers") + "\n\n" + a["prompt"]
     a["rules_office"] = o.get("id")
 
@@ -623,6 +638,12 @@ def finish(a, t0, status, answer, other, fields):
     if status != "SUCCESS":  # last error lines (e.g. 429 "Individual quota reached"): Habblaud shows quota hits
         end["error"] = ("\n".join(other[-5:]) or answer or "")[-300:]
     log_end(a, t0, **end)
+    office = a.get("office")
+    if status != "SUCCESS" and office and re.search(r"quota|RESOURCE_EXHAUSTED|\b429\b", end["error"], re.I):
+        if R.bench(office, a["worker"], f"{a['worker']}: quota reached"):
+            print(f"{CMD}: {a['worker']} reached its quota and left the office until it resets (/quota puts it back)", file=sys.stderr)
+    elif TOOL == "agy" and office:
+        refresh_usage(a["worker"], office)
     if status != "SUCCESS":
         print(f"{CMD}: {a['worker']} {status} after {round(time.time() - t0)}s:", file=sys.stderr)
         print("\n".join(other[-5:]) or answer, file=sys.stderr)

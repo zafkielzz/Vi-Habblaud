@@ -37,6 +37,11 @@ any repository.
 | `bin/office_rules.py` | Office rules, the Python twin of `shared/rules.ts` |
 | `bin/rules-hook` | PreToolUse hook that enforces the office rules |
 | `bin/agy-up`, `agy-mode`, `agy-sync` | Run workers in `herdr` panes, without the office |
+| `bin/office-boss` | Appoint the calling Claude Code session the boss of the office for its folder (the deepest office holding it, else a new one with every signed-in worker; in `~`: the office "cli" with no folder limit), or of a named office; `off` steps down; `list` / `rm` manage the offices. A running office re-reads `team.json` within a second |
+| `commands/boss.md` | The Claude Code command `/boss [office\|off]` (linked into `~/.claude/commands`): runs `office-boss` for the session you type it in, so you appoint a boss from the terminal |
+| `commands/quota.md` | `/quota`: every worker's 5-hour and weekly use (agy `/usage`, no tokens; kept in `~/.habblaud/usage/agy:accN.json` for agy-ask's quota stop); in a boss session, workers near the limit leave the office and benched ones come back after their reset |
+| `commands/workers.md` | `/workers [add\|rm <names>]`: the workers of this session's office (working now / free / not signed in) and the accounts that can be added |
+| `commands/offices.md` | `/offices [rm <office>]`: the open offices and the ended ones a resume brings back (an office closes with its boss's session: `office_rules.tidy`, run by agy-ask, office-boss and `rules-hook boss` at every prompt) |
 | `agy-plugin/` | `office-rules` (the hook inside agy) and `agy-boss` (loads the boss rules) |
 | `boss/AGENTS.md` | Rules for an Antigravity boss |
 | `worker-rules/GEMINI.md` | Rules for Antigravity workers |

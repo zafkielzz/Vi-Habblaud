@@ -6,7 +6,8 @@ Habblaud mod.
                       the office's rules prints the documented deny ({"hookSpecificOutput": {"hookEventName":
                       "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}) and appends one
                       RuleViolation (by "hook") to rules-log.jsonl; otherwise prints nothing (the call goes on).
-  rules-hook boss     {"office", "name", "rev", "text"} when the calling Claude Code session is the boss of an office
+  rules-hook boss     first office_rules.tidy (an office closes with its boss's session; resuming the session brings
+                      it back), then {"office", "name", "rev", "text"} when the calling Claude Code session is the boss of an office
                       (text = the rules for the boss, its workers, how to follow the to-do list, and to ask for a
                       handoff file when the folder has none), else {}.
                       Used by the Habblaud mod (mod/habblaud).
@@ -17,9 +18,9 @@ decision: agy's own permissions still apply). agy tools: write_to_file / replace
 edits, view_file / read_file / grep_search / list_dir / find_by_name are reads, run_command (CommandLine) a command.
 
 Checks: Edit/Write/MultiEdit/NotebookEdit -> the path may be edited; Read/Grep/Glob -> it may be read; Bash -> no
-forbidden command prefix, and what it writes (office_rules.command_writes) may be edited. A boss writes to its own
-memory folder freely, and outside the office folder its user is asked (permissionDecision "ask", which the mod turns
-into a question) instead of a refusal; workers and agy are refused. Whoever the agent is, team.json and rules-log.jsonl may not be edited (with the file tools,
+forbidden command prefix, and what it writes (office_rules.command_writes) may be edited. The office folder limits
+the workers only: a boss (Claude or agy) edits outside it freely (the user is at hand; asking every time slowed the
+work down, 11/11). Workers are refused. The deny list and the forbidden commands hold for everyone. Whoever the agent is, team.json and rules-log.jsonl may not be edited (with the file tools,
 or, best effort, by a Bash command that names them and writes): rules are changed from the Habblaud page only.
 
 The office: $AGY_OFFICE / $HABBLAUD_OFFICE (claude-ask sets AGY_OFFICE and AGY_WORKER for its workers), else the office
@@ -113,11 +114,6 @@ def names_protected(cmd):
 STOP = " Stop and report it instead of working around it."
 
 
-def own_memory(ab, home):
-    """A Claude Code memory folder (<config>/projects/<project>/memory): a boss's own notes, free wherever it works."""
-    return bool(re.match(re.escape(home) + r"/\.claude[^/]*/projects/[^/]+/memory(/|$)", ab or ""))
-
-
 def decide(o, ev, who="boss"):
     """(kind, detail, reason) for a call against the rules, else None."""
     tool, inp = ev.get("tool_name") or "", ev.get("tool_input") or {}
@@ -137,7 +133,7 @@ def decide(o, ev, who="boss"):
             return "command", cmd, f"Office rule ({name}): team.json and rules-log.jsonl are changed from the Habblaud page only, not by agents.{stop}"
         for ab in R.command_writes(cmd, cwd, home):
             c = R.check_path(rules, folder, home, ab, "write")
-            if c["ok"] or (who == "boss" and own_memory(ab, home)):
+            if c["ok"] or (who == "boss" and c["kind"] != "deny"):
                 continue
             if c["kind"] == "deny":
                 return "deny", ab, f'Office rule ({name}): {ab} may not be read or edited ("{c["rule"]}").{stop}'
@@ -152,8 +148,6 @@ def decide(o, ev, who="boss"):
     if not isinstance(path, str) or not path:
         return None
     ab = R.norm_path(path if path.startswith(("/", "~")) else f"{cwd}/{path}", home)
-    if mode == "write" and who == "boss" and own_memory(ab, home):
-        return None
     if mode == "write" and ab in protected(home):
         return "deny", ab, f"Office rule ({name}): {ab} is changed from the Habblaud page only, not by agents.{stop}"
     c = R.check_path(rules, folder, home, path, mode, cwd=cwd)
@@ -163,6 +157,8 @@ def decide(o, ev, who="boss"):
         return None
     if c["kind"] == "deny":
         return "deny", ab or path, f'Office rule ({name}): {ab or path} may not be read or edited ("{c["rule"]}").{stop}'
+    if who == "boss":
+        return None  # the office folder limits the workers, not the boss
     return "outside", ab or path, f"Office rule ({name}): files may be edited only inside {', '.join([folder, *rules['scope']['write']])}; {ab or path} is outside.{stop}"
 
 
@@ -188,8 +184,7 @@ def note(folder):
     return BOSS_SCOPE + BOSS_TODO + (NO_HANDOFF if missing else "")
 
 
-BOSS_SCOPE = ("\n\nYour Claude Code memory folder is always free. For anything else outside the folders above, the user is "
-              "asked before it runs: a refusal stands, do not work around it.")
+BOSS_SCOPE = ("\n\nWhen you give a worker a job, keep it inside the office folder: workers are refused outside it.")
 BOSS_TODO = ("\n\nYour to-do list is the \"Next steps\" list in the HANDOFF file of this office's folder; the Board shows it. "
              "Read it before you start and work through it one item at a time, in order. Mark an item `- [x]` as soon as "
              "it is done, and re-read the list before the next one: the user adds to it on the Board.")
@@ -200,6 +195,10 @@ NO_HANDOFF = ("\n\nThis office's folder has no HANDOFF*.md yet. Before any work,
 
 def main():
     if sys.argv[1:] == ["boss"]:
+        # Run at every prompt (the Habblaud mod): offices whose boss ended close, and a resumed boss gets its office back.
+        pid = claude_ancestor()
+        if pid:
+            R.tidy(pid, os.path.basename((os.environ.get("CLAUDE_CONFIG_DIR") or f"{R.HOME}/.claude").rstrip("/")))
         o = boss_office()
         if not o:
             print("{}")
@@ -218,11 +217,6 @@ def main():
     if not d:
         return
     kind, detail, reason = d
-    # Outside the folder a boss's user is at hand: the Habblaud mod asks them. Workers run alone and agy has no such answer.
-    if kind == "outside" and who == "boss" and not AGY[0]:
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                                 "permissionDecisionReason": reason.replace(STOP, "")}}))
-        return
     R.violation(o.get("id"), who, kind, detail, "hook")
     if AGY[0]:
         AGY[0] = False  # answered

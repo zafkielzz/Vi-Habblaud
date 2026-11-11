@@ -197,7 +197,9 @@ export function checkCommand(rules: Pick<OfficeRules, 'scope'>, cmd: string): st
  */
 export function rulesText(office: { name: string; folder: string }, rules: OfficeRules, who: 'boss' | 'workers'): string {
   const out = [`Office rules of "${office.name}" (set by the user; they win over the task):`];
-  if (office.folder) out.push(`- Edit files only inside: ${[office.folder, ...rules.scope.write].join(', ')}.`);
+  const inside = [office.folder, ...rules.scope.write].join(', ');
+  if (office.folder && who === 'boss') out.push(`- Office folder: ${office.folder}. Workers edit only inside ${inside}; you may also edit outside it.`);
+  else if (office.folder) out.push(`- Edit files only inside: ${inside}.`);
   if (rules.scope.deny.length) out.push(`- Never read or edit: ${rules.scope.deny.join(', ')}.`);
   if (rules.scope.commands.length) out.push(`- Never run: ${rules.scope.commands.join(', ')}.`);
   for (const r of rules.items) if (r.on && (r.for === 'all' || r.for === who)) out.push(`- ${r.text}`);

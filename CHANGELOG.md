@@ -12,6 +12,26 @@ middle one (0.**3**.0).
 
 ### Added
 
+- **`/boss` from the terminal:** type `/boss` in any Claude Code session to make it the boss of the office for its
+  folder (the deepest office holding it, else a new office named after the folder with every signed-in Antigravity
+  worker; in the home folder, the office "Terminal" with no folder limit). `/boss <office>` picks an office by id or
+  name, `/boss off` steps down. The session is told its workers and how to give them jobs. Installed globally by
+  `tools/agy/install.sh` (`~/.claude/commands/boss.md`).
+- **An office lasts as long as its boss's session:** when the session ends (closed, killed, machine off) the office
+  closes and is kept under the session id; `claude --resume` of that session brings it back by itself (folder,
+  workers, rules), since the boss remembers and the workers never do. `/offices` lists the open offices and the ended
+  ones a resume would bring back; `/offices rm <office>` closes one or forgets an ended one.
+- **`/workers` from the terminal:** in a boss session, `/workers` lists its office's workers (working now, free or not
+  signed in) and the accounts that can be added; `/workers add acc3 4` and `/workers rm acc2` change the list.
+- **`/quota` and workers near their limit:** `/quota` shows every worker's 5-hour and weekly use now (agy's own
+  `/usage`, which costs no tokens; Claude accounts from the file the mod keeps). `/boss` always puts every signed-in
+  worker in the office, except one near its quota (the office's quota stop, 90 % by default). A worker that reaches
+  its quota, or is found near it after a job, leaves the office by itself; `/quota` brings it back once its quota
+  has reset.
+- **Nested offices:** an office may sit inside another's folder (one for `~/Workspace`, one for `~/Workspace/app`); a
+  session belongs to the deepest. Two offices still cannot share the very same folder.
+- **The boss edits outside the office folder without being asked:** the folder limits the workers only. Forbidden
+  paths and commands still hold for the boss.
 - **📜 Office rules ("Nội quy") in the page:** a toolbar button (shortcut R) shows how many rules of the office shown
   are on, with a red ⚠ when something was refused today. Its dialog edits the office's scope (extra folders that may
   be edited, paths that may not be read, commands that may not run), its rules (for the boss, the workers or

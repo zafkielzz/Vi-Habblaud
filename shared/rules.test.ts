@@ -43,5 +43,6 @@ describe('office rules', () => {
     expect(w).not.toMatch(/B only|- Off|propose|At most/);
     const b = rulesText({ name: 'A', folder: '/p' }, r, 'boss');
     expect(b).toMatch(/B only[\s\S]*At most 2 jobs[\s\S]*agy-ask rules propose/);
+    expect(b).toContain('you may also edit outside it');
   });
 });

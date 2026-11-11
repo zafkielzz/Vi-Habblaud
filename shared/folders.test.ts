@@ -25,7 +25,7 @@ describe('office folders', () => {
   });
 
   it('office folders never overlap; an extra write folder may not reach another office', () => {
-    expect([...FOLDER_CLASH].sort()).toEqual(['contains', 'inside', 'same']);
+    expect([...FOLDER_CLASH]).toEqual(['same']);
     const offices = [{ id: 'a', folder: '/w/a' }, { id: 'b', folder: '/w/b' }];
     expect(writeFolderClash('/w/b/docs', offices, 'a')?.id).toBe('b');
     expect(writeFolderClash('/w', offices, 'a')?.id).toBe('b');

@@ -244,7 +244,7 @@ describe('TeamService: v2 (Antigravity boss, Claude workers)', () => {
 });
 
 describe('TeamService: offices', () => {
-  it('folders: symlinks resolved (another office\'s folder through a link is refused), never the whole disk, never nested', () => {
+  it('folders: symlinks resolved (another office\'s folder through a link is refused), never the whole disk, nested is fine', () => {
     const t = setup();
     const b = t.team();
     t.links.set('/w/link-to-a', '/w/a');
@@ -257,9 +257,9 @@ describe('TeamService: offices', () => {
     t.links.set('/w/link-to-b', '/w/b');
     expect(b.createOffice('B', '/w/link-to-b')).toMatchObject({ ok: true, office: { folder: '/w/b' } });
     expect(b.setFolder('b', '/w/link-to-a')).toMatchObject({ ok: false, status: 409 });
-    // office folders never overlap
-    expect(b.createOffice('Inner', '/w/a/inner')).toMatchObject({ ok: false, status: 409, error: expect.stringContaining('inside') });
-    expect(b.createOffice('Outer', '/w')).toMatchObject({ ok: false, status: 409, error: expect.stringContaining('holds') });
+    // two offices never share a folder, but one may sit inside another's
+    expect(b.createOffice('Inner', '/w/a/inner')).toMatchObject({ ok: true });
+    expect(b.createOffice('Outer', '/w')).toMatchObject({ ok: true });
     expect(b.createOffice('Apart', '/w/ab')).toMatchObject({ ok: true });
   });
 
@@ -465,5 +465,21 @@ describe('TeamService: office rules', () => {
     const o = t.office.commit().snapshot.team?.offices?.[0];
     expect(o?.rules?.rev).toBe(0);
     expect(o?.violations).toEqual([{ at: T0, office: o?.id, who: 'acc1', kind: 'cwd', detail: '/etc', by: 'ask' }]);
+  });
+});
+
+describe('TeamService: team.json changed by another program', () => {
+  it('a boss appointed from the terminal (office-boss) is picked up at the next tick', () => {
+    const t = setup();
+    t.main('.claude:7', 's7');
+    const s = t.team();
+    s.sync();
+    const file = t.saved();
+    file.offices.push({ id: 'cli', name: 'Terminal', folder: '', workers: ['acc1', 'acc2'],
+      boss: { kind: 'claude', id: '.claude:7', account: '.claude', pid: 7, name: 'Boss', at: T0 } });
+    writeFileSync(t.file, JSON.stringify(file, null, 2) + '\n\n');  // another size: a new stamp even in the same ms
+    s.sync();
+    expect(s.offices.map((o) => o.id)).toContain('cli');
+    expect(t.crowned()).toEqual(['.claude:7']);
   });
 });

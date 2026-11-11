@@ -241,7 +241,7 @@ export class OfficeMenu {
       line(tr('Running'), s.running ? plural(s.running, tr('job'), tr('jobs')) : tr('no job'), !s.running),
       line(tr('To-do'), todo, !s.todo),
       ...(s.scope ? [line(tr('Scope'), s.scope)] : []),
-      ...(s.overlap ? [h('p', { class: 'ui-officemenu__warn', text: tr('⚠ Its folder overlaps the folder of {0}: change one of them.', [s.overlap]) })] : []),
+      ...(s.overlap ? [h('p', { class: 'ui-officemenu__warn', text: tr('⚠ {0} works in the same folder: change one of them.', [s.overlap]) })] : []),
     );
     for (const v of this.head.querySelectorAll<HTMLElement>('.ui-officemenu__value')) v.title = v.textContent ?? '';
   }
