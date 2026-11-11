@@ -13,8 +13,8 @@ Habblaud mod.
                       Used by the Habblaud mod (mod/habblaud).
 
 Antigravity (agy) PreToolUse hooks use the same script (agy-plugin/office-rules): their event is {"toolCall": {"name",
-"args"}, "workspacePaths"} and a refusal is {"decision": "deny", "reason"}; a call it lets through gets {} (no
-decision: agy's own permissions still apply). agy tools: write_to_file / replace_file_content / ... (TargetFile) are
+"args"}, "workspacePaths"} and a refusal is {"decision": "deny", "reason"}; a call it lets through gets
+{"decision": "ask"}: agy's own permissions still apply (agy 1.5.5, 11/11, treats {} with no decision as a refusal). agy tools: write_to_file / replace_file_content / ... (TargetFile) are
 edits, view_file / read_file / grep_search / list_dir / find_by_name are reads, run_command (CommandLine) a command.
 
 Checks: Edit/Write/MultiEdit/NotebookEdit -> the path may be edited; Read/Grep/Glob -> it may be read; Bash -> no
@@ -162,7 +162,8 @@ def decide(o, ev, who="boss"):
     return "outside", ab or path, f"Office rule ({name}): files may be edited only inside {', '.join([folder, *rules['scope']['write']])}; {ab or path} is outside.{stop}"
 
 
-# An agy event (it always wants an answer on stdout; {} = no decision, agy's own permissions apply).
+# An agy event (it always wants an answer on stdout with a decision; "ask" = agy's own permissions apply).
+PASS = json.dumps({"decision": "ask"})
 AGY = [False]
 
 
@@ -232,5 +233,5 @@ if __name__ == "__main__":
     except Exception as e:  # never break the session: allow, and say why on stderr
         print(f"rules-hook: {type(e).__name__}: {e} (call allowed)", file=sys.stderr)
     if AGY[0]:
-        print("{}")
+        print(PASS)
     sys.exit(0)

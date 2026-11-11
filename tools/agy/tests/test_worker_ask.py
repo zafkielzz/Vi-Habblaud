@@ -502,13 +502,14 @@ class RulesHook(unittest.TestCase):
             e = dict(os.environ, HABBLAUD_AGY_PROFILES=self.root, HOME="/home/u", **(env if env is not None else {"AGY_OFFICE": "o1"}))
             r = subprocess.run([os.path.join(self.bin, "rules-hook")], input=call(name, args), env=e, capture_output=True, text=True, timeout=10)
             self.assertEqual(r.returncode, 0)
-            return json.loads(r.stdout)  # always exactly one JSON answer
+            return json.loads(r.stdout)  # always exactly one JSON answer, with a decision (agy 1.5.5 refuses {})
+        PASS = {"decision": "ask"}  # no opinion: agy's own permissions apply
         self.assertEqual(answer("run_command", {"CommandLine": "git push", "Cwd": "/x/shop"})["decision"], "deny")
         self.assertEqual(answer("view_file", {"AbsolutePath": "/x/shop/.env"})["decision"], "deny")
-        self.assertEqual(answer("replace_file_content", {"TargetFile": "src/a.py"}), {})  # relative: in the workspace
-        self.assertEqual(answer("run_command", {"CommandLine": "ls"}), {})
-        self.assertEqual(answer("browser_subagent", {"Task": "x"}), {})
-        self.assertEqual(answer("write_to_file", {"TargetFile": "/x/other/a.py"}, env={}), {})  # no office
+        self.assertEqual(answer("replace_file_content", {"TargetFile": "src/a.py"}), PASS)  # relative: in the workspace
+        self.assertEqual(answer("run_command", {"CommandLine": "ls"}), PASS)
+        self.assertEqual(answer("browser_subagent", {"Task": "x"}), PASS)
+        self.assertEqual(answer("write_to_file", {"TargetFile": "/x/other/a.py"}, env={}), PASS)  # no office
 
     def test_real_home_from_an_agy_profile(self):
         code = "import office_rules as R; print(R.HOME, R.ROOT)"
