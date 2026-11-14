@@ -64,9 +64,12 @@ The office itself runs on your machine and spends no tokens: it only reads logs,
 
 ## Install
 
+Only want the boss and its workers (`/boss`, `agy-ask`, `claude-ask`) without the office? The same scripts are
+published on their own in [Agent-Farm](https://github.com/zafkielzz/Agent-Farm).
+
 You need:
 
-- **Linux.** The worker scripts rely on `setsid`, `dbus-daemon` and `gnome-keyring-daemon`.
+- **Linux.** The worker scripts rely on `setsid`, `dbus-daemon` and `gnome-keyring-daemon`. On Windows, use WSL2.
 - **Node.js 22.12+** and npm.
 - **[Claude Code](https://code.claude.com)** 2.1.287 or newer, signed in and used at least once, so `mod:install` finds
   the account.

@@ -8,7 +8,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "bin"))
 import office_rules as R  # noqa: E402
 
-with open(os.path.join(HERE, "..", "..", "..", "shared", "rules.vectors.json")) as f:
+VECTORS = os.path.join(HERE, "..", "..", "..", "shared", "rules.vectors.json")  # in Habblaud
+if not os.path.exists(VECTORS):  # the standalone copy (Agent-Farm) keeps it next to the tests
+    VECTORS = os.path.join(HERE, "rules.vectors.json")
+with open(VECTORS) as f:
     V = json.load(f)
 RULES = R.parse_rules({"scope": V["scope"]})
 
