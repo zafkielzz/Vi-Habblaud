@@ -10,6 +10,7 @@ import { statusLabel } from './model';
 import { folderOverlap, officeBoss, teamOffices } from './offices';
 import { scopeLine } from './rules-model';
 import { tr } from '../../../shared/i18n';
+import { cloneSuffix, workerBase } from '../../../shared/workers';
 
 type SummarySnap = Pick<OfficeSnapshot, 'agents' | 'rooms' | 'accounts'> & Partial<Pick<OfficeSnapshot, 'team'>>;
 
@@ -34,11 +35,15 @@ export interface OfficeSummary {
 /** "alice (Agy)" -> "alice". */
 const bare = (name: string): string => name.replace(/\s*\([^)]*\)\s*$/, '');
 
-/** A worker's short name: its account's name (Claude "claude:<id>", Antigravity "accN"), else the id. */
+/**
+ * A worker's short name: its account's name (Claude "claude:<id>", Antigravity "accN"), else the id; a clone
+ * ("acc2#2": one more session of the account) ends in " #2".
+ */
 export function workerShortName(snap: Pick<SummarySnap, 'accounts' | 'team'> | null | undefined, worker: string): string {
-  const account = worker.startsWith('claude:') ? worker.slice(7) : snap?.team?.agy.find((p) => p.acc === worker)?.account;
+  const base = workerBase(worker);
+  const account = base.startsWith('claude:') ? base.slice(7) : snap?.team?.agy.find((p) => p.acc === base)?.account;
   const acc = account ? snap?.accounts.find((a) => a.id === account) : undefined;
-  return acc ? bare(acc.name) || worker : worker;
+  return acc && bare(acc.name) ? `${bare(acc.name)}${cloneSuffix(worker)}` : worker;
 }
 
 export function officeSummary(snap: SummarySnap | null | undefined, office: OfficeInfo): OfficeSummary {

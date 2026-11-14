@@ -12,6 +12,16 @@ middle one (0.**3**.0).
 
 ### Added
 
+- **One account, several workers:** an account that is already a worker of an office, and the boss's own Claude
+  account, can be added again. Each time it joins as a clone, one more session of the same account (`acc2#2`,
+  `claude:.claude#3`): a worker of its own, with its own terminal, BUSY state and character (named "… #2"), sharing the
+  account's sign-in and quota, so the sessions of an account near its limit leave and come back together. In
+  **＋ Workers** such an account is under "Clone a session"; from the boss's terminal, `/workers clone claude 3` adds
+  three sessions of `~/.claude` (`claude` = that default account) and `/workers rm acc2#2` removes one. `/boss` keeps
+  the clones. A job to a worker on the boss's own account saves the boss's context, not
+  the account's quota. An Antigravity boss's own account still cannot work for it: `agy-ask` knows that boss by its
+  profile.
+
 - **`/boss` from the terminal:** type `/boss` in any Claude Code session to make it the boss of the office for its
   folder (the deepest office holding it, else a new office named after the folder with every signed-in Antigravity
   worker; in the home folder, the office "Terminal" with no folder limit). `/boss <office>` picks an office by id or
@@ -21,8 +31,16 @@ middle one (0.**3**.0).
   closes and is kept under the session id; `claude --resume` of that session brings it back by itself (folder,
   workers, rules), since the boss remembers and the workers never do. `/offices` lists the open offices and the ended
   ones a resume would bring back; `/offices rm <office>` closes one or forgets an ended one.
-- **`/workers` from the terminal:** in a boss session, `/workers` lists its office's workers (working now, free or not
-  signed in) and the accounts that can be added; `/workers add acc3 4` and `/workers rm acc2` change the list.
+- **`/workers` from the terminal:** in a boss session, `/workers` lists its office's workers by account (each session
+  working now, free or not signed in), then the accounts that can be added and the ones that can be cloned, each with
+  the command to type.
+- **Adding an account and cloning a session are two things:** `/workers add acc3 4` takes accounts that are not in the
+  office yet; `/workers clone acc2 3` gives more sessions of an account already there, or of the boss's own Claude
+  account (`/workers clone claude`). Each refuses the other's case and says what to type instead. `/workers rm acc2#2`
+  removes one session, `/workers rm acc2` the account with all its sessions, `/workers rm all` everyone. In the page,
+  **＋ Workers** shows the same two groups: "Add an account" and "Clone a session".
+- **`/office`:** lists every command used in an office (`/boss`, `/workers` and its verbs, `/quota`, `/offices`, and
+  the boss's `agy-ask` / `claude-ask`), one example each.
 - **`/quota` and workers near their limit:** `/quota` shows every worker's 5-hour and weekly use now (agy's own
   `/usage`, which costs no tokens; Claude accounts from the file the mod keeps). `/boss` always puts every signed-in
   worker in the office, except one near its quota (the office's quota stop, 90 % by default). A worker that reaches
@@ -236,7 +254,17 @@ middle one (0.**3**.0).
 - **"Boss overloaded" thresholds in Settings:** when a session counts as tired or overloaded (share of the context and
   compactions) can now be set under Settings › 🥵 Boss overloaded. The defaults stay 60% or 1 compaction and 80% or 2.
 
+### Removed
+
+- **herdr:** the `agy-up`, `agy-mode` and `agy-sync` scripts (workers in herdr panes) are gone; workers get their jobs
+  through `agy-ask` / `claude-ask` and the office. The `agy-orchestrator` skill is a third of its old size.
+
 ### Fixed
+
+- **Two terminals, two bosses:** typing `/boss` in a second Claude Code session no longer takes the office of a boss
+  whose session is still running. In the home folder the next free "Terminal" office is used, or "Terminal 2",
+  "Terminal 3"... is opened with the same workers; in a project folder whose office already has a running boss,
+  `/boss` says so instead. `/boss <office>` still takes an office over on purpose.
 
 - **A worker signed in moments ago can be added at once:** adding an Antigravity account whose profile appeared
   since the last re-read of `~/.agy_profiles` (every 30 s) said "account not found"; the profiles are now re-read first.

@@ -8,7 +8,9 @@ agy-ask rules propose "<rule>" --why "<reason>" [--for workers|boss|all] [--offi
 
 Gives one job to a worker and prints ONLY its final answer (capped at --max chars, default 2000). One source, two
 commands: installed as agy-ask (Antigravity workers, "acc2") and as the symlink claude-ask (Claude Code workers: the
-account id ".claude-work", "claude:.claude-work" or just "work"). The worker id is "acc2" / "claude:.claude-work".
+account id ".claude-work", "claude:.claude-work" or just "work"; "claude" = the default account ~/.claude). The worker id
+is "acc2" / "claude:.claude-work"; "<id>#N" (N >= 2: "acc2#2", "claude:.claude#3") is a clone, one more session of the
+same account: its own terminal, queue and BUSY in the office, the account's profile, sign-in, usage and quota.
 
 Through the office (Habblaud at $HABBLAUD_URL, default http://127.0.0.1:4747): the job goes into the worker's own
 terminal (POST /api/workers/ask) as a fresh conversation, and this call waits on GET /api/workers/jobs/<id>?wait=60,
@@ -21,10 +23,12 @@ the jobs it runs.
 Team rule (~/.agy_profiles/team.json v3, edited in Habblaud; no file = no rule): the file lists offices, each one team
 for one project folder ({"offices": [{"id", "name", "folder", "boss", "workers"}]}; a v2 file {boss, workers} is
 one office "main"). The boss of an office (a Claude boss: its PID is an ancestor of this call; an Antigravity boss:
-an ancestor `agy` runs with HOME=~/.agy_profiles/<boss acc>) gives jobs only to that office's workers, never to its
-own account, and the job carries the office id. A caller that is no office's boss is refused while any office has a
-boss; with no boss anywhere it may give jobs to any office's worker. Jobs sent from the office (AGY_ASK_FROM_OFFICE=1,
-with AGY_OFFICE=<id>; also usable by hand) skip the rule.
+an ancestor `agy` runs with HOME=~/.agy_profiles/<boss acc>) gives jobs only to that office's workers, each by the id
+in the list (a clone only when that clone is listed), and the job carries the office id. A Claude boss's own account may
+be one of its workers (plain or as clones): every job is a fresh session of the account. An Antigravity boss's may not:
+that boss is recognised by its profile, so a worker on the same profile would pass for the boss. A caller that is no
+office's boss is refused while any office has a boss; with no boss anywhere it may give jobs to any office's worker.
+Jobs sent from the office (AGY_ASK_FROM_OFFICE=1, with AGY_OFFICE=<id>; also usable by hand) skip the rule.
 
 Claude Code workers start lean unless --full: no MCP servers, no skills or slash commands, only the tools in LEAN_TOOLS
 (the default set costs ~24k tokens of context per job before any work, mostly the Workflow and Agent tools; lean ~8k),
@@ -88,16 +92,19 @@ def die(msg, code=FAIL):
 # ------------------------------------------------------------------ arguments
 
 def worker_id(name):
-    """The worker id for the account named on the command line ("acc2", "claude:.claude-work")."""
+    """The worker id for the account named on the command line ("acc2", "claude:.claude-work"; a clone keeps its
+    "#N": "acc2#2", "claude#3" -> "claude:.claude#3")."""
     if TOOL == "agy":
         acc = name[4:] if name.startswith("agy:") else name
-        if acc.startswith("claude:") or acc.startswith(".claude"):
+        if acc.startswith("claude:") or acc.startswith(".claude") or R.account_of(acc) == "claude":
             die(f"{name} is a Claude Code account: use claude-ask")
         return acc
-    acc = name[7:] if name.startswith("claude:") else name
+    acc, n = R.split_worker(name[7:] if name.startswith("claude:") else name)
     if acc.startswith("acc") or acc.startswith("agy:"):
         die(f"{name} is an Antigravity account: use agy-ask")
-    return "claude:" + (acc if acc.startswith(".") else f".claude-{acc}")
+    if acc == "claude" and not os.path.isdir(f"{HOME}/.claude-claude"):
+        acc = ".claude"  # the default account
+    return "claude:" + (acc if acc.startswith(".") else f".claude-{acc}") + (f"#{n}" if n > 1 else "")
 
 
 def flag(extra, name):
@@ -141,10 +148,11 @@ def parse(argv):
 
 
 def defaults(worker):
-    """The worker's defaults for calls that do not say (defaults.json), or {}."""
+    """The worker's defaults for calls that do not say (defaults.json: its own, else its account's), or {}."""
     try:
         with open(DEFAULTS) as f:
-            d = json.load(f).get(worker)
+            all_ = json.load(f)
+        d = all_.get(worker) if isinstance(all_.get(worker), dict) else all_.get(R.account_of(worker))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError, AttributeError):
         return {}
@@ -250,7 +258,7 @@ def office_of_caller(t, who):
 def same_account(worker, claude_pid):
     """The Claude worker is the account of the calling claude (its CLAUDE_CONFIG_DIR, else ~/.claude)."""
     conf = env_of(claude_pid, "CLAUDE_CONFIG_DIR") or f"{HOME}/.claude"
-    return os.path.realpath(conf) == os.path.realpath(f"{HOME}/{worker[len('claude:'):]}")
+    return os.path.realpath(conf) == os.path.realpath(f"{HOME}/{R.account_of(worker)[len('claude:'):]}")
 
 
 def office_label(o):
@@ -259,7 +267,9 @@ def office_label(o):
 
 def check_team(worker, who):
     """(by, office id or None): by = 'you' (office), 'boss' or 'script'; refuses (exit 2) a job the team rule does
-    not allow. The boss of an office gives jobs to that office's workers only."""
+    not allow. The boss of an office gives jobs to that office's workers only, by the ids in its list: a clone
+    ("acc2#2") only when that clone is listed. A Claude boss's own account may be listed (the job is one more session
+    of it); an Antigravity boss's may not (that boss is known by its profile: its worker would pass for the boss)."""
     if os.environ.get("AGY_ASK_FROM_OFFICE") == "1":
         return "you", os.environ.get("AGY_OFFICE") or None
     tidy(who)
@@ -269,11 +279,11 @@ def check_team(worker, who):
     office = office_of_caller(t, who)
     if office:
         boss = boss_of(office)
-        if worker == boss_worker(boss):
-            die(f"{worker} is the boss's own account", REFUSED)
+        if boss.get("kind") == "agy" and R.account_of(worker) == boss_worker(boss):
+            die(f"{worker} is the boss's own account (an Antigravity boss is known by its profile, so its account cannot work for it)", REFUSED)
         workers = workers_of(office)
         if workers is not None and worker not in workers:
-            die(f"{worker} is not a worker of your office {office_label(office)} (workers: {', '.join(workers) or 'none'}; add it in Habblaud)", REFUSED)
+            die(f"{worker} is not a worker of your office {office_label(office)} (workers: {', '.join(workers) or 'none'}; the user adds one with /workers add or in Habblaud)", REFUSED)
         return "boss", office.get("id")
     bosses = [boss_of(o) for o in t["offices"] if boss_of(o)]
     if bosses:
@@ -445,7 +455,8 @@ def running_jobs(oid):
 
 
 def usage_of(worker):
-    """The worker's highest use (5-hour or weekly, %) as Habblaud knows it, or None (unknown)."""
+    """The highest use (5-hour or weekly, %) of the worker's account as Habblaud knows it, or None (unknown)."""
+    worker = R.account_of(worker)  # clones share their account's quota
     account = worker if worker.startswith("claude:") else f"agy:{worker}"
     account = account[len("claude:"):] if account.startswith("claude:") else account
     try:
@@ -472,7 +483,7 @@ def refresh_usage(worker, office):
         return
     try:
         subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.realpath(__file__)), "office_rules.py"),
-                          "refresh", worker, office], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                          "refresh", R.account_of(worker), office], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
         pass
@@ -502,8 +513,9 @@ def apply_rules(a, oid):
     if stop:
         used = usage_of(a["worker"])
         if used is not None and used >= stop:
-            R.bench(o.get("id"), a["worker"], f"{a['worker']} at {used:g}%")
-            refuse(o, a, "quota", f"{a['worker']} at {used:g}%", f"{a['worker']} has used {used:g}% of its quota (limit {stop}%), so it left the office until its quota resets: give the job to another worker")
+            account = R.account_of(a["worker"])  # the quota is the account's: its sessions leave together
+            R.bench(o.get("id"), a["worker"], f"{account} at {used:g}%")
+            refuse(o, a, "quota", f"{account} at {used:g}%", f"{account} has used {used:g}% of its quota (limit {stop}%), so it left the office until its quota resets: give the job to a worker on another account")
     a["prompt"] = R.rules_text(o, rules, "workers") + "\n\n" + a["prompt"]
     a["rules_office"] = o.get("id")
 
@@ -621,14 +633,13 @@ def log(entry):
 
 
 def log_start(a, who, t0):
-    acc = a["worker"]
-    log({"event": "start", "ts": t0, "acc": acc, "worker": acc, "via": "headless", "pid": os.getpid(), "mode": a["mode"],
+    log({"event": "start", "ts": t0, "acc": R.account_of(a["worker"]), "worker": a["worker"], "via": "headless", "pid": os.getpid(), "mode": a["mode"],
          "role": a["role"], "model": a["model"], "effort": a["effort"], "claude_pid": who["claude_pid"],
          "cwd": a["cwd"], "prompt": a["task"][:200], **({"office": a["office"]} if a.get("office") else {})})
 
 
 def log_end(a, t0, **fields):
-    log({"event": "end", "ts": time.time(), "acc": a["worker"], "worker": a["worker"], "via": "headless",
+    log({"event": "end", "ts": time.time(), "acc": R.account_of(a["worker"]), "worker": a["worker"], "via": "headless",
          "pid": os.getpid(), "sec": round(time.time() - t0), **fields})
 
 
@@ -641,7 +652,7 @@ def finish(a, t0, status, answer, other, fields):
     office = a.get("office")
     if status != "SUCCESS" and office and re.search(r"quota|RESOURCE_EXHAUSTED|\b429\b", end["error"], re.I):
         if R.bench(office, a["worker"], f"{a['worker']}: quota reached"):
-            print(f"{CMD}: {a['worker']} reached its quota and left the office until it resets (/quota puts it back)", file=sys.stderr)
+            print(f"{CMD}: {R.account_of(a['worker'])} reached its quota and left the office until it resets (/quota puts it back)", file=sys.stderr)
     elif TOOL == "agy" and office:
         refresh_usage(a["worker"], office)
     if status != "SUCCESS":
@@ -654,7 +665,7 @@ def finish(a, t0, status, answer, other, fields):
 
 
 def headless_agy(a, who):
-    acc = a["worker"]
+    acc = R.account_of(a["worker"])  # a clone runs exactly like its account: one more `agy -p` on the same profile
     cmd = ["agy-as", acc, "-p", a["prompt"], "--output-format", "stream-json"]
     if a["mode"] != "default":
         cmd += ["--mode", a["mode"]]
@@ -666,7 +677,7 @@ def headless_agy(a, who):
     env = {k: v for k, v in os.environ.items() if k not in BOSS_VARS}
     env["PATH"] = f"{HOME}/.local/bin:" + env.get("PATH", "")
     if a.get("rules_office"):  # for agy-plugin/office-rules (rules-hook), when it is installed in the profile
-        env.update(AGY_OFFICE=a["rules_office"], AGY_WORKER=acc)
+        env.update(AGY_OFFICE=a["rules_office"], AGY_WORKER=a["worker"])
     t0 = time.time()
     log_start(a, who, t0)
     p = subprocess.Popen(cmd, cwd=a["cwd"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -715,7 +726,7 @@ def headless_agy(a, who):
 
 
 def headless_claude(a, who):
-    account = a["worker"][len("claude:"):]
+    account = R.account_of(a["worker"])[len("claude:"):]  # a clone is one more session of the same account
     conf = f"{HOME}/{account}"
     if not os.path.isdir(conf):
         die(f"no Claude Code account folder {conf}")

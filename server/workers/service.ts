@@ -8,7 +8,9 @@
 // `max` characters. After the job the terminal stays open to read until it idles out: every job is a new conversation,
 // so there is nothing to continue in it and nobody types there (only sessions you open in a terminal yourself).
 //
-// One session per account at a time: a worker on a job refuses new ones (BUSY) and the caller asks again later.
+// One job per worker at a time: a worker on a job refuses new ones (BUSY) and the caller asks again later. A clone
+// ("acc2#2", "claude:.claude#3": shared/workers.ts) is a worker of its own, with its own terminal and BUSY, on its
+// account's profile / config dir: the sessions of one account work side by side and share its quota.
 //
 // Jobs go to the agy-ask log (start/end lines with via "terminal": level, tokens and news, as before) and to the room's
 // job board (with their WorkerJob id, so the board can cancel them).
@@ -18,6 +20,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import type { JobBoardItem, PtyInfo, WorkerJob, WorkerKind, WorkerSession } from '../../shared/types';
 import { maskSecrets, truncate } from '../../shared/activity';
 import { tr } from '../../shared/i18n';
+import { workerBase } from '../../shared/workers';
 import { errMsg, log } from '../log';
 import type { Office } from '../model/office';
 import type { GhostCandidate } from './ghosts';
@@ -37,6 +40,8 @@ export const IDLE_CLOSE_MS = 20 * 60_000;
 const TICK_MS = 1_000;
 /** Waiting for an old terminal of the same account to close before starting another one. */
 const CLOSE_WAIT_MS = 8_000;
+/** Waiting for an earlier job of the same Antigravity profile (a clone's) to find its conversation before starting. */
+const CONV_WAIT_MS = 30_000;
 const ESC = '\x1b';
 /** A Claude job whose conversation has not started by then, in a folder its account does not trust, is stopped. */
 export const TRUST_WAIT_MS = 15_000;
@@ -68,6 +73,7 @@ export function leanClaudeArgs(max: number): string[] {
 }
 
 export interface WorkerTarget {
+  /** WorkerId: an account, or a clone of one ("acc2#2"): each is a session of its own. */
   id: string;
   kind: WorkerKind;
   /** Its character in the office. */
@@ -75,7 +81,7 @@ export interface WorkerTarget {
   /** AccountInfo.id. */
   account: string;
   name: string;
-  /** Antigravity: profile (accN) and agy state dir (<profile>/.gemini/antigravity-cli). */
+  /** Antigravity: profile (accN, also for a clone "accN#2") and agy state dir (<profile>/.gemini/antigravity-cli). */
   acc?: string;
   stateDir?: string;
   /** Claude Code: config dir (CLAUDE_CONFIG_DIR, unless `isDefault`). */
@@ -142,6 +148,8 @@ export interface WorkerServiceOptions {
 }
 
 interface Job extends WorkerJob {
+  /** The order jobs were asked in (sessions of one Antigravity profile start one at a time). */
+  order: number;
   model?: string;
   max: number;
   lean?: boolean;
@@ -265,6 +273,7 @@ export class WorkerService {
     const now = this.now();
     const job: Job = {
       id: `w${now.toString(36)}${(++this.seq).toString(36)}`,
+      order: this.seq,
       worker: s.t.id,
       agentId: s.t.agentId,
       prompt: truncate(maskSecrets(taskOf(prompt).replace(/\s+/g, ' ')), 300),
@@ -291,6 +300,7 @@ export class WorkerService {
     this.jobList = [job, ...this.jobList].slice(0, JOBS_KEPT);
     this.starting.add(s.t.id);
     try {
+      await this.profileTurn(s, job);
       // Cancelled while the old terminal was closing: nothing to start.
       await this.restart(s, () => (live(job) ? this.jobProgram(s, job, prompt) : undefined));
     } catch (err) {
@@ -300,7 +310,8 @@ export class WorkerService {
       this.starting.delete(s.t.id);
     }
     if (!live(job)) return { ok: true, job: view(job) };
-    this.writeLog({ event: 'start', ts: job.startedAt / 1000, acc: s.t.id, role: job.role, mode: job.mode, effort: job.effort, claude_pid: job.by === 'boss' ? (job.callerPid ?? null) : null, pid: job.ptyPid, prompt: prompt.slice(0, 200), via: 'terminal', worker: s.t.id, job: job.id, ...(job.office ? { office: job.office } : {}) });
+    // `acc`: the account (what the log's readers sum by); `worker`: the session (a clone has its own id).
+    this.writeLog({ event: 'start', ts: job.startedAt / 1000, acc: workerBase(s.t.id), role: job.role, mode: job.mode, effort: job.effort, claude_pid: job.by === 'boss' ? (job.callerPid ?? null) : null, pid: job.ptyPid, prompt: prompt.slice(0, 200), via: 'terminal', worker: s.t.id, job: job.id, ...(job.office ? { office: job.office } : {}) });
     this.toBoard(job);
     this.opts.office.addActivity(s.t.agentId, { id: `${job.id}:start`, at: now, kind: 'prompt', icon: '📋', text: truncate(job.prompt, 40), detail: job.prompt }, true);
     this.changed(s);
@@ -472,14 +483,28 @@ export class WorkerService {
     if (!j.conv) {
       // Without the folders listed before agy started, any old conversation would look new.
       if (!j.known) return undefined;
-      const fresh = newDirs(join(s.t.stateDir!, 'brain'), j.known);
+      // Not a conversation another job already found as its own (the sessions of one profile share the folder).
+      const taken = new Set(this.jobList.flatMap((x) => (x !== j && x.conv ? [x.conv] : [])));
+      const fresh = newDirs(join(s.t.stateDir!, 'brain'), j.known, taken);
       if (!fresh) return undefined;
       j.conv = fresh;
     }
     return agyTranscriptPath(s.t.stateDir!, j.conv);
   }
 
-  /** Closes the worker's terminal (waiting for it to end: one agy per profile) and opens another. */
+  /**
+   * The sessions of one Antigravity profile (a worker and its clones) start one at a time: agy names a conversation
+   * itself, and a job knows its own as the folder that appears after it started. Waits (at most CONV_WAIT_MS) while
+   * an earlier job on the same profile has not found its conversation yet.
+   */
+  private async profileTurn(s: Session, job: Job): Promise<void> {
+    if (s.t.kind !== 'agy') return;
+    const earlier = (): boolean =>
+      [...this.sessions.values()].some((x) => x !== s && x.t.kind === 'agy' && x.t.stateDir === s.t.stateDir && !!x.job && live(x.job) && !x.job.conv && x.job.order < job.order);
+    for (let i = 0; i < CONV_WAIT_MS / 200 && live(job) && earlier(); i++) await this.sleep(200);
+  }
+
+  /** Closes the worker's terminal (waiting for it to end: one terminal per worker) and opens another. */
   private async restart(s: Session, open: () => PtyInfo | undefined): Promise<void> {
     const agentId = s.t.agentId;
     s.activeAt = this.now();
@@ -542,7 +567,7 @@ export class WorkerService {
     if (error) j.error = error;
     if (j.turn?.tokens) j.tokens = j.turn.tokens;
     const sec = Math.round((j.endedAt - j.startedAt) / 1000);
-    const end: Record<string, unknown> = { event: 'end', ts: j.endedAt / 1000, acc: j.worker, pid: j.ptyPid, status: logStatus, sec, via: 'terminal', worker: j.worker, job: j.id, ...(j.office ? { office: j.office } : {}) };
+    const end: Record<string, unknown> = { event: 'end', ts: j.endedAt / 1000, acc: workerBase(j.worker), pid: j.ptyPid, status: logStatus, sec, via: 'terminal', worker: j.worker, job: j.id, ...(j.office ? { office: j.office } : {}) };
     if (j.tokens) end.usage = { ...(j.turn?.usage ?? {}), total_tokens: j.tokens };
     if (error && status === 'failed') end.error = error;
     this.writeLog(end);
@@ -650,12 +675,12 @@ function dirSet(dir: string): Set<string> {
 }
 
 /** A folder in `dir` that was not there before (the conversation agy just created). */
-function newDirs(dir: string, known: Set<string>): string | undefined {
+function newDirs(dir: string, known: Set<string>, taken?: Set<string>): string | undefined {
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
     return undefined;
   }
-  return names.find((n) => !known.has(n) && /^[0-9a-f-]{36}$/.test(n));
+  return names.find((n) => !known.has(n) && !taken?.has(n) && /^[0-9a-f-]{36}$/.test(n));
 }

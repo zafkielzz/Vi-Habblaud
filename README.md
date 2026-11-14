@@ -101,7 +101,10 @@ Then open **http://127.0.0.1:4747**. If `~/.local/bin` is not on your PATH, the 
    offices cannot share a folder or sit inside each other, so do not use your home folder.
 
 3. **Add the boss and the workers.** In the sidebar, **＋** next to Boss opens a Claude Code session in the office's folder
-   and makes it the boss. **＋** next to Workers adds an account.
+   and makes it the boss. **＋** next to Workers has two lists: **Add an account** (one that is not in the office yet) and
+   **Clone a session** (one more session, `#2`, `#3`…, of an account that is already a worker there or of the boss's own
+   Claude account, with its own terminal, on the same quota). From the boss's terminal: `/workers add acc3`,
+   `/workers clone claude 3`, `/workers rm acc3`; `/office` lists every command.
 
 4. **Talk to the boss** in its terminal on the page. If the folder has no `HANDOFF.md`, the boss asks whether to create one
    from your idea, and its "Next steps" list becomes the to-do list on the Board.

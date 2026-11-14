@@ -117,14 +117,16 @@ const GUIDE: [string, string[]][] = [
   [tr('👑 The boss'), [
     tr('＋ next to Boss opens a Claude Code session in the office folder and makes it the boss. You talk to it in its terminal.'),
     tr('You can also pick a session you already have: open its details and press 👑 Make boss, or type /boss in that session\'s terminal.'),
-    tr('The boss plans, gives jobs to the workers and checks the results. An account cannot be boss and worker in the same office.'),
+    tr('The boss plans, gives jobs to the workers and checks the results.'),
     tr('In a folder without a HANDOFF file, the boss asks whether to create one before it starts.'),
   ]],
   [tr('🧑‍🔧 Workers'), [
-    tr('＋ next to Workers adds an account, Antigravity or Claude Code. Accounts must be signed in first.'),
+    tr('＋ next to Workers has two lists. "Add an account" takes an Antigravity or Claude Code account that is not in the office yet. Accounts must be signed in first.'),
     tr('Every job is a new conversation: a worker does not remember the job before it.'),
     tr("A worker's terminal is read-only: open its details and press 👁 Watch its terminal."),
     tr('A worker can serve several offices. It then has a character in each, named "(2)", and a busy worker refuses new jobs.'),
+    tr('"Clone a session" gives one more session ("#2", "#3"…) of an account already in the office, or of the boss\'s own Claude account: its own terminal, working side by side on the same quota.'),
+    tr('In the boss\'s terminal: /workers add acc3 (a new account), /workers clone claude 3 (three more sessions), /workers rm acc3#2 (one session) or /workers rm acc3 (the account with all its sessions). /office lists every command.'),
   ]],
   [tr('📨 Giving work'), [
     tr('Directly: type in the boss\'s terminal, or send a message from its details. It starts right away.'),

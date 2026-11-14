@@ -2,12 +2,14 @@
 // edited by the server (POST /api/team, server/team.ts) and read by agy-ask / claude-ask, which enforce it.
 // - ＋ Boss: a Claude Code session (a logged-in Claude account and a folder -> a new session in the browser terminal,
 //   appointed right away, pending until it shows up) or an Antigravity terminal (`{bossAgy}`: the server opens
-//   `agy-as accN` and appoints it). The current boss moves to Others; an account that was a worker leaves Workers
-//   (one account is never both).
-// - ＋ Worker: a logged-in Antigravity or Claude account that is neither a worker nor the boss's -> registered.
+//   `agy-as accN` and appoints it). The current boss moves to Others; an Antigravity account that was a worker leaves
+//   Workers (agy-ask knows an Antigravity boss by its profile, so its account is never both).
+// - ＋ Worker: two groups (workers-api.ts workerChoiceGroups). "Add an account": a logged-in Antigravity or Claude
+//   account that is not in the office yet -> registered. "Clone a session": an account that is already a worker of the
+//   office, or the boss's own -> one more session of the same account (a clone, "#2", "#3"…).
 // Both act on the office shown (ui/offices.ts): the boss opens in the office's folder (an office without one declares
 // it here first); a worker of another office can join this one too (workers are shared); an Antigravity account that
-// is the boss of another office is not offered (one agy per profile).
+// is the boss of an office is not offered.
 import type { AccountInfo, OfficeInfo, WorkerKind } from '../../../shared/types';
 import type { UiComponent, UiContext } from './context';
 import { h, iconButton, setHidden, setText } from './dom';
@@ -15,9 +17,10 @@ import { ICONS } from './icons';
 import { segmented } from './settings';
 import { loadFolders, shortPath, spawnFolders, type FolderOption } from './spawn';
 import { createAccountChip, updateAccountChip } from './widgets';
-import { appointAgyBoss, appointBoss, freeWorkers, setOfficeFolder, setWorker } from './workers-api';
+import { appointAgyBoss, appointBoss, setOfficeFolder, setWorker, workerChoiceGroups, workerChoices, type WorkerChoice } from './workers-api';
 import { agyBossOffice, folderProblem, officeBoss, otherOfficesOf, teamOffices } from './offices';
 import { tr } from '../../../shared/i18n';
+import { cloneSuffix, workerBase } from '../../../shared/workers';
 
 type Kind = 'boss' | 'workers';
 
@@ -216,7 +219,7 @@ export class TeamDialogs implements UiComponent {
         (id) => (this.agyAcc = id),
         'agy',
       );
-      if ((office?.workers ?? team?.workers)?.includes(this.agyAcc)) leaves = tr('{0} is a worker now: it leaves Workers (an account is never both).', [this.ctx.account(team?.agy.find((p) => p.acc === this.agyAcc)?.account ?? '')?.name ?? this.agyAcc]);
+      if ((office?.workers ?? team?.workers)?.some((w) => workerBase(w) === this.agyAcc)) leaves = tr('{0} is a worker now: it leaves Workers (an Antigravity account is never both).', [this.ctx.account(team?.agy.find((p) => p.acc === this.agyAcc)?.account ?? '')?.name ?? this.agyAcc]);
     } else {
       accountList = this.radioList(
         tr('Claude account'),
@@ -224,7 +227,6 @@ export class TeamDialogs implements UiComponent {
         this.account,
         (id) => (this.account = id),
       );
-      if ((office?.workers ?? team?.workers)?.includes(`claude:${this.account}`)) leaves = tr('{0} is a worker now: it leaves Workers (an account is never both).', [this.ctx.account(this.account)?.name ?? this.account]);
     }
     // The office's folder: fixed once declared; an office without one picks it here (it is declared on open).
     const fixed = office?.folder ?? '';
@@ -355,9 +357,9 @@ export class TeamDialogs implements UiComponent {
     const team = this.ctx.store.snapshot?.team;
     const office = this.ctx.selectedOffice();
     const offices = teamOffices(team);
-    const free = freeWorkers(team, team?.offices ? office : undefined);
+    const free = workerChoices(team, team?.offices ? office : undefined);
     setText(this.titleEl, office && offices.length > 1 ? tr('＋ Workers of {0}', [office.name]) : tr('＋ Workers'));
-    setText(this.intro, tr("Logged-in accounts that are not workers yet (the boss's account cannot be one). Only workers get jobs, from the boss or from you."));
+    setText(this.intro, tr('Two ways to get a worker: add an account that is not in this office yet, or clone a session of one that already is. Only workers get jobs, from the boss or from you.'));
     setHidden(this.bossKindSeg.row, true);
     setHidden(this.submit, true);
     if (!team) {
@@ -365,31 +367,44 @@ export class TeamDialogs implements UiComponent {
       return;
     }
     if (!free.length) {
-      this.body.replaceChildren(h('p', { class: 'ui-muted', text: tr('Every logged-in account is already a worker (or the boss). Add more accounts with the Accounts button.') }));
+      this.body.replaceChildren(h('p', { class: 'ui-muted', text: tr('No logged-in account to add. Add accounts with the Accounts button.') }));
       return;
     }
+    // The two kinds of a new worker, apart: an account that is new to the office, or one more session of one already there.
+    const groups = workerChoiceGroups(free);
+    const row = (c: WorkerChoice): HTMLElement => {
+      const account = this.ctx.account(c.account);
+      const chip = createAccountChip('sm');
+      updateAccountChip(chip, account, c.account, c.kind);
+      const name = `${account?.name ?? workerBase(c.worker)}${cloneSuffix(c.worker)}`;
+      const add = h('button', { class: 'ui-btn', type: 'button', text: c.clone ? tr('＋ Clone') : tr('＋ Add'), on: { click: () => void this.addWorker(c.worker, name, add) } });
+      // (workers are shared: one already working for another office can join this one too)
+      const also = otherOfficesOf(offices, c.worker, office?.id);
+      // Already here, or the boss's own account: one more session of it (a clone).
+      const again = c.own ? tr("another session of the boss's account (#{0})", [c.n]) : c.clone && c.n > 1 ? tr('another session of this account (#{0})', [c.n]) : '';
+      add.disabled = this.busy;
+      return h(
+        'li',
+        { class: 'ui-teamdlg__account' },
+        chip,
+        h('span', { class: 'ui-teamdlg__account-name', text: account?.name ?? workerBase(c.worker) }),
+        h('span', { class: `ui-teamdlg__kind is-${c.kind}`, text: kindLabel(c.kind) }),
+        h('span', { class: 'ui-teamdlg__account-email ui-muted', text: again || (also.length ? tr('also in {0}', [also.join(', ')]) : (account?.email ?? c.worker)) }),
+        add,
+      );
+    };
+    const group = (title: string, hint: string, list: WorkerChoice[], none: string): HTMLElement[] => [
+      h('p', { class: 'ui-teamdlg__label', text: title }),
+      h('p', { class: 'ui-teamdlg__hint ui-muted', text: list.length ? hint : none }),
+      ...(list.length ? [h('ul', { class: 'ui-teamdlg__free', attrs: { 'aria-label': title } }, ...list.map(row))] : []),
+    ];
     this.body.replaceChildren(
-      h(
-        'ul',
-        { class: 'ui-teamdlg__free' },
-        ...free.map((c) => {
-          const account = this.ctx.account(c.account);
-          const chip = createAccountChip('sm');
-          updateAccountChip(chip, account, c.account, c.kind);
-          const add = h('button', { class: 'ui-btn', type: 'button', text: tr('＋ Add'), on: { click: () => void this.addWorker(c.worker, account?.name ?? c.worker, add) } });
-          // (workers are shared: one already working for another office can join this one too)
-          const also = otherOfficesOf(offices, c.worker, office?.id);
-          add.disabled = this.busy;
-          return h(
-            'li',
-            { class: 'ui-teamdlg__account' },
-            chip,
-            h('span', { class: 'ui-teamdlg__account-name', text: account?.name ?? c.worker }),
-            h('span', { class: `ui-teamdlg__kind is-${c.kind}`, text: kindLabel(c.kind) }),
-            h('span', { class: 'ui-teamdlg__account-email ui-muted', text: also.length ? tr('also in {0}', [also.join(', ')]) : (account?.email ?? c.worker) }),
-            add,
-          );
-        }),
+      ...group(tr('Add an account'), tr('An account that is not in this office yet.'), groups.add, tr('Every logged-in account is already in this office.')),
+      ...group(
+        tr('Clone a session'),
+        tr("One more session of an account already in this office, or of the boss's own: its own terminal, the same quota."),
+        groups.clone,
+        tr('No account in this office yet: add one first.'),
       ),
     );
   }

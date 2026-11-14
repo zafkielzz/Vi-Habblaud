@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { officeSlug, parseTeam, seatSuffix, teamSeats, TeamService } from './team';
+import { isWorkerId, officeSlug, parseTeam, seatSuffix, teamSeats, TeamService, workerAccount, workerAgentId } from './team';
 import { NameStore } from './model/names';
 import type { HandoffPlan } from '../shared/types';
 import { defaultRules } from '../shared/rules';
@@ -226,7 +226,7 @@ describe('TeamService: v2 (Antigravity boss, Claude workers)', () => {
     expect(parseTeam(readFileSync(t.file, 'utf8')).offices[0].boss?.kind).toBe('agy');
   });
 
-  it('Claude accounts can be workers, but not the boss\'s account (appointing a boss drops it)', () => {
+  it('Claude accounts can be workers, also the boss\'s own (appointing a boss keeps it: one more session of the account)', () => {
     const t = setup();
     t.main('.claude:1', 's1');
     const b = t.team();
@@ -234,12 +234,64 @@ describe('TeamService: v2 (Antigravity boss, Claude workers)', () => {
     expect(b.setWorker(undefined, 'claude:.claude', true)).toEqual({ ok: true });
     expect(b.setWorker(undefined, 'claude:.nope', true)).toMatchObject({ ok: false, status: 404 });
     b.appoint(undefined, '.claude:1');
-    expect(b.workers).toEqual(['acc1', 'acc2', 'claude:.claude-w']);
-    expect(b.setWorker(undefined, 'claude:.claude', true)).toMatchObject({ ok: false, status: 409 });
+    expect(b.workers).toEqual(['acc1', 'acc2', 'claude:.claude', 'claude:.claude-w']);
+    expect(b.setWorker(undefined, 'claude:.claude', true)).toEqual({ ok: true });
+    expect(b.setWorker(undefined, 'claude:.claude#2', true)).toEqual({ ok: true });
+    expect(b.workers).toEqual(['acc1', 'acc2', 'claude:.claude', 'claude:.claude#2', 'claude:.claude-w']);
+    expect(b.setWorker(undefined, 'claude:.claude#2', false)).toEqual({ ok: true });
     expect(t.office.commit().snapshot.team).toMatchObject({ bossAccount: '.claude', bossKind: 'claude', claude: [{ worker: 'claude:.claude', account: '.claude' }, { worker: 'claude:.claude-w', account: '.claude-w' }] });
     // a worker's own character (no pid) is never the boss
     t.office.addMain({ id: 'claude-worker:.claude-w', account: '.claude-w', sessionId: 'x', cwd: '/w/agy-hub', role: 'Worker', startedAt: T0, status: 'idle' });
     expect(b.appoint(undefined, 'claude-worker:.claude-w')).toMatchObject({ ok: false, status: 400 });
+  });
+});
+
+describe('TeamService: clones (one more session of an account)', () => {
+  it('a clone id is its account plus "#N" (N >= 2): its own character, its account\'s usage', () => {
+    expect(['acc2', 'acc2#2', 'claude:.claude#13', 'claude:.claude-w'].map(isWorkerId)).toEqual([true, true, true, true]);
+    expect(['acc2#1', 'acc2#0', 'acc2#02', 'acc2#', '#2', 'acc2#x', 'acc 2', 'acc2#2#3'].map(isWorkerId)).toEqual(Array(8).fill(false));
+    expect([workerAccount('acc2'), workerAccount('acc2#2'), workerAccount('claude:.claude#3')]).toEqual(['agy:acc2', 'agy:acc2', '.claude']);
+    expect([workerAgentId('acc2#2'), workerAgentId('claude:.claude#3')]).toEqual(['agy:acc2#2', 'claude-worker:.claude#3']);
+    expect(parseTeam('{"offices":[{"id":"a","workers":["acc1","acc1#2","acc1#1","claude:.c#3","acc2#x"]}]}').offices[0].workers).toEqual(['acc1', 'acc1#2', 'claude:.c#3']);
+  });
+
+  it('registered when its account exists, each one a worker of its own; removing one leaves the others', () => {
+    const t = setup();
+    const b = t.team();
+    expect(b.setWorker(undefined, 'acc2#2', true)).toEqual({ ok: true });
+    expect(b.setWorker(undefined, 'acc2#3', true)).toEqual({ ok: true });
+    expect(b.setWorker(undefined, 'acc2#2', true)).toEqual({ ok: true }); // already there: nothing changes
+    expect(b.setWorker(undefined, 'claude:.claude-w#2', true)).toEqual({ ok: true });
+    expect(b.setWorker(undefined, 'acc9#2', true)).toMatchObject({ ok: false, status: 404 });
+    expect(b.setWorker(undefined, 'acc2#1', true)).toMatchObject({ ok: false, status: 404 });
+    expect(b.setWorker(undefined, 'claude:.nope#2', true)).toMatchObject({ ok: false, status: 404 });
+    expect(b.workers).toEqual(['acc1', 'acc2', 'acc2#2', 'acc2#3', 'claude:.claude-w#2']);
+    expect(t.saved().offices[0].workers).toEqual(['acc1', 'acc2', 'acc2#2', 'acc2#3', 'claude:.claude-w#2']);
+    expect(b.isWorker('acc2#2')).toBe(true);
+    expect(b.isWorker('acc2#4')).toBe(false);
+    expect(b.seats().map((x) => [x.worker, x.agentId])).toEqual([
+      ['acc1', 'agy:acc1'],
+      ['acc2', 'agy:acc2'],
+      ['acc2#2', 'agy:acc2#2'],
+      ['acc2#3', 'agy:acc2#3'],
+      ['claude:.claude-w#2', 'claude-worker:.claude-w#2'],
+    ]);
+    expect(b.setWorker(undefined, 'acc2', false)).toEqual({ ok: true });
+    expect(b.workers).toEqual(['acc1', 'acc2#2', 'acc2#3', 'claude:.claude-w#2']);
+    // the same clone in a second office: its own seat there
+    b.createOffice('Two', '/w/two');
+    expect(b.setWorker('two', 'acc2#2', true)).toEqual({ ok: true });
+    expect(b.seats().find((x) => x.office === 'two')).toMatchObject({ worker: 'acc2#2', n: 2, agentId: 'agy:acc2#2@two' });
+  });
+
+  it('an Antigravity boss is nobody\'s worker, clones included (agy-ask knows that boss by its profile)', () => {
+    const t = setup();
+    const b = t.team();
+    b.setWorker(undefined, 'acc1#2', true);
+    b.setWorker(undefined, 'acc2#2', true);
+    expect(b.appointAgy(undefined, 'acc1')).toEqual({ ok: true });
+    expect(b.workers).toEqual(['acc2', 'acc2#2']);
+    expect(b.setWorker(undefined, 'acc1#2', true)).toMatchObject({ ok: false, status: 409 });
   });
 });
 

@@ -5,7 +5,6 @@ job to an Antigravity (`agy`) or Claude Code account and print only the final an
 worker's reasoning. Every job is a new conversation.
 
 Needs Linux, Python 3, Claude Code, and for Antigravity workers the `agy` CLI, `dbus-daemon` and `gnome-keyring-daemon`.
-`agy-up`, `agy-mode` and `agy-sync` also need `herdr`.
 
 ## Install
 
@@ -36,11 +35,11 @@ any repository.
 | `bin/worker-ask` | `agy-ask` and `claude-ask`: give a job, print its answer |
 | `bin/office_rules.py` | Office rules, the Python twin of `shared/rules.ts` |
 | `bin/rules-hook` | PreToolUse hook that enforces the office rules |
-| `bin/agy-up`, `agy-mode`, `agy-sync` | Run workers in `herdr` panes, without the office |
 | `bin/office-boss` | Appoint the calling Claude Code session the boss of the office for its folder (the deepest office holding it, else a new one with every signed-in worker; in `~`: the office "cli" with no folder limit), or of a named office; `off` steps down; `list` / `rm` manage the offices. A running office re-reads `team.json` within a second |
 | `commands/boss.md` | The Claude Code command `/boss [office\|off]` (linked into `~/.claude/commands`): runs `office-boss` for the session you type it in, so you appoint a boss from the terminal |
 | `commands/quota.md` | `/quota`: every worker's 5-hour and weekly use (agy `/usage`, no tokens; kept in `~/.habblaud/usage/agy:accN.json` for agy-ask's quota stop); in a boss session, workers near the limit leave the office and benched ones come back after their reset |
-| `commands/workers.md` | `/workers [add\|rm <names>]`: the workers of this session's office (working now / free / not signed in) and the accounts that can be added |
+| `commands/workers.md` | `/workers`: the workers of this session's office by account, each session with its state (working now / free / not signed in), then the accounts that can be added and the ones that can be cloned. `/workers add <account>…` takes accounts that are not in the office yet (`acc3` or `3`, `claude:.claude-work`). `/workers clone <account> [N]` gives N more sessions (1 by default) of an account already there, or of the boss's own Claude account (`claude` = `~/.claude`): clones (`acc2#2`, `claude:.claude#2`), each with its own terminal and BUSY, on the account's quota. `/workers rm <id>…` removes one session (`acc2#2`), an account with all its sessions (`acc2`) or everyone (`all`) |
+| `commands/office.md` | `/office`: every command used in an office (`/boss`, `/workers` and its verbs, `/quota`, `/offices`, `agy-ask`, `claude-ask`), one example each (`office-boss help`) |
 | `commands/offices.md` | `/offices [rm <office>]`: the open offices and the ended ones a resume brings back (an office closes with its boss's session: `office_rules.tidy`, run by agy-ask, office-boss and `rules-hook boss` at every prompt) |
 | `agy-plugin/` | `office-rules` (the hook inside agy) and `agy-boss` (loads the boss rules) |
 | `boss/AGENTS.md` | Rules for an Antigravity boss |

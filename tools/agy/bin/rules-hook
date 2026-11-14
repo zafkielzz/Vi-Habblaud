@@ -169,12 +169,19 @@ AGY = [False]
 
 def team_note(office):
     """What a boss is told about its workers: being appointed says nothing about them otherwise."""
-    workers = office.get("workers") or []
+    workers = [w for w in office.get("workers") or [] if isinstance(w, str)]
     if not workers:
         return ""
-    return (f"\n\nYour workers: {', '.join(workers)}. Give them routine and read-heavy work: `agy-ask <acc> \"<job>\"`, or "
-            "`claude-ask <account> \"<job>\"` for a claude: worker. Keep the hard parts and the final check for yourself. "
-            "The skill agy-orchestrator has the details.")
+    out = (f"\n\nYour workers: {', '.join(workers)}. Give them routine and read-heavy work: `agy-ask <acc> \"<job>\"`, or "
+           "`claude-ask <account> \"<job>\"` for a claude: worker. Keep the hard parts and the final check for yourself. "
+           "The skill agy-orchestrator has the details.")
+    if any(R.split_worker(w)[1] > 1 for w in workers):
+        out += (" A name ending in #2, #3… is one more session of that account: give it jobs by that exact name; the "
+                "sessions of one account work at the same time and share its quota.")
+    boss = office.get("boss") if isinstance(office.get("boss"), dict) else {}
+    if boss.get("kind") != "agy" and any(R.account_of(w) == f"claude:{boss.get('account')}" for w in workers):
+        out += " A worker on your own account saves your context, not the account's quota."
+    return out
 
 
 def note(folder):

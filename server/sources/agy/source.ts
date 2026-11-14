@@ -38,6 +38,7 @@ import { parseAgyUsage, runAgyUsage } from './usage';
 import { findAgyCliLog, readAgyRun, settingsModel, type AgyRunInfo } from './clilog';
 import { AgyDefaultsFile, type AgyDefaults } from './defaults';
 import { tr } from '../../../shared/i18n';
+import { workerBase } from '../../../shared/workers';
 import type { GhostCandidate } from '../../workers/ghosts';
 import { lastWrite } from '../../workers/turns';
 
@@ -84,7 +85,10 @@ export interface AgyAskLine {
 
 /** A character to show for a profile (server/team.ts seat, or an Antigravity boss). */
 export interface AgySeat {
+  /** The profile (accN). */
   acc: string;
+  /** The worker id of the seat, when it is not the profile itself: a clone ("acc2#2", one more session of it). */
+  worker?: string;
   agentId: string;
   name: string;
   /** Folder (or "<workers room>@<office>") its room is made of. */
@@ -301,7 +305,8 @@ export class AgySource implements AgentSource {
    * ("claude:…") are not this source's; `bossAccs` = the Antigravity bosses (one per office), which get a character too.
    */
   setTeam(workers: readonly string[], bossAccs: readonly string[] = [], seats?: readonly AgySeat[]): void {
-    this.team = new Set(workers.filter((w) => !w.startsWith('claude:')));
+    // by profile: a clone ("acc2#2") is one more session of the profile "acc2"
+    this.team = new Set(workers.filter((w) => !w.startsWith('claude:')).map(workerBase));
     this.bossAccs = new Set(bossAccs);
     this.seatList = seats ? seats.filter((x) => !x.acc.startsWith('claude:')) : undefined;
     if (this.started) this.syncCharacters();
@@ -342,7 +347,7 @@ export class AgySource implements AgentSource {
         id: seat.agentId,
         provider: 'agy',
         account: w.account,
-        sessionId: seat.agentId === w.id ? `agy-${seat.acc}` : `agy-${seat.acc}-${seat.office ?? ''}`,
+        sessionId: seat.agentId === w.id ? `agy-${seat.acc}` : `agy-${seat.worker ?? seat.acc}-${seat.office ?? ''}`,
         cwd: seat.room,
         role: tr('Worker'),
         name: seat.name,
@@ -362,6 +367,12 @@ export class AgySource implements AgentSource {
         w.ending = [];
       }
     }
+  }
+
+  /** The registered profile behind a character: its own ("agy:accN"), or another seat of it (a clone's, another office's). */
+  private workerOf(agentId: string): Worker | undefined {
+    const acc = this.shown.get(agentId);
+    return this.workers.find((x) => x.id === agentId || x.profile.acc === acc);
   }
 
   /** Profile with this agent id ("agy:accN"), registered or not: its name and account id (terminal, pty/manager.ts). */
@@ -456,7 +467,7 @@ export class AgySource implements AgentSource {
       // shows on the seat of the office that gave it.
       for (const seat of seats.filter((x) => x.acc === w.profile.acc)) {
         const base = seat.agentId === w.id;
-        const ext = this.external?.(w.profile.acc, seat.office);
+        const ext = this.external?.(seat.worker ?? w.profile.acc, seat.office);
         const busy = (base && (w.jobs.size > 0 || w.ending.length > 0 || panes.includes('working'))) || !!ext?.busy;
         const status: AgentStatus = base && panes.includes('blocked') ? 'waiting' : busy ? 'working' : 'idle';
         const cur = this.opts.office.get(seat.agentId);
@@ -733,7 +744,7 @@ export class AgySource implements AgentSource {
    * comes the usual way (processes and log); the answer becomes a 📦 activity when agy-ask finishes.
    */
   assign(agentId: string, job: AgyJobInput): AgyJobResult {
-    const w = this.workers.find((x) => x.id === agentId);
+    const w = this.workerOf(agentId);
     if (!w) return { ok: false, status: 404, error: tr('Antigravity worker not found') };
     if (!this.opts.jobsDir) return { ok: false, status: 400, error: tr('sending jobs from the office is off') };
     const prompt = job.prompt.trim();
@@ -768,7 +779,7 @@ export class AgySource implements AgentSource {
    * this source saw running; the request never picks the PID. Returns how many were stopped.
    */
   stopJobs(agentId: string): number {
-    const w = this.workers.find((x) => x.id === agentId);
+    const w = this.workerOf(agentId);
     if (!w) return 0;
     let n = 0;
     for (const job of w.jobs.values()) {
@@ -827,7 +838,7 @@ export class AgySource implements AgentSource {
 
   /** Sets a worker's defaults for jobs that do not say (POST /api/agy/defaults). */
   setDefaults(agentId: string, d: AgyDefaults): AgyJobResult {
-    const w = this.workers.find((x) => x.id === agentId);
+    const w = this.workerOf(agentId);
     if (!w) return { ok: false, status: 404, error: tr('Antigravity worker not found') };
     if (d.mode && !(AGY_MODES as readonly string[]).includes(d.mode)) return { ok: false, status: 400, error: tr('unknown mode') };
     if (d.effort && !(AGY_EFFORTS as readonly string[]).includes(d.effort)) return { ok: false, status: 400, error: tr('unknown effort') };

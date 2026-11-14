@@ -9,8 +9,11 @@ then. Opened by hand in `tools/agy/boss/`, this folder's rules make you a boss t
 ## The team
 - Run `agy-ask team` first: it prints every office with its folder, boss and workers, and marks yours
   (`<- you are its boss`). Give jobs only to your office's workers, e.g. `acc2` (Antigravity) and
-  `claude:.claude-work` (Claude Code); workers may be shared with other offices (then they can answer BUSY). The
-  user changes the offices in Habblaud, not you.
+  `claude:.claude-work` (Claude Code); workers may be shared with other offices (then they can answer BUSY). An id
+  ending in `#2`, `#3`… (`acc2#2`) is one more session of that account: name it exactly as listed; the sessions of
+  one account work at the same time and share its quota. Your own account is never one of your workers. The
+  user changes the offices in Habblaud, not you (＋ Workers there: "Add an account" for an account that is not in the
+  office yet, "Clone a session" for one more session of an account that already is).
 - Your to-do list is the "Next steps" list in the HANDOFF file of your office's folder; the Board shows it. Read it
   before you start and work through it one item at a time, in order. Mark an item `- [x]` as soon as it is done, and
   re-read the list before the next one: the user adds to it on the Board. Work and give jobs in that folder (`--cwd`).

@@ -447,7 +447,8 @@ export interface AccountInfo {
 /** The team (server/team.ts, ~/.agy_profiles/team.json): who may give jobs and who gets them. */
 /**
  * Worker id: an Antigravity profile ("acc2", agy-ask) or a Claude Code account ("claude:<AccountInfo.id>", e.g.
- * "claude:.claude-work", claude-ask; its config dir is ~/<id>).
+ * "claude:.claude-work", claude-ask; its config dir is ~/<id>), or a clone of one, "<id>#N" with N >= 2 ("acc2#2",
+ * "claude:.claude#3"): one more session of the same account, a worker of its own (shared/workers.ts).
  */
 export type WorkerId = string;
 export type WorkerKind = 'agy' | 'claude';
@@ -536,7 +537,7 @@ export interface TeamInfo {
   agy: Array<{ acc: string; account: string }>;
   /** Every Claude Code account that can be a worker: its WorkerId ("claude:<id>") and account id. */
   claude?: Array<{ worker: WorkerId; account: string }>;
-  /** The boss's account (AccountInfo.id): it cannot be a worker; absent = no boss. */
+  /** The boss's account (AccountInfo.id); absent = no boss. */
   bossAccount?: string;
   /** The boss's kind ('claude' session or 'agy' terminal). */
   bossKind?: WorkerKind;

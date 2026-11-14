@@ -28,6 +28,19 @@ class Vectors(unittest.TestCase):
                 self.assertEqual(R.check_command(RULES, c["cmd"]), c["hit"])
 
 
+class WorkerIds(unittest.TestCase):
+    def test_a_clone_is_its_account_and_a_session_number(self):
+        for worker, want in (("acc2", ("acc2", 1)), ("acc2#2", ("acc2", 2)), ("claude:.claude#13", ("claude:.claude", 13)),
+                             ("claude:.claude-work", ("claude:.claude-work", 1)),
+                             # not clones: session 1 is the plain id, and a number is written without zeros
+                             ("acc2#1", ("acc2#1", 1)), ("acc2#0", ("acc2#0", 1)), ("acc2#02", ("acc2#02", 1)),
+                             ("acc2#", ("acc2#", 1)), ("#2", ("#2", 1)), ("acc2#x", ("acc2#x", 1))):
+            with self.subTest(worker=worker):
+                self.assertEqual(R.split_worker(worker), want)
+                self.assertEqual(R.account_of(worker), want[0])
+        self.assertEqual(R.split_worker(None), (None, 1))
+
+
 class Parse(unittest.TestCase):
     def test_absent_defaults_junk_caps_ids(self):
         self.assertEqual(R.parse_rules(None), R.default_rules())

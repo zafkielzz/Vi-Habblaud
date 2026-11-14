@@ -10,10 +10,13 @@
 // crown waits for it. "＋ Boss" opens a session and appoints it before it shows up (pending: the record has its id only,
 // filled in when it appears).
 //
-// Workers (WorkerId): an Antigravity profile ("acc2") or a Claude Code account ("claude:<account id>"). Workers may sit
-// in several offices (their jobs go through agy-ask; a busy one answers BUSY). A boss session leads one office; an
-// Antigravity account bosses at most one office and is then nobody's worker (one agy per profile); within an office the
-// boss's account is not a worker. Two offices never share a folder.
+// Workers (WorkerId): an Antigravity profile ("acc2") or a Claude Code account ("claude:<account id>"), or a clone of
+// one ("acc2#2", "claude:.claude#3", shared/workers.ts): one more session of the same account, a worker of its own
+// (terminal, BUSY, character) that shares the account's sign-in and quota. Workers may sit in several offices (their
+// jobs go through agy-ask; a busy one answers BUSY). A boss session leads one office; an Antigravity account bosses at
+// most one office and is then nobody's worker (agy-ask knows that boss by its profile, so its worker would pass for
+// the boss). A Claude boss's own account may be a worker of its office: every job is a fresh session of the account
+// (it saves the boss's context, not the account's quota). Two offices never share a folder.
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
@@ -24,6 +27,7 @@ import { FOLDER_CLASH, folderRelation, isDiskRoot, writeFolderClash } from '../s
 import { pidAlive } from './sources/registry';
 import { normPath, parseRules, RULES_MAX, type OfficeRules, type RuleFor, type RuleViolation } from '../shared/rules';
 import { tr } from '../shared/i18n';
+import { splitWorker, workerBase } from '../shared/workers';
 
 /** How often the crowns are put back on the right heads (sessions come, go and resume). */
 const TICK_MS = 1_000;
@@ -83,15 +87,23 @@ export function findBoss(rec: BossRecord | undefined, agents: readonly AgentInfo
 
 const pidOf = (id: string): number => Number(/:(\d+)$/.exec(id)?.[1] ?? 0);
 
-const WORKER_ID = /^(?:claude:[\w.~-]+|[\w.-]+)$/;
+/** An account ("acc2", "claude:.claude-work"), or a clone of one ("acc2#2": shared/workers.ts). */
+const WORKER_ID = /^(?:claude:[\w.~-]+|[\w.-]+)(?:#(?:[2-9]|[1-9]\d+))?$/;
+
+/** Is this a well-formed worker id? */
+export const isWorkerId = (worker: string): boolean => WORKER_ID.test(worker);
 const OFFICE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** Account id (AccountInfo.id) of a worker: "acc2" -> "agy:acc2", "claude:.claude-w" -> ".claude-w". */
+/** Account id (AccountInfo.id) of a worker or clone: "acc2#2" -> "agy:acc2", "claude:.claude-w" -> ".claude-w". */
 export function workerAccount(worker: string): string {
-  return worker.startsWith(CLAUDE_WORKER) ? worker.slice(CLAUDE_WORKER.length) : `agy:${worker}`;
+  const base = workerBase(worker);
+  return base.startsWith(CLAUDE_WORKER) ? base.slice(CLAUDE_WORKER.length) : `agy:${base}`;
 }
 
 const byName = (x: string, y: string) => x.localeCompare(y, undefined, { numeric: true });
+
+/** Workers in order: by account, each followed by its clones ("acc2", "acc2#2", "acc2#3", "acc3"). */
+const byWorker = (x: string, y: string) => byName(workerBase(x), workerBase(y)) || splitWorker(x).n - splitWorker(y).n;
 
 /** "FinSTAR labels" -> "finstar-labels" (ASCII, for ids). */
 export function officeSlug(name: string): string {
@@ -200,7 +212,10 @@ export interface Seat {
   agentId: string;
 }
 
-/** The plain character id of a worker: "agy:accN", or "claude-worker:<account>" for a Claude Code account. */
+/**
+ * The plain character id of a worker: "agy:accN", or "claude-worker:<account>" for a Claude Code account; a clone has
+ * its own ("agy:acc2#2", "claude-worker:.claude#2").
+ */
 export function workerAgentId(worker: string): string {
   return worker.startsWith(CLAUDE_WORKER) ? `claude-worker:${worker.slice(CLAUDE_WORKER.length)}` : `agy:${worker}`;
 }
@@ -269,7 +284,7 @@ export class TeamService {
 
   /** Every registered worker, any office. */
   get workers(): readonly string[] {
-    return [...new Set(this.team.offices.flatMap((o) => o.workers))].sort(byName);
+    return [...new Set(this.team.offices.flatMap((o) => o.workers))].sort(byWorker);
   }
 
   /** Profiles of the Antigravity bosses. */
@@ -307,7 +322,6 @@ export class TeamService {
       // A pending boss: "<account>:<pid>" of the Claude Code just opened in that account.
       if (!pending || !pidOf(agentId) || !agentId.startsWith(`${pending.account}:`)) return { ok: false, status: 404, error: tr('agent not found') };
       o.boss = { kind: 'claude', id: agentId, account: pending.account, sessionId: '', pid: pidOf(agentId), name: '', at: now };
-      o.workers = o.workers.filter((w) => w !== `${CLAUDE_WORKER}${pending.account}`);
       this.announced.delete(o.id);
       this.changed();
       return { ok: true };
@@ -315,7 +329,6 @@ export class TeamService {
     if (!canBeBoss(a)) return { ok: false, status: 400, error: tr('only an open Claude Code session can be the boss') };
     if (o.boss?.id === a.id) return { ok: true };
     o.boss = { kind: 'claude', id: a.id, account: a.account, sessionId: a.sessionId, pid: pidOf(a.id), name: a.name, at: now };
-    o.workers = o.workers.filter((w) => w !== `${CLAUDE_WORKER}${a.account}`);
     this.announced.set(o.id, a.id);
     this.changed();
     this.crown(a);
@@ -334,32 +347,39 @@ export class TeamService {
     if (elsewhere) return { ok: false, status: 409, error: tr('{0} is already the boss of {1} (one Antigravity terminal per account)', [acc, elsewhere.name]) };
     const name = displayName ?? this.opts.office.get(id)?.name ?? acc;
     o.boss = { kind: 'agy', id, account: p.account, acc, sessionId: '', pid: 0, name, at: (this.opts.now ?? Date.now)() };
-    for (const x of this.team.offices) x.workers = x.workers.filter((w) => w !== acc);
+    for (const x of this.team.offices) x.workers = x.workers.filter((w) => workerBase(w) !== acc);
     this.announced.delete(o.id);
     this.changed();
     return { ok: true };
   }
 
-  /** Registers an account as one of the office's workers (`on`) or removes it. */
+  /**
+   * Registers a worker of the office (`on`) or removes it. `worker`: an account, or a clone of one ("acc2#2": one more
+   * session of the account, shared/workers.ts); the page asks for the next free clone when the account is already
+   * there or is the boss's own.
+   */
   setWorker(officeId: string | undefined, worker: string, on: boolean): TeamResult {
     const o = this.officeOf(officeId);
     if (!o) return { ok: false, status: 404, error: tr('office not found: {0}', [officeId ?? '']) };
     if (on) {
-      const isProfile = () => this.opts.profiles().some((p) => p.acc === worker);
-      let known = worker.startsWith(CLAUDE_WORKER) ? (this.opts.claudeAccounts?.() ?? []).some((c) => c.worker === worker) : isProfile();
+      // The account must exist; a clone is one more session of it.
+      const base = workerBase(worker);
+      const isProfile = () => this.opts.profiles().some((p) => p.acc === base);
+      let known = isWorkerId(worker) && (base.startsWith(CLAUDE_WORKER) ? (this.opts.claudeAccounts?.() ?? []).some((c) => c.worker === base) : isProfile());
       // A profile signed in since the last periodic re-read: look again before refusing.
-      if (!known && !worker.startsWith(CLAUDE_WORKER) && this.opts.rescanProfiles) {
+      if (!known && isWorkerId(worker) && !base.startsWith(CLAUDE_WORKER) && this.opts.rescanProfiles) {
         this.opts.rescanProfiles();
         known = isProfile();
       }
       if (!known) return { ok: false, status: 404, error: tr('account not found: {0}', [worker]) };
-      if (o.boss && workerAccount(worker) === o.boss.account) return { ok: false, status: 409, error: tr('{0} is the boss: the boss cannot be a worker', [worker]) };
-      const agyBoss = this.team.offices.find((x) => x.boss?.kind === 'agy' && x.boss.acc === worker);
+      // A Claude boss's own account may work for it (one more session). An Antigravity boss's may not: agy-ask knows
+      // that boss by its profile, so a worker on the same profile would pass for the boss.
+      const agyBoss = this.team.offices.find((x) => x.boss?.kind === 'agy' && x.boss.acc === base);
       if (agyBoss) return { ok: false, status: 409, error: tr('{0} is the boss of {1}: an Antigravity boss cannot be a worker', [worker, agyBoss.name]) };
     }
     const has = o.workers.includes(worker);
     if (has === on) return { ok: true };
-    o.workers = on ? [...o.workers, worker].sort(byName) : o.workers.filter((w) => w !== worker);
+    o.workers = on ? [...o.workers, worker].sort(byWorker) : o.workers.filter((w) => w !== worker);
     this.changed();
     return { ok: true };
   }

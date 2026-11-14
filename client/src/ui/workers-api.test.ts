@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkerSession } from '../../../shared/types';
-import { freeWorkers, jobOpen, sessionAgentIn, sessionAgents, sessionOfAgent, workerKind, workerOfAgent } from './workers-api';
+import { jobOpen, sessionAgentIn, sessionAgents, sessionOfAgent, workerChoiceGroups, workerChoices, workerKind, workerOfAgent } from './workers-api';
 
 const session = (worker: string, agentId: string, extra: Partial<WorkerSession> = {}): WorkerSession => ({
   worker,
@@ -26,7 +26,7 @@ describe('workers', () => {
     expect(workerOfAgent(undefined, { id: 'agy:acc3', provider: 'agy' })).toBe('acc3');
   });
 
-  it('＋ Worker: Antigravity and Claude accounts, not workers yet, never the boss account', () => {
+  it('＋ Worker: Antigravity and Claude accounts, new ones first; one already there or the boss\'s own joins as another session', () => {
     const team = {
       workers: ['acc1'],
       agy: [
@@ -40,13 +40,51 @@ describe('workers', () => {
       ],
       bossAccount: '.claude',
     };
-    expect(freeWorkers(team).map((c) => [c.worker, c.kind])).toEqual([
-      ['acc2', 'agy'],
-      ['acc4', 'agy'],
-      ['claude:.claude-w', 'claude'],
+    expect(workerChoices(team).map((c) => [c.worker, c.kind, c.n, c.own])).toEqual([
+      ['acc2', 'agy', 1, false],
+      ['acc4', 'agy', 1, false],
+      ['claude:.claude-w', 'claude', 1, false],
+      // already a worker: one more session of the account
+      ['acc1#2', 'agy', 2, false],
+      // the boss's own account: the boss is its first session
+      ['claude:.claude#2', 'claude', 2, true],
     ]);
-    expect(freeWorkers({ ...team, bossAccount: 'agy:acc2' }).map((c) => c.worker)).toEqual(['acc4', 'claude:.claude', 'claude:.claude-w']);
-    expect(freeWorkers(undefined)).toEqual([]);
+    // the next free number, per account
+    expect(workerChoices({ ...team, workers: ['acc1', 'acc1#2', 'claude:.claude#2', 'claude:.claude-w'] }).map((c) => c.worker)).toEqual(['acc2', 'acc4', 'acc1#3', 'claude:.claude#3', 'claude:.claude-w#2']);
+    // an Antigravity boss's own account is never offered (agy-ask knows that boss by its profile)
+    expect(workerChoices({ ...team, bossAccount: 'agy:acc2' }).map((c) => c.worker)).toEqual(['acc4', 'claude:.claude', 'claude:.claude-w', 'acc1#2']);
+    expect(workerChoices(undefined)).toEqual([]);
+  });
+
+  it('＋ Worker has two groups: accounts to add (not in the office yet) and sessions to clone (already there, or the boss\'s own)', () => {
+    const team = {
+      workers: ['acc1', 'acc4#2'],
+      agy: [
+        { acc: 'acc1', account: 'agy:acc1' },
+        { acc: 'acc2', account: 'agy:acc2' },
+        { acc: 'acc4', account: 'agy:acc4' },
+      ],
+      claude: [
+        { worker: 'claude:.claude', account: '.claude' },
+        { worker: 'claude:.claude-w', account: '.claude-w' },
+      ],
+      bossAccount: '.claude',
+    };
+    const ids = (list: Array<{ worker: string }>) => list.map((c) => c.worker);
+    const groups = workerChoiceGroups(workerChoices(team));
+    expect(ids(groups.add)).toEqual(['acc2', 'claude:.claude-w']);
+    // acc4 has only its session #2 left: still an account of the office, so it is cloned (its plain id is free again)
+    expect(ids(groups.clone)).toEqual(['acc1#2', 'acc4', 'claude:.claude#2']);
+    expect(groups.clone.map((c) => c.own)).toEqual([false, false, true]);
+    // nobody in the office and no boss: everything is an account to add
+    const empty = workerChoiceGroups(workerChoices({ ...team, workers: [], bossAccount: undefined }));
+    expect(ids(empty.add)).toEqual(['acc1', 'acc2', 'acc4', 'claude:.claude', 'claude:.claude-w']);
+    expect(empty.clone).toEqual([]);
+    // every account already there: nothing to add
+    const full = workerChoiceGroups(workerChoices({ ...team, workers: ['acc1', 'acc2', 'acc4', 'claude:.claude-w'] }));
+    expect(ids(full.add)).toEqual([]);
+    expect(ids(full.clone)).toEqual(['acc1#2', 'acc2#2', 'acc4#2', 'claude:.claude#2', 'claude:.claude-w#2']);
+    expect(workerChoiceGroups([])).toEqual({ add: [], clone: [] });
   });
 
   it("＋ Worker in an office: another office's workers are offered, an Antigravity boss anywhere is not", () => {
@@ -63,8 +101,8 @@ describe('workers', () => {
         { id: 'b', name: 'B', folder: '/b', workers: ['acc1'], bossAccount: 'agy:acc4', bossKind: 'agy' as const },
       ],
     };
-    expect(freeWorkers(team, team.offices[0]).map((c) => c.worker)).toEqual(['acc2']);
-    expect(freeWorkers(team, { workers: ['acc2'], bossAccount: undefined }).map((c) => c.worker)).toEqual(['acc1', 'claude:.claude']);
+    expect(workerChoices(team, team.offices[0]).map((c) => c.worker)).toEqual(['acc2', 'acc1#2', 'claude:.claude#2']);
+    expect(workerChoices(team, { workers: ['acc2'], bossAccount: undefined }).map((c) => c.worker)).toEqual(['acc1', 'claude:.claude', 'acc2#2']);
   });
 
   it('open jobs', () => {

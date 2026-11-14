@@ -41,6 +41,7 @@ import { discoverCodexDirs } from './sources/codex/accounts';
 import { CodexHistory } from './sources/codex/history';
 import { AgySource, type AgySeat } from './sources/agy/source';
 import { CLAUDE_WORKER, seatSuffix, TeamService, workerAgentId } from './team';
+import { cloneSuffix, workerBase } from '../shared/workers';
 import { GhostWatch } from './workers/ghosts';
 import { WorkerService, type WorkerTarget } from './workers/service';
 import { BoardService } from './board';
@@ -201,14 +202,16 @@ agy?.setTeam(team.workers, team.agyBosses, agySeats());
 /**
  * The Antigravity characters: one per office a worker belongs to (its first office keeps "agy:accN", the next ones
  * "agy:accN@<office>" named "… (2)"), each in its office's workers room; each Antigravity boss in its office's folder.
+ * A clone ("acc2#2": one more session of the profile) is a worker of its own, named "… #2".
  */
 function agySeats(): AgySeat[] {
   const out: AgySeat[] = [];
   for (const seat of team.seats()) {
     if (seat.worker.startsWith(CLAUDE_WORKER)) continue;
-    const p = agy?.profileOf(seat.worker);
+    const acc = workerBase(seat.worker);
+    const p = agy?.profileOf(acc);
     if (!p) continue;
-    out.push({ acc: seat.worker, agentId: seat.agentId, name: `${p.name}${seatSuffix(seat.n)}`, room: team.workersRoomOf(seat.office) ?? config.agy.room, office: seat.office });
+    out.push({ acc, worker: seat.worker, agentId: seat.agentId, name: `${p.name}${cloneSuffix(seat.worker)}${seatSuffix(seat.n)}`, room: team.workersRoomOf(seat.office) ?? config.agy.room, office: seat.office });
   }
   for (const o of team.offices) {
     if (o.boss?.kind !== 'agy' || !o.boss.acc) continue;
@@ -417,14 +420,18 @@ const workers = ptys
       ptys,
       targets: () =>
         team.workers.flatMap((id): WorkerTarget[] => {
-          if (id.startsWith(CLAUDE_WORKER)) {
-            const e = accounts.entries().find((x) => x.id === id.slice(CLAUDE_WORKER.length));
+          // A clone ("acc2#2") is a worker of its own (terminal, BUSY, character) on its account's profile / config dir.
+          const base = workerBase(id);
+          if (base.startsWith(CLAUDE_WORKER)) {
+            const e = accounts.entries().find((x) => x.id === base.slice(CLAUDE_WORKER.length));
             if (!e) return [];
-            const name = tr('{0} (Claude worker)', [e.detected.email?.split('@')[0] ?? e.id]);
+            const name = `${tr('{0} (Claude worker)', [e.detected.email?.split('@')[0] ?? e.id])}${cloneSuffix(id)}`;
             return [{ id, kind: 'claude', agentId: workerAgentId(id), account: e.id, name, configDir: e.dir, isDefault: isDefaultDir(e.dir, config.home), seats: seatsOf(id, name) }];
           }
-          const p = agy?.profileOf(id);
-          return p ? [{ id, kind: 'agy', agentId: workerAgentId(id), account: p.account, name: p.name, acc: id, stateDir: p.stateDir, seats: seatsOf(id, p.name) }] : [];
+          const p = agy?.profileOf(base);
+          if (!p) return [];
+          const name = `${p.name}${cloneSuffix(id)}`;
+          return [{ id, kind: 'agy', agentId: workerAgentId(id), account: p.account, name, acc: base, stateDir: p.stateDir, seats: seatsOf(id, name) }];
         }),
       agyBin,
       claudeBin: claudeBin ?? 'claude',

@@ -1,10 +1,12 @@
 // The team and the workers' terminals, from the page: POST /api/team (server/team.ts) and /api/workers/* (server/workers).
-// A worker is an Antigravity profile ("acc2") or a Claude Code account ("claude:<account id>"); each registered worker
-// has a standing terminal to watch. The boss gives jobs through agy-ask / claude-ask; here you give them too and cancel them.
+// A worker is an Antigravity profile ("acc2") or a Claude Code account ("claude:<account id>"), or a clone of one
+// ("acc2#2": one more session of the account, shared/workers.ts); each registered worker has a standing terminal to
+// watch. The boss gives jobs through agy-ask / claude-ask; here you give them too and cancel them.
 // Errors become Error with the server's message (a BUSY answer's `message`, else `error`).
 import type { AgentInfo, OfficeInfo, PtyInfo, TeamInfo, WorkerId, WorkerJob, WorkerKind, WorkerSession } from '../../../shared/types';
 import type { OfficeRules } from '../../../shared/rules';
 import { tr } from '../../../shared/i18n';
+import { nextWorkerId, splitWorker, workerBase } from '../../../shared/workers';
 
 /** A refusal from the server, with its HTTP status (e.g. 409 = changed meanwhile). */
 export class ApiError extends Error {
@@ -143,18 +145,30 @@ export function workerOfAgent(team: Pick<TeamInfo, 'workers' | 'sessions' | 'off
 }
 
 export interface WorkerChoice {
+  /** The id choosing it gives: the account, or its next free session ("acc2#2") when it is already there or is the boss's. */
   worker: WorkerId;
   kind: WorkerKind;
   /** AccountInfo.id. */
   account: string;
+  /** The session number of `worker`: 1 = the plain id; 2, 3… = one more session of the account. */
+  n: number;
+  /** The office's boss runs on this account (the boss is its first session). */
+  own: boolean;
+  /**
+   * Which of the two kinds of "＋ Worker" this is: false = the account is not in the office yet (add an account);
+   * true = it already has a session there, or is the boss's own (clone a session: one more session of it).
+   */
+  clone: boolean;
 }
 
 /**
- * Accounts "＋ Worker" can register in an office: logged-in Antigravity and Claude accounts not already its workers nor
- * its boss's account, and no Antigravity account that is a boss anywhere (one agy per profile). Workers of another
- * office are offered too (workers are shared). Without `office`: the old single team (root fields).
+ * What "＋ Worker" offers in an office, for every logged-in Antigravity and Claude account: the accounts not there yet
+ * first (to add), then the ones that already are a worker there, or the boss's own (to clone: one more session of the
+ * account, "#2", "#3"…). Not offered: an Antigravity account that is a boss anywhere (agy-ask knows that boss by its
+ * profile). Workers of another office are offered too (workers are shared). Without `office`: the old single team
+ * (root fields).
  */
-export function freeWorkers(
+export function workerChoices(
   team: Pick<TeamInfo, 'workers' | 'agy' | 'claude' | 'bossAccount' | 'offices'> | undefined,
   office?: Pick<OfficeInfo, 'workers' | 'bossAccount'>,
 ): WorkerChoice[] {
@@ -162,11 +176,27 @@ export function freeWorkers(
   const workers = office?.workers ?? team.workers;
   const boss = office ? office.bossAccount : team.bossAccount;
   const agyBosses = new Set((team.offices ?? []).filter((o) => o.bossKind === 'agy' && o.bossAccount).map((o) => o.bossAccount));
-  const out: WorkerChoice[] = [
+  const accounts = [
     ...team.agy.map((p) => ({ worker: p.acc, kind: 'agy' as const, account: p.account })),
     ...(team.claude ?? []).map((c) => ({ worker: c.worker, kind: 'claude' as const, account: c.account })),
   ];
-  return out.filter((c) => !workers.includes(c.worker) && c.account !== boss && !(c.kind === 'agy' && agyBosses.has(c.account)));
+  const out = accounts
+    .filter((c) => c.account !== boss || c.kind === 'claude')
+    .filter((c) => !(c.kind === 'agy' && agyBosses.has(c.account)))
+    .map((c): WorkerChoice => {
+      const own = c.account === boss;
+      const worker = nextWorkerId(workers, c.worker, own);
+      return { ...c, worker, n: splitWorker(worker).n, own, clone: own || workers.some((w) => workerBase(w) === c.worker) };
+    });
+  return [...out.filter((c) => !c.clone), ...out.filter((c) => c.clone)];
+}
+
+/**
+ * The two kinds of "＋ Worker", apart: `add` = accounts that are not in the office yet, `clone` = accounts that already
+ * are (or the boss's own), each joining as one more session.
+ */
+export function workerChoiceGroups(choices: readonly WorkerChoice[]): { add: WorkerChoice[]; clone: WorkerChoice[] } {
+  return { add: choices.filter((c) => !c.clone), clone: choices.filter((c) => c.clone) };
 }
 
 /** A job still running or waiting (it can be cancelled). */

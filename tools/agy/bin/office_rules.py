@@ -31,6 +31,20 @@ _ID = re.compile(r"^[\w-]{1,24}$", re.ASCII)
 _MAX_SAFE = 2 ** 53 - 1
 
 
+def split_worker(worker):
+    """A worker id as (account, session number): "acc2" -> ("acc2", 1), "claude:.claude#3" -> ("claude:.claude", 3).
+    "<account>#N" (N >= 2) is a clone: one more session of the same account. What belongs to the ACCOUNT (its profile
+    or config folder, sign-in, usage and quota) goes by the account part; what belongs to the SESSION (terminal, queue,
+    BUSY, the job log's `worker`) goes by the whole id. The same split as Habblaud's shared/workers.ts."""
+    m = re.fullmatch(r"(.+)#([2-9]|[1-9]\d+)", worker) if isinstance(worker, str) else None
+    return (m.group(1), int(m.group(2))) if m else (worker, 1)
+
+
+def account_of(worker):
+    """The account of a worker id ("acc2#2" -> "acc2")."""
+    return split_worker(worker)[0]
+
+
 def default_rules():
     return {
         "scope": {"write": [], "deny": ["~/.ssh", "~/.gnupg", ".env", ".env.*"], "commands": ["git push", "sudo"]},
@@ -545,7 +559,8 @@ def fetch_agy_usage(acc, timeout=60):
 
 
 def usage_file(worker):
-    """The kept usage of a worker ("acc1" or "claude:.claude-x"), or None."""
+    """The kept usage of a worker's account ("acc1", "claude:.claude-x", or a clone of one), or None."""
+    worker = account_of(worker)
     name = worker[len("claude:"):] if worker.startswith("claude:") else f"agy:{worker}"
     return read_json(f"{USAGE_DIR}/{name}.json", {}) or None
 
@@ -574,15 +589,18 @@ def quota_stop(office):
 
 
 def bench(office_id, worker, why):
-    """Takes a worker near its quota out of an office (kept in its "benched" list, so /quota puts it back once its
-    quota has reset). Returns True when it was in the office."""
+    """Takes a worker near its quota out of an office, with every other session (clone) of its account: they share the
+    quota (kept in the office's "benched" list, so /quota puts them back once the quota has reset). Returns True when
+    some session of the account was in the office."""
+    account = account_of(worker)
     with team_lock():
         t = load_team()
         o = next((x for x in t["offices"] if x.get("id") == office_id), None)
-        if not o or not isinstance(o.get("workers"), list) or worker not in o["workers"]:
+        out = [w for w in o["workers"] if account_of(w) == account] if o and isinstance(o.get("workers"), list) else []
+        if not out:
             return False
-        o["workers"].remove(worker)
-        o["benched"] = sorted(set(o.get("benched") or []) | {worker})
+        o["workers"] = [w for w in o["workers"] if w not in out]
+        o["benched"] = sorted(set(o.get("benched") or []) | set(out))
         write_json(TEAM, t)
     violation(office_id, worker, "quota", why, "ask")
     return True
@@ -611,7 +629,7 @@ def violation(office, who, kind, detail, by):
 if __name__ == "__main__":  # office_rules.py refresh <acc> <office id>: agy-ask after a job, in the background
     import sys
     if sys.argv[1:2] == ["refresh"] and len(sys.argv) == 4:
-        _u = fetch_agy_usage(sys.argv[2])
+        _u = fetch_agy_usage(account_of(sys.argv[2]))
         _o = office_by_id(sys.argv[3])
         _p = used_pct(_u)
         if _o and _p is not None and _p >= quota_stop(_o):

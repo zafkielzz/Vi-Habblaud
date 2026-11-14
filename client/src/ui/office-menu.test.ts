@@ -71,6 +71,12 @@ describe('office tab menu', () => {
   it('worker short name falls back to the id', () => {
     expect(workerShortName(snap, 'acc9')).toBe('acc9');
     expect(workerShortName(null, 'claude:x')).toBe('claude:x');
+    expect(workerShortName(snap, 'acc9#2')).toBe('acc9#2');
+  });
+
+  it('a clone is named after its account, with its session number', () => {
+    const s = { accounts: [{ id: 'agy:acc1', name: 'alice (Agy)' }, { id: '.claude-b', name: 'bob' }], team: { agy: [{ acc: 'acc1', account: 'agy:acc1' }] } } as unknown as Parameters<typeof workerShortName>[0];
+    expect([workerShortName(s, 'acc1'), workerShortName(s, 'acc1#2'), workerShortName(s, 'claude:.claude-b#3')]).toEqual(['alice', 'alice #2', 'bob #3']);
   });
 
   it('items: "Show" only for another office, Board / Boss / Worker only when wired, delete last', () => {

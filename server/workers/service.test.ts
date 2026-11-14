@@ -104,6 +104,9 @@ function setup(workers = ['acc2', 'claude:.claude-w']) {
   const all: WorkerTarget[] = [
     { id: 'acc2', kind: 'agy', agentId: 'agy:acc2', account: 'agy:acc2', name: 'two (Agy)', acc: 'acc2', stateDir },
     { id: 'claude:.claude-w', kind: 'claude', agentId: 'claude-worker:.claude-w', account: '.claude-w', name: 'w (Claude worker)', configDir },
+    // clones: one more session of the same profile / config dir
+    { id: 'acc2#2', kind: 'agy', agentId: 'agy:acc2#2', account: 'agy:acc2', name: 'two (Agy) #2', acc: 'acc2', stateDir },
+    { id: 'claude:.claude-w#2', kind: 'claude', agentId: 'claude-worker:.claude-w#2', account: '.claude-w', name: 'w (Claude worker) #2', configDir },
   ];
   let registered = workers;
   const f = fakePtys();
@@ -276,6 +279,78 @@ describe('WorkerService', () => {
     t.svc.tick();
     expect(t.svc.jobs()[0]).toMatchObject({ status: 'failed' });
     expect(t.log().at(-1)).toMatchObject({ status: 'TIMEOUT' });
+  });
+
+  it('clones of an Antigravity profile: own terminal and BUSY each, the profile\'s agy, and each job its own conversation', async () => {
+    const CONV2 = '77777777-96c2-4742-9f6d-a9a3620e7176';
+    const t = setup(['acc2', 'acc2#2']);
+    const a = await t.svc.ask({ worker: 'acc2', prompt: 'one', office: 'main' });
+    t.agyWrites([{ type: 'USER_INPUT', status: 'DONE', content: 'one' }]);
+    t.svc.tick(); // the first job has found its conversation
+    // its clone is free: a second agy on the same profile, in a terminal of its own
+    const b = await t.svc.ask({ worker: 'acc2#2', prompt: 'two', office: 'main', by: 'boss' });
+    expect([a.ok, b.ok]).toEqual([true, true]);
+    expect(t.open.get('agy:acc2#2')).toMatchObject({ file: '/bin/agy-as', args: ['acc2', '-i', 'two'], account: 'agy:acc2' });
+    expect(t.open.get('agy:acc2#2')?.env).toMatchObject({ AGY_OFFICE: 'main', AGY_WORKER: 'acc2#2' });
+    expect(t.open.get('agy:acc2')?.args).toEqual(['acc2', '-i', 'one']);
+    expect(t.svc.sessionList().map((s) => [s.worker, s.agentId, s.account, !!s.job])).toEqual([
+      ['acc2', 'agy:acc2', 'agy:acc2', true],
+      ['acc2#2', 'agy:acc2#2', 'agy:acc2', true],
+    ]);
+    expect(await t.svc.ask({ worker: 'acc2#2', prompt: 'three' })).toMatchObject({ ok: false, status: 409, busy: 'job' });
+    // the clone's answer comes from the conversation that appeared after it started, not from its sibling's
+    t.agyWrites(answer('from the clone'), CONV2);
+    t.svc.tick();
+    expect(t.svc.jobs().map((j) => [j.worker, j.status, j.answer])).toEqual([
+      ['acc2#2', 'done', 'from the clone'],
+      ['acc2', 'working', undefined],
+    ]);
+    expect(t.svc.statusOf('acc2#2')).toEqual({ busy: false });
+    expect(t.svc.statusOf('acc2')).toMatchObject({ busy: true });
+    t.agyWrites(answer('from the first'));
+    t.svc.tick();
+    expect(t.svc.jobs()[1]).toMatchObject({ worker: 'acc2', status: 'done', answer: 'from the first' });
+    // the log: `acc` is the account (what its readers sum by), `worker` the session
+    expect(t.log().filter((l) => l.event === 'start').map((l) => [l.acc, l.worker])).toEqual([['acc2', 'acc2'], ['acc2', 'acc2#2']]);
+    expect(t.log().filter((l) => l.event === 'end').map((l) => [l.acc, l.worker])).toEqual([['acc2', 'acc2#2'], ['acc2', 'acc2']]);
+    expect(t.board.at(-1)).toMatchObject({ workerId: 'acc2', agentId: 'agy:acc2' });
+  });
+
+  it('clones started together never take the same conversation', async () => {
+    const CONV2 = '77777777-96c2-4742-9f6d-a9a3620e7176';
+    const t = setup(['acc2', 'acc2#2']);
+    await t.svc.ask({ worker: 'acc2', prompt: 'one' });
+    await t.svc.ask({ worker: 'acc2#2', prompt: 'two' }); // waited for the first one's conversation, in vain
+    t.agyWrites(answer('A'));
+    t.svc.tick();
+    expect(t.svc.jobs().map((j) => [j.worker, j.status])).toEqual([['acc2#2', 'working'], ['acc2', 'done']]);
+    t.agyWrites(answer('B'), CONV2);
+    t.svc.tick();
+    expect(t.svc.jobs().map((j) => [j.worker, j.status, j.answer])).toEqual([['acc2#2', 'done', 'B'], ['acc2', 'done', 'A']]);
+  });
+
+  it('clones of a Claude account: a character, a terminal and a session id each, on the same config dir', async () => {
+    const t = setup(['claude:.claude-w', 'claude:.claude-w#2']);
+    expect(t.office.get('claude-worker:.claude-w#2')).toMatchObject({ kind: 'main', name: 'w (Claude worker) #2', account: '.claude-w', status: 'idle' });
+    await t.svc.ask({ worker: 'claude:.claude-w', prompt: 'one', cwd: t.root, office: 'main' });
+    const r = await t.svc.ask({ worker: 'claude:.claude-w#2', prompt: 'two', cwd: t.root, office: 'main' });
+    expect(r.ok).toBe(true);
+    const [p1, p2] = [t.open.get('claude-worker:.claude-w')!, t.open.get('claude-worker:.claude-w#2')!];
+    expect([p1.env?.CLAUDE_CONFIG_DIR, p2.env?.CLAUDE_CONFIG_DIR]).toEqual([t.configDir, t.configDir]);
+    expect([p1.env?.AGY_WORKER, p2.env?.AGY_WORKER]).toEqual(['claude:.claude-w', 'claude:.claude-w#2']);
+    expect(p1.args[1]).not.toBe(p2.args[1]);
+    expect([t.office.get('claude-worker:.claude-w')?.status, t.office.get('claude-worker:.claude-w#2')?.status]).toEqual(['working', 'working']);
+    const file = claudeTranscriptPath(t.configDir, t.root, p2.args[1]);
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, [step({ type: 'user', message: { role: 'user', content: 'two' } }), step({ type: 'assistant', message: { id: 'm', stop_reason: 'end_turn', usage: { input_tokens: 9, output_tokens: 1 }, content: [{ type: 'text', text: 'second' }] } })].join('\n'));
+    t.svc.tick();
+    expect(t.svc.jobs().map((j) => [j.worker, j.status, j.answer])).toEqual([['claude:.claude-w#2', 'done', 'second'], ['claude:.claude-w', 'working', undefined]]);
+    expect([t.office.get('claude-worker:.claude-w')?.status, t.office.get('claude-worker:.claude-w#2')?.status]).toEqual(['working', 'idle']);
+    // removed alone: its sibling keeps its job
+    t.register(['claude:.claude-w']);
+    t.svc.sync();
+    expect(t.office.get('claude-worker:.claude-w#2')?.status ?? 'gone').not.toBe('working');
+    expect(t.svc.statusOf('claude:.claude-w')).toMatchObject({ busy: true });
   });
 
   it('Claude worker: its own character; the job runs with a chosen session id and its transcript answers', async () => {

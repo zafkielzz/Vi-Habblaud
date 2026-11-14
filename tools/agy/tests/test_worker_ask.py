@@ -48,6 +48,11 @@ if [ -n "${TEAM_TEMPLATE:-}" ]; then printf '%s' "${TEAM_TEMPLATE//__PID__/$$}" 
 exit $?
 """
 
+# A fake `agy-as <acc> -p ...`: one stream-json result line with its arguments and what the worker's hook would see.
+FAKE_AGY_AS = """#!/bin/bash
+exec python3 -c 'import json, os, sys; print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": json.dumps({"args": sys.argv[1:], "worker": os.environ.get("AGY_WORKER")})}}, separators=(",", ":")))' "$@"
+"""
+
 
 class TeamRule(unittest.TestCase):
     @classmethod
@@ -67,6 +72,9 @@ class TeamRule(unittest.TestCase):
             with open(path, "w") as f:
                 f.write(FAKE)
             os.chmod(path, 0o755)
+        with open(os.path.join(cls.bin, "agy-as"), "w") as f:  # headless agy: answers with its arguments
+            f.write(FAKE_AGY_AS)
+        os.chmod(os.path.join(cls.bin, "agy-as"), 0o755)
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Office)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
@@ -159,6 +167,96 @@ class TeamRule(unittest.TestCase):
         code, out, err = self.run_ask(["acc1", "ping"], via="agy", team=team, env=env)
         self.assertEqual((code, out.strip()), (0, "pong"), err)
         self.assertEqual(Office.bodies[-1]["office"], "o1")
+
+    # -------------------------------------------------------------- clones: one more session of an account
+
+    def test_a_clone_is_a_worker_only_when_it_is_listed(self):
+        team = self.v3(boss2=self.claude_boss())
+        code, _, err = self.ask("acc2#2", via="claude", team=team)
+        self.assertEqual(code, 2)
+        self.assertIn("acc2#2 is not a worker of your office News (o2)", err)
+        self.assertEqual(Office.bodies, [])
+        team["offices"][1]["workers"] += ["acc2#2", "claude:.claude-w#3"]
+        code, out, err = self.ask("acc2#2", via="claude", team=team)
+        self.assertEqual((code, out.strip()), (0, "pong"), err)
+        self.assertEqual((Office.bodies[-1]["worker"], Office.bodies[-1]["office"]), ("acc2#2", "o2"))
+        code, _, err = self.ask("w#3", via="claude", team=team, tool="claude-ask")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Office.bodies[-1]["worker"], "claude:.claude-w#3")
+        code, _, err = self.ask("claude:.claude-w#2", via="claude", team=team, tool="claude-ask")  # not that one
+        self.assertEqual(code, 2)
+        self.assertIn("claude:.claude-w#2 is not a worker of your office", err)
+
+    def test_a_claude_boss_gives_jobs_to_its_own_account(self):
+        team = self.v3(boss2=self.claude_boss())
+        team["offices"][1]["workers"] = ["claude:.claude", "claude:.claude#2"]
+        home = {"HOME": self.tmp}  # no ~/.claude-claude there: "claude" names the default account
+        for name, worker in (("claude#2", "claude:.claude#2"), ("claude", "claude:.claude"), (".claude#2", "claude:.claude#2")):
+            code, out, err = self.ask(name, via="claude", team=team, env=home, tool="claude-ask")
+            self.assertEqual((code, out.strip()), (0, "pong"), err)
+            self.assertEqual((Office.bodies[-1]["worker"], Office.bodies[-1]["office"]), (worker, "o2"))
+            self.assertIn("is the account you run on: this saves your context, not your quota", err)
+        n = len(Office.bodies)
+        code, _, err = self.ask("claude#3", via="claude", team=team, env=home, tool="claude-ask")
+        self.assertEqual(code, 2)
+        self.assertIn("claude:.claude#3 is not a worker of your office", err)
+        self.assertEqual(len(Office.bodies), n)
+
+    def test_an_agy_boss_is_refused_for_a_clone_of_its_own_account(self):
+        team = self.v3(boss2={"kind": "agy", "acc": "acc2", "name": "Ana"})
+        team["offices"][1]["workers"].append("acc2#2")
+        code, _, err = self.run_ask(["acc2#2", "ping"], via="agy", team=team, env={"HOME": os.path.join(self.root, "acc2")})
+        self.assertEqual(code, 2)
+        self.assertIn("boss's own account", err)
+
+    def test_a_worker_session_on_the_boss_account_cannot_give_jobs(self):
+        # the worker is another `claude` below the boss: the nearest claude above the call is not the boss
+        team = self.v3(boss2=self.claude_boss())
+        team["offices"][1]["workers"] = ["acc2", "claude:.claude#2"]
+        template = json.dumps(team).replace('"__PID__"', "__PID__")
+        e = {k: v for k, v in os.environ.items() if not k.startswith(("AGY_", "TEAM_TEMPLATE"))}
+        e.update(HABBLAUD_AGY_PROFILES=self.root, HABBLAUD_URL=f"http://127.0.0.1:{self.server.server_port}", TEAM_TEMPLATE=template)
+        worker = os.path.join(self.bin, "worker", "claude")  # a second fake claude that leaves the team file alone
+        os.makedirs(os.path.dirname(worker), exist_ok=True)
+        with open(worker, "w") as f:
+            f.write('#!/bin/bash\n"$@"\nexit $?\n')
+        os.chmod(worker, 0o755)
+        p = subprocess.run([os.path.join(self.bin, "claude"), worker, os.path.join(self.bin, "agy-ask"), "acc2", "ping"],
+                           env=e, capture_output=True, text=True, timeout=30, cwd=self.tmp)
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("only a boss may give jobs", p.stderr)
+        self.assertEqual(Office.bodies, [])
+
+    def test_a_clone_over_quota_leaves_with_every_session_of_its_account(self):
+        Office.snapshot = {"accounts": [{"id": "agy:acc1", "usage": {"fiveHour": {"utilization": 20}, "sevenDay": {"utilization": 93}}}]}
+        team = self.ruled(None)
+        team["offices"][0]["workers"] = ["acc1", "acc1#2", "acc2", "claude:.claude-w"]
+        code, _, err = self.ask("acc1#2", team=team)  # its account's use, not a use of its own
+        self.assertEqual(code, 2)
+        self.assertIn("acc1 has used 93% of its quota (limit 90%)", err)
+        with open(os.path.join(self.root, "team.json")) as f:
+            o = json.load(f)["offices"][0]
+        self.assertEqual((o["workers"], o["benched"]), (["acc2", "claude:.claude-w"], ["acc1", "acc1#2"]))
+        self.assertEqual(self.violations()[-1]["who"], "acc1#2")
+
+    def test_headless_a_clone_runs_like_its_account(self):
+        os.makedirs(os.path.join(self.tmp, ".claude-w"), exist_ok=True)
+        team = self.ruled(None)
+        team["offices"][0]["workers"] = ["acc1", "acc1#2", "claude:.claude-w", "claude:.claude-w#2"]
+        e = {"HOME": self.tmp, "HABBLAUD_URL": "http://127.0.0.1:9", "PATH": f"{self.bin}:{os.environ['PATH']}"}
+        code, out, err = self.run_ask(["acc1#2", "ping", "--mode", "default"], team=team, env=e)
+        self.assertEqual(code, 0, err)
+        r = json.loads(out)
+        self.assertEqual(r["args"][:2], ["acc1", "-p"])  # the profile, not "acc1#2"
+        self.assertEqual(r["worker"], "acc1#2")  # the session, for the rules hook and the log
+        code, out, err = self.run_ask(["w#2", "ping"], team=team, env=e, tool="claude-ask")
+        self.assertEqual(code, 0, err)
+        r = json.loads(out)
+        self.assertEqual((r["args"][0], r["worker"]), ("-p", "claude:.claude-w#2"))
+        with open(os.path.join(self.root, "agy-ask.log.jsonl")) as f:
+            lines = [json.loads(l) for l in f]
+        self.assertEqual([(l["acc"], l["worker"]) for l in lines if l["event"] == "start"],
+                         [("acc1", "acc1#2"), ("claude:.claude-w", "claude:.claude-w#2")])
 
     def live_claude(self):
         """The PID of a running process named `claude` (another session that is boss)."""
@@ -549,6 +647,18 @@ class RulesHook(unittest.TestCase):
         self.assertIn("may not be read or edited", self.denied("Bash", {"command": "echo k > ~/.ssh/config"}))
         for cmd in ("echo hi > /x/shop/out.txt", "cd /x/shop && rm old.txt", "echo hi > /tmp/job.txt", "cat /etc/hosts", "ls 2>/dev/null"):
             self.assertIsNone(self.hook("Bash", {"command": cmd})[0], cmd)
+
+    def test_boss_is_told_about_clones_and_workers_on_its_own_account(self):
+        office = dict(self.team["offices"][0], workers=["acc1", "acc1#2", "claude:.claude#2"],
+                      boss={"kind": "claude", "pid": "__PID__", "name": "Raul", "account": ".claude"})
+        template = json.dumps({"offices": [office]}).replace('"__PID__"', "__PID__")
+        out = subprocess.run([os.path.join(self.bin, "claude"), os.path.join(self.bin, "rules-hook"), "boss"],
+                             env=dict({k: v for k, v in os.environ.items() if not k.startswith("AGY_")}, HABBLAUD_AGY_PROFILES=self.root, HOME="/home/u", TEAM_TEMPLATE=template),
+                             capture_output=True, text=True, timeout=10).stdout
+        text = json.loads(out)["text"]
+        self.assertIn("Your workers: acc1, acc1#2, claude:.claude#2.", text)
+        self.assertIn("one more session of that account", text)
+        self.assertIn("saves your context, not the account's quota", text)
 
     def test_a_boss_with_no_workers_is_not_told_about_them(self):
         template = json.dumps({"offices": [dict(self.team["offices"][0], workers=[], boss={"kind": "claude", "pid": "__PID__", "name": "Raul", "account": ".claude"})]}).replace('"__PID__"', "__PID__")

@@ -5,7 +5,7 @@
 // Character name: from ~/.agy_profiles/names.conf ("acc2 Huy"), else the account's e-mail username
 // ("alice@gmail.com" -> "alice"; up to the first dot), else the account ("acc2").
 // E-mail: from the most recent "OAuth: ..." line in agy's cli.log (for name and label only; no credentials).
-// Default role: ~/.agy_profiles/roles.conf ("acc2 impl accept-edits"), matching `agy-sync`; only shown while the
+// Default role: ~/.agy_profiles/roles.conf ("acc2 impl accept-edits"); only shown while the
 // worker is active, when the prompt (agy-ask --role) doesn't specify another.
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';

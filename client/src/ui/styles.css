@@ -1549,6 +1549,12 @@
   font-weight: 650;
 }
 
+/* Under a group's heading in ＋ Workers ("Add an account", "Clone a session"): what the group is, or why it is empty. */
+.ui-teamdlg__hint {
+  margin: 0;
+  font-size: 12px;
+}
+
 .ui-teamdlg__accounts,
 .ui-teamdlg__free {
   display: flex;
